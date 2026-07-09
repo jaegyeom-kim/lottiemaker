@@ -53,6 +53,11 @@ export function extractColorGroups(data: unknown): ColorGroup[] {
     if (node === null || typeof node !== 'object') return
     const obj = node as Record<string, unknown>
 
+    // 텍스트 레이어 색상: 텍스트 도큐먼트의 fc = [r,g,b]
+    if (isColorArray(obj.fc) && typeof obj.t === 'string') {
+      addRef(groups, rgbArrayToHex(obj.fc), [...path, 'fc'])
+    }
+
     if ((obj.ty === 'fl' || obj.ty === 'st') && obj.c && typeof obj.c === 'object') {
       const c = obj.c as Record<string, unknown>
       // a 플래그 대신 k의 형태로 정적/키프레임 구분 — a 누락 파일도 처리.

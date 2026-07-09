@@ -64,6 +64,29 @@ export type KnobOp =
    * coinDepth·zoom·duration보다 앞에 배치할 것.
    */
   | { kind: 'coinSpins' }
+  /**
+   * 숫자 카운트 통합 레이아웃(항상 적용). 값(0–999,999)·쉼표·화폐·폰트 노브를 함께 읽어
+   * 표시할 스트립 수/위치/롤 종점, 쉼표·화폐 레이어, fonts.list를 재구성한다.
+   * ids: 함께 읽을 보조 노브 id.
+   */
+  | {
+      kind: 'countStyle'
+      ids: {
+        comma: string
+        currency: string
+        font: string
+        digitSize: string
+        digitWeight: string
+        curSize: string
+        curWeight: string
+      }
+    }
+  /**
+   * 구도 방향 회전 — 값(옵션 인덱스) × 90°를 캔버스 중심 기준으로 전체 적용.
+   * 루트 레이어의 위치(정적+키프레임)를 회전하고 레이어 회전값에 각도를 더한다.
+   * 진폭(ampPos) 등 축 기준 연산 뒤에 배치할 것.
+   */
+  | { kind: 'dirRotate' }
   /** 위치 키프레임 진폭. ref = 원본 최대 편차 px. 첫 키프레임 기준이라 순환 유지.
    *  exclude: 해당 프리픽스로 시작하는 레이어는 제외 (광택 스윕 등 보호). */
   | { kind: 'ampPos'; ref: number; exclude?: string }
@@ -89,6 +112,24 @@ export interface TemplateKnob {
   options?: string[]
   /** 지정 시 체크박스로 렌더 — 값은 0/1. */
   toggle?: boolean
+  /** 옵션 패널 탭 그룹 — 미지정은 '기본' 탭. */
+  group?: string
+  /** 지정 시 폰트 드롭다운으로 렌더 — 값은 프리셋 인덱스(number) 또는 로컬 폰트 패밀리(string). */
+  fontPicker?: boolean
+}
+
+/** 폰트 프리셋 — fontPicker 노브의 숫자 인덱스가 가리키는 CSS font-family. */
+export const FONT_PRESETS = [
+  { label: 'Pretendard', family: 'Pretendard, sans-serif' },
+  { label: '시스템 고딕', family: '-apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif' },
+  { label: '세리프', family: 'Georgia, "Times New Roman", serif' },
+  { label: '모노', family: '"SF Mono", Menlo, Consolas, monospace' },
+]
+
+/** 노브 값 → CSS font-family. 문자열이면 로컬 폰트 패밀리(공백 대비 인용). */
+export function resolveFontFamily(v: number | string | undefined): string {
+  if (typeof v === 'string' && v) return `"${v.replace(/"/g, '')}", sans-serif`
+  return FONT_PRESETS[Math.round(Number(v ?? 0))]?.family ?? FONT_PRESETS[0].family
 }
 
 /** 템플릿 원본 길이(초) 기준의 재생 길이 노브 — 로드 시 자동 추가. */
@@ -119,14 +160,16 @@ interface Keyframe {
 export function applyKnobs(
   base: LottieJson,
   knobs: TemplateKnob[],
-  values: Record<string, number>,
+  values: Record<string, number | string>,
 ): LottieJson {
   const out = structuredClone(base)
   for (const knob of knobs) {
-    const v = values[knob.id] ?? knob.default
+    const raw = values[knob.id] ?? knob.default
+    // 문자열 값(로컬 폰트 등)은 자체 변환 없는 노브(none)에만 실림 — 수치 연산은 기본값으로 대체
+    const v = typeof raw === 'number' ? raw : knob.default
     // 기본값 = 원본 그대로. 단 아래 연산들은 기본값이 원본과 다른 변환이므로 항상 적용.
-    const ALWAYS = ['arcChase', 'vanish', 'pickLayer', 'coinDepth']
-    if (v === knob.default && !ALWAYS.includes(knob.op.kind)) continue
+    const ALWAYS = ['arcChase', 'vanish', 'pickLayer', 'coinDepth', 'countStyle']
+    if (raw === knob.default && !ALWAYS.includes(knob.op.kind)) continue
     const op = knob.op
     switch (op.kind) {
       case 'zoom': {
@@ -205,6 +248,41 @@ export function applyKnobs(
             if (Math.abs(last[0] - first - 360) < 0.01) last[0] = first + 360 - stretchDeg
           })
         }
+        break
+      }
+      case 'dirRotate': {
+        const ang = Math.round(v) * 90
+        if (ang % 360 === 0) break
+        const rad = (ang * Math.PI) / 180
+        const cos = Math.cos(rad)
+        const sin = Math.sin(rad)
+        const cx = out.w / 2
+        const cy = out.h / 2
+        const rot = (pt: number[]) => {
+          const dx = pt[0] - cx
+          const dy = pt[1] - cy
+          pt[0] = cx + dx * cos - dy * sin
+          pt[1] = cy + dx * sin + dy * cos
+        }
+        out.layers.forEach((l) => {
+          if ((l as Record<string, unknown>).parent !== undefined) return
+          const p = ksProp(l, 'p')
+          if (p) {
+            if (p.a === 1 && Array.isArray(p.k)) {
+              for (const kf of p.k as Keyframe[]) if (Array.isArray(kf.s)) rot(kf.s)
+            } else if (Array.isArray(p.k)) {
+              rot(p.k as number[])
+            }
+          }
+          const r = ksProp(l, 'r')
+          if (r) {
+            if (r.a === 1 && Array.isArray(r.k)) {
+              for (const kf of r.k as Keyframe[]) if (Array.isArray(kf.s)) (kf.s as number[])[0] += ang
+            } else if (typeof r.k === 'number') {
+              r.k = r.k + ang
+            }
+          }
+        })
         break
       }
       case 'ampPos': {
@@ -286,6 +364,160 @@ export function applyKnobs(
         for (const l of out.layers as LottieLayer[]) {
           if (typeof l.nm === 'string' && l.nm.startsWith(op.prefix)) {
             l.hd = l.nm !== keep
+          }
+        }
+        break
+      }
+      case 'countStyle': {
+        // 숫자 크기(px) 기준 배율 — 줄 간격/베이스라인/슬롯 폭/창 크기를 함께 스케일
+        const num = (id: string, dflt: number) => {
+          const r = values[id]
+          return typeof r === 'number' ? r : dflt
+        }
+        const digitSizeReq = Math.max(40, Math.min(130, Math.round(num(op.ids.digitSize, 90))))
+        const n = Math.max(0, Math.min(999999999, Math.round(v)))
+        const commaOn = num(op.ids.comma, 1) !== 0
+        const curIdx = Math.round(num(op.ids.currency, 1))
+        const curSizeReq = Math.max(24, Math.min(120, Math.round(num(op.ids.curSize, 62))))
+        // lottie-web은 fStyle 키워드(Regular/Medium/Bold/Black)를 font-weight로 매핑
+        const WEIGHTS = ['Regular', 'Medium', 'Bold', 'Black']
+        const dWeight = WEIGHTS[Math.round(num(op.ids.digitWeight, 0))] ?? 'Regular'
+        const cWeight = WEIGHTS[Math.round(num(op.ids.curWeight, 0))] ?? 'Regular'
+        // wr = 글자폭/글자크기 비율 — 화폐 크기 노브에 비례해 슬롯 폭 산출
+        const CUR: ({ t: string; suffix: boolean; wr: number } | null)[] = [
+          null,
+          { t: '원', suffix: true, wr: 1.13 },
+          { t: '₩', suffix: false, wr: 0.69 },
+          { t: '$', suffix: false, wr: 0.6 },
+          { t: '%', suffix: true, wr: 0.86 },
+        ]
+        const fam = resolveFontFamily(values[op.ids.font])
+        ;(out as Record<string, unknown>).fonts = {
+          list: [
+            { fName: 'Main', fFamily: fam, fStyle: dWeight, ascent: 72 },
+            { fName: 'Cur', fFamily: fam, fStyle: cWeight, ascent: 72 },
+          ],
+        }
+        const layers = out.layers as LottieLayer[]
+        const docOf = (l: LottieLayer) => {
+          const t = (l as Record<string, unknown>).t as Record<string, unknown> | undefined
+          const d = t?.d as Record<string, unknown> | undefined
+          const k = d?.k as Record<string, unknown>[] | undefined
+          return k?.[0]?.s as Record<string, unknown> | undefined
+        }
+        // 레이아웃 계산 — 요청 크기 기준 폭이 캔버스를 넘으면 전체 비례 축소(9자리 대비)
+        const str = String(n)
+        const D = str.length
+        const cur = CUR[curIdx] ?? null
+        const useComma = commaOn && D > 3
+        const nCommas = useComma ? Math.floor((D - 1) / 3) : 0
+        const reqF = digitSizeReq / 90
+        const rawW = D * 58 * reqF + nCommas * 24 * reqF + (cur ? cur.wr * curSizeReq : 0)
+        const fit = Math.min(1, 484 / rawW)
+        const digitSize = digitSizeReq * fit
+        const curSize = curSizeReq * fit
+        const f = digitSize / 90
+        const LH = 110 * f
+        const BASE = 256 + 35 * f // 창 중앙(256)에 베이스라인이 오도록 한 오프셋
+        const Wd = 58 * f
+        const Wc = 24 * f
+        const curW = cur ? cur.wr * curSize : 0
+        const totalW = D * Wd + nCommas * Wc + curW
+        let x = 256 - totalW / 2
+        type Item = { kind: 'strip'; i: number } | { kind: 'comma' } | { kind: 'cur' }
+        const order: Item[] = []
+        if (cur && !cur.suffix) order.push({ kind: 'cur' })
+        for (let i = 0; i < D; i++) {
+          order.push({ kind: 'strip', i })
+          // 남은 자릿수가 3의 배수인 지점마다 쉼표 (예: 123,456,789)
+          if (useComma && i < D - 1 && (D - 1 - i) % 3 === 0) order.push({ kind: 'comma' })
+        }
+        if (cur && cur.suffix) order.push({ kind: 'cur' })
+        const centers: { item: Item; cx: number }[] = []
+        for (const item of order) {
+          const w = item.kind === 'strip' ? Wd : item.kind === 'comma' ? Wc : curW
+          centers.push({ item, cx: x + w / 2 })
+          x += w
+        }
+        // 스트립/창 배치 + 롤 종점
+        const usedStrip = new Set<number>()
+        for (const { item, cx } of centers) {
+          if (item.kind !== 'strip') continue
+          const k = item.i
+          usedStrip.add(k)
+          const digit = Number(str[k])
+          const cycles = k >= D - 2 ? 2 : 1
+          const dur = D === 1 ? 70 : Math.round(50 + (k / (D - 1)) * 40)
+          const strip = layers.find((l) => l.nm === `Strip ${k + 1}`)
+          const win = layers.find((l) => l.nm === `Window ${k + 1}`)
+          if (!strip || !win) continue
+          strip.hd = false
+          win.hd = false
+          const yf = BASE - (cycles * 10 + digit) * LH
+          const p = ((strip as Record<string, unknown>).ks as Record<string, unknown>).p as AnimatableProp
+          const kfs = p.k as (Keyframe & { t?: number })[]
+          ;(kfs[0].s as number[])[0] = cx
+          ;(kfs[0].s as number[])[1] = BASE
+          kfs[1].t = dur - 9
+          ;(kfs[1].s as number[])[0] = cx
+          ;(kfs[1].s as number[])[1] = yf - 12 * f
+          kfs[2].t = dur
+          ;(kfs[2].s as number[])[0] = cx
+          ;(kfs[2].s as number[])[1] = yf
+          const wp = ((win as Record<string, unknown>).ks as Record<string, unknown>).p as AnimatableProp
+          ;(wp.k as number[])[0] = cx
+          // 매트 창 사각형도 글자 크기에 비례
+          const winShapes = (win as Record<string, unknown>).shapes as Record<string, unknown>[] | undefined
+          const winRc = (winShapes?.[0]?.it as Record<string, unknown>[] | undefined)?.find(
+            (s) => s.ty === 'rc',
+          )
+          if (winRc) (winRc.s as AnimatableProp).k = [68 * f, 120 * f]
+          const doc = docOf(strip)
+          if (doc) {
+            doc.f = 'Main'
+            doc.s = digitSize
+            doc.lh = LH
+          }
+        }
+        for (let k = 0; k < 9; k++) {
+          if (usedStrip.has(k)) continue
+          const strip = layers.find((l) => l.nm === `Strip ${k + 1}`)
+          const win = layers.find((l) => l.nm === `Window ${k + 1}`)
+          if (strip) strip.hd = true
+          if (win) win.hd = true
+        }
+        // 쉼표(최대 2개) / 화폐
+        const commaCenters = centers.filter((c) => c.item.kind === 'comma')
+        for (let ci = 0; ci < 2; ci++) {
+          const commaL = layers.find((l) => l.nm === `Comma ${ci + 1}`)
+          if (!commaL) continue
+          const at = commaCenters[ci]
+          commaL.hd = !at
+          if (at) {
+            const p = ((commaL as Record<string, unknown>).ks as Record<string, unknown>).p as AnimatableProp
+            ;(p.k as number[])[0] = at.cx
+            ;(p.k as number[])[1] = BASE
+            const doc = docOf(commaL)
+            if (doc) {
+              doc.f = 'Main'
+              doc.s = digitSize
+            }
+          }
+        }
+        const curL = layers.find((l) => l.nm === 'Currency')
+        if (curL) {
+          const at = centers.find((c) => c.item.kind === 'cur')
+          curL.hd = !at || !cur
+          if (at && cur) {
+            const p = ((curL as Record<string, unknown>).ks as Record<string, unknown>).p as AnimatableProp
+            ;(p.k as number[])[0] = at.cx
+            ;(p.k as number[])[1] = BASE
+            const doc = docOf(curL)
+            if (doc) {
+              doc.f = 'Cur' // 별도 폰트 엔트리 — 굵기를 숫자와 독립 제어
+              doc.t = cur.t
+              doc.s = curSize
+            }
           }
         }
         break

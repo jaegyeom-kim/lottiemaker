@@ -4,6 +4,7 @@ import TemplateGallery from './components/TemplateGallery'
 import Preview from './components/Preview'
 import ColorEditor from './components/ColorEditor'
 import TemplateOptions from './components/TemplateOptions'
+import CustomGraphic from './components/CustomGraphic'
 import LayerPanel from './components/LayerPanel'
 import ExportPanel from './components/ExportPanel'
 import './App.css'
@@ -76,6 +77,7 @@ export default function App() {
               (animationData ? (
                 <>
                   <TemplateOptions />
+                  <CustomGraphic />
                   <ColorEditor />
                   <LayerPanel />
                 </>

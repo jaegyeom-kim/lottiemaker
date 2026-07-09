@@ -994,3 +994,143 @@
 .spec li span:last-child {
   font-variant-numeric: tabular-nums;
 }
+
+/* 커스텀 그래픽 */
+.graphicrow {
+  display: flex;
+  gap: 8px;
+}
+
+.graphicrow .input--select {
+  flex: 1;
+  appearance: auto;
+  padding: 8px 10px;
+}
+
+.graphicpreview {
+  display: flex;
+  gap: 12px;
+  background: var(--bg-raise2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  align-items: center;
+}
+
+.graphicpreview__canvas {
+  width: 72px;
+  height: 72px;
+  flex-shrink: 0;
+  background:
+    repeating-conic-gradient(#2a2a33 0 25%, transparent 0 50%) 0 0 / 12px 12px;
+  border-radius: 8px;
+}
+
+.graphicpreview__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.graphicpreview__name {
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graphicpreview__actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.graphicpreview__actions .btn {
+  padding: 6px 12px;
+  font-size: 12.5px;
+}
+
+/* SVG 드롭존 */
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 18px 12px;
+  border: 1.5px dashed var(--line);
+  border-radius: 10px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.dropzone:hover {
+  border-color: var(--text-dim);
+}
+
+.dropzone--over {
+  border-color: var(--blue);
+  background: rgba(49, 130, 246, 0.08);
+  color: var(--text);
+}
+
+.dropzone__icon {
+  font-size: 18px;
+  color: var(--blue);
+}
+
+.dropzone u {
+  color: var(--blue);
+  text-decoration-thickness: 1px;
+}
+
+/* 옵션 패널 탭 (기본/폰트) */
+.opttabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 3px;
+  background: var(--bg-raise2);
+  border-radius: 9px;
+}
+
+.opttab {
+  flex: 1;
+  font-size: 12px;
+  padding: 5px 0;
+  border-radius: 7px;
+  color: var(--text-dim);
+}
+
+.opttab--on {
+  color: var(--text);
+  background: var(--bg-raise);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+}
+
+/* 폰트 드롭다운 */
+.fontselect {
+  width: 100%;
+  background: var(--bg-raise2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.fontselect:focus {
+  outline: none;
+  border-color: var(--blue);
+}
+
+.knob__note {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+}

@@ -13,7 +13,7 @@ const HISTORY_CAP = 50
 interface Snapshot {
   data: LottieJson
   source: LottieJson | null
-  knobValues: Record<string, number>
+  knobValues: Record<string, number | string>
   templateKnobs: TemplateKnob[]
 }
 
@@ -28,8 +28,12 @@ interface EditorState {
 
   /** 노브 미적용 원본. 색상/레이어/크기 편집은 여기에도 미러된다. 템플릿이 아니면 null. */
   sourceData: LottieJson | null
+  /** 템플릿 로드 시점의 완전 원본 — 색상/그래픽 편집도 안 닿는다. 전체 초기화용. */
+  pristineData: LottieJson | null
   templateKnobs: TemplateKnob[]
-  knobValues: Record<string, number>
+  knobValues: Record<string, number | string>
+  /** 로드된 템플릿 id — 커스텀 그래픽 슬롯 조회용. 파일 로드 시 null. */
+  templateId: string | null
 
   // 재생 상태 (파일에는 저장 안 됨)
   playing: boolean
@@ -42,11 +46,16 @@ interface EditorState {
   loadTemplate: (data: LottieJson, id: string, knobs: TemplateKnob[]) => void
   load: (data: LottieJson, fileName: string) => void
   setColorLive: (group: ColorGroup, hex: string) => void
-  setKnobLive: (id: string, value: number) => void
-  resetKnobs: () => void
+  setKnobLive: (id: string, value: number | string) => void
+  /** 템플릿 전체 초기화 — 노브·색상·커스텀 그래픽·크기 전부 로드 시점 원본으로 (undo 가능). */
+  resetTemplate: () => void
   commitEdit: () => void
   toggleLayer: (index: number) => void
   setSize: (w: number, h: number) => void
+  /** match로 시작하는 레이어들의 셰이프를 커스텀 그래픽 그룹으로 교체 (원본에도 미러). */
+  applyGraphicToSlot: (match: string, group: unknown) => void
+  /** 슬롯 셰이프를 레이어 이름별 원본으로 복원. */
+  restoreSlot: (match: string, byName: Record<string, unknown[]>) => void
   undo: () => void
   redo: () => void
 
@@ -86,8 +95,10 @@ export const useEditor = create<EditorState>((set, get) => {
     editBaseline: null,
 
     sourceData: null,
+    pristineData: null,
     templateKnobs: [],
     knobValues: {},
+    templateId: null,
 
     playing: true,
     speed: 1,
@@ -102,8 +113,10 @@ export const useEditor = create<EditorState>((set, get) => {
       set({
         animationData: applied,
         sourceData: structuredClone(data),
+        pristineData: structuredClone(data),
         templateKnobs: knobs,
         knobValues: values,
+        templateId: id,
         fileName: id,
         colorGroups: extractColorGroups(applied),
         past: [],
@@ -117,8 +130,10 @@ export const useEditor = create<EditorState>((set, get) => {
       set({
         animationData: data,
         sourceData: null,
+        pristineData: null,
         templateKnobs: [],
         knobValues: {},
+        templateId: null,
         fileName: fileName.replace(/\.json$/i, ''),
         colorGroups: extractColorGroups(data),
         past: [],
@@ -157,15 +172,16 @@ export const useEditor = create<EditorState>((set, get) => {
       })
     },
 
-    resetKnobs: () => {
-      const { sourceData, templateKnobs } = get()
-      if (!sourceData) return
+    resetTemplate: () => {
+      const { pristineData, templateKnobs } = get()
+      if (!pristineData) return
       const values = Object.fromEntries(templateKnobs.map((k) => [k.id, k.default]))
-      const applied = applyKnobs(sourceData, templateKnobs, values)
+      const applied = applyKnobs(pristineData, templateKnobs, values)
       push({
         animationData: applied,
-        colorGroups: extractColorGroups(applied),
+        sourceData: structuredClone(pristineData),
         knobValues: values,
+        colorGroups: extractColorGroups(applied),
       })
     },
 
@@ -193,6 +209,46 @@ export const useEditor = create<EditorState>((set, get) => {
       push({
         animationData: resizeUtil(animationData, w, h),
         sourceData: sourceData ? resizeUtil(sourceData, w, h) : null,
+      })
+    },
+
+    applyGraphicToSlot: (match, group) => {
+      const { animationData, sourceData } = get()
+      if (!animationData) return
+      const swap = (d: LottieJson) => {
+        const clone = structuredClone(d)
+        for (const l of clone.layers) {
+          if (typeof l.nm === 'string' && l.nm.startsWith(match)) {
+            ;(l as Record<string, unknown>).shapes = [structuredClone(group)]
+          }
+        }
+        return clone
+      }
+      const next = swap(animationData)
+      push({
+        animationData: next,
+        colorGroups: extractColorGroups(next),
+        sourceData: sourceData ? swap(sourceData) : null,
+      })
+    },
+
+    restoreSlot: (match, byName) => {
+      const { animationData, sourceData } = get()
+      if (!animationData) return
+      const restore = (d: LottieJson) => {
+        const clone = structuredClone(d)
+        for (const l of clone.layers) {
+          if (typeof l.nm === 'string' && l.nm.startsWith(match) && byName[l.nm]) {
+            ;(l as Record<string, unknown>).shapes = structuredClone(byName[l.nm])
+          }
+        }
+        return clone
+      }
+      const next = restore(animationData)
+      push({
+        animationData: next,
+        colorGroups: extractColorGroups(next),
+        sourceData: sourceData ? restore(sourceData) : null,
       })
     },
 

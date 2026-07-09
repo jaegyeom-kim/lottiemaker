@@ -93,6 +93,12 @@ lottie.loadAnimation({
         </li>
       </ul>
       <p className="panel__hint">lottie-web · dotLottie · 네이티브 Lottie 라이브러리 호환</p>
+      {animationData.fonts?.list?.length ? (
+        <p className="panel__hint">
+          텍스트 레이어 포함 — 재생 환경에 폰트({animationData.fonts.list[0].fFamily.split(',')[0]})가
+          설치·로드되어 있어야 동일하게 보입니다.
+        </p>
+      ) : null}
     </div>
   )
 }

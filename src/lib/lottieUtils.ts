@@ -10,6 +10,8 @@ export interface LottieJson {
   nm?: string
   layers: LottieLayer[]
   assets?: unknown[]
+  /** 텍스트 레이어용 폰트 목록 — fFamily는 CSS font-family 문자열. */
+  fonts?: { list?: { fName: string; fFamily: string; fStyle: string; ascent: number }[] }
   [key: string]: unknown
 }
 

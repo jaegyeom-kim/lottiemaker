@@ -23,6 +23,7 @@ import pinDrop from './pin-drop.json'
 import dotOrbit from './dot-orbit.json'
 import heartbeatLine from './heartbeat-line.json'
 import starRating from './star-rating.json'
+import countUp from './count-up.json'
 import type { TemplateKnob } from '../lib/lottieKnobs'
 
 export interface TemplateDef {
@@ -31,6 +32,8 @@ export interface TemplateDef {
   category: 'loading' | 'feedback' | 'interaction' | 'effect'
   data: unknown
   knobs: TemplateKnob[]
+  /** 커스텀 그래픽(SVG) 교체 슬롯들 — match로 시작하는 레이어의 셰이프를 교체. fit = 맞춤 크기 px. */
+  swapSlots?: { match: string; label: string; fit: number }[]
 }
 
 export const categories = [
@@ -83,6 +86,7 @@ export const templates: TemplateDef[] = [
   },
   {
     id: 'dots-bounce', label: '점 세 개 바운스', category: 'loading', data: dotsBounce,
+    swapSlots: [{ match: 'Dot', label: '점', fit: 84 }],
     knobs: [
       shape('dot', '점 크기', 84, 40, 120, 4, ['el']),
       spreadX('점 간격', 100, 60, 160),
@@ -92,6 +96,7 @@ export const templates: TemplateDef[] = [
   },
   {
     id: 'typing-dots', label: '타이핑 점', category: 'loading', data: typingDots,
+    swapSlots: [{ match: 'Dot', label: '점', fit: 56 }],
     knobs: [
       shape('dot', '점 크기', 56, 24, 96, 4, ['el']),
       spreadX('점 간격', 80, 50, 130),
@@ -110,6 +115,7 @@ export const templates: TemplateDef[] = [
   },
   {
     id: 'pulse-ring', label: '펄스 링', category: 'loading', data: pulseRing,
+    swapSlots: [{ match: 'Center Dot', label: '중앙 도트', fit: 120 }, { match: 'Pulse Ring', label: '확산 링', fit: 120 }],
     knobs: [
       shape('dot', '도트 크기', 120, 60, 200, 4, ['el']),
       stroke('링 두께', 12, 4, 32),
@@ -164,6 +170,7 @@ export const templates: TemplateDef[] = [
   // ── 인터랙션 ──────────────────────────────
   {
     id: 'heart-like', label: '하트 좋아요', category: 'interaction', data: heartLike,
+    swapSlots: [{ match: 'heart', label: '하트', fit: 300 }, { match: 'particle', label: '파티클', fit: 26 }],
     knobs: [
       zoom('전체 크기', 512, 300, 640),
       ampPos('burst', '파티클 퍼짐', 175, 60, 350),
@@ -178,6 +185,7 @@ export const templates: TemplateDef[] = [
   },
   {
     id: 'star-favorite', label: '별 즐겨찾기', category: 'interaction', data: starFavorite,
+    swapSlots: [{ match: 'star', label: '별', fit: 300 }, { match: 'sparkle', label: '파티클', fit: 24 }],
     knobs: [
       shape('star', '별 크기', 150, 80, 220, 5, ['sr']),
       shape('particle', '파티클 크기', 24, 10, 48, 2, ['el']),
@@ -192,6 +200,7 @@ export const templates: TemplateDef[] = [
   },
   {
     id: 'bell-shake', label: '벨 알림', category: 'interaction', data: bellShake,
+    swapSlots: [{ match: 'bell', label: '벨', fit: 280 }, { match: 'badge', label: '배지', fit: 60 }],
     knobs: [
       zoom('전체 크기', 512, 300, 640),
       ampRot('swing', '흔들림 각도', 18, 4, 45, 1),
@@ -204,6 +213,11 @@ export const templates: TemplateDef[] = [
       zoom('전체 크기', 512, 300, 640),
       stroke('선 두께', 40, 12, 72),
       ampPos('travel', '이동 거리', 80, 24, 160, 4),
+      // 축 기준 연산(이동 거리) 뒤에 회전 — 회전 후 좌표계에서 진폭이 안 틀어진다
+      {
+        id: 'dir', label: '방향', min: 0, max: 3, step: 1, default: 0, unit: '',
+        options: ['위', '오른쪽', '아래', '왼쪽'], op: { kind: 'dirRotate' },
+      },
     ],
   },
   {
@@ -231,6 +245,7 @@ export const templates: TemplateDef[] = [
   },
   {
     id: 'toggle-switch', label: '토글 스위치', category: 'interaction', data: toggleSwitch,
+    swapSlots: [{ match: 'Knob', label: '노브', fit: 96 }],
     knobs: [
       shape('knob', '노브 크기', 96, 56, 120, 4, ['el']),
       corner(60, 8, 60),
@@ -239,6 +254,7 @@ export const templates: TemplateDef[] = [
   },
   {
     id: 'pin-drop', label: '핀 드롭', category: 'interaction', data: pinDrop,
+    swapSlots: [{ match: 'Pin', label: '핀', fit: 250 }],
     knobs: [
       // 몸통이 베지어 패스라 부분 스케일 불가 — 전체 줌으로 크기 조절
       zoom('전체 크기', 512, 300, 640),
@@ -247,15 +263,55 @@ export const templates: TemplateDef[] = [
   },
   {
     id: 'star-rating', label: '별점', category: 'interaction', data: starRating,
+    swapSlots: [{ match: 'Star', label: '별', fit: 76 }],
     knobs: [
       shape('star', '별 크기', 38, 16, 52, 2, ['sr']),
       spreadX('별 간격', 160, 130, 200),
       zoom('전체 크기', 512, 300, 640),
     ],
   },
+  {
+    id: 'count-up', label: '숫자 카운트', category: 'interaction', data: countUp,
+    knobs: [
+      // 통합 레이아웃 연산 — 아래 보조 노브(쉼표/화폐/폰트)를 함께 읽는다
+      {
+        id: 'target', label: '숫자', min: 0, max: 999999999, step: 1, default: 1280, unit: '',
+        op: {
+          kind: 'countStyle',
+          ids: {
+            comma: 'comma', currency: 'currency', font: 'font',
+            digitSize: 'digitSize', digitWeight: 'digitWeight',
+            curSize: 'curSize', curWeight: 'curWeight',
+          },
+        },
+      },
+      { id: 'comma', label: '천 단위 쉼표', min: 0, max: 1, step: 1, default: 1, unit: '', toggle: true, op: { kind: 'none' } },
+      {
+        id: 'currency', label: '화폐 단위', min: 0, max: 4, step: 1, default: 1, unit: '',
+        options: ['없음', '원', '₩', '$', '%'], op: { kind: 'none' },
+      },
+      // ── 폰트 탭 ──
+      {
+        id: 'font', label: '서체', min: 0, max: 3, step: 1, default: 0, unit: '',
+        fontPicker: true, group: 'font', op: { kind: 'none' },
+      },
+      { id: 'digitSize', label: '숫자 크기', min: 40, max: 130, step: 1, default: 90, unit: 'px', group: 'font', op: { kind: 'none' } },
+      {
+        id: 'digitWeight', label: '숫자 굵기', min: 0, max: 3, step: 1, default: 0, unit: '',
+        options: ['레귤러', '미디엄', '볼드', '블랙'], group: 'font', op: { kind: 'none' },
+      },
+      { id: 'curSize', label: '화폐 크기', min: 24, max: 120, step: 1, default: 62, unit: 'px', group: 'font', op: { kind: 'none' } },
+      {
+        id: 'curWeight', label: '화폐 굵기', min: 0, max: 3, step: 1, default: 0, unit: '',
+        options: ['레귤러', '미디엄', '볼드', '블랙'], group: 'font', op: { kind: 'none' },
+      },
+      zoom('전체 크기', 512, 300, 640),
+    ],
+  },
   // ── 이펙트 ────────────────────────────────
   {
     id: 'confetti-burst', label: '컨페티 버스트', category: 'effect', data: confettiBurst,
+    swapSlots: [{ match: 'Piece', label: '조각', fit: 38 }],
     knobs: [
       // 소멸 방식(burstStyle)이 시작 시각을 읽으므로 그보다 앞에 배치
       {
@@ -275,6 +331,7 @@ export const templates: TemplateDef[] = [
   },
   {
     id: 'confetti-rain', label: '컨페티 레인', category: 'effect', data: confettiRain,
+    swapSlots: [{ match: 'Drop', label: '조각', fit: 26 }],
     knobs: [
       // 낙하 경로는 화면 밖 워프와 맞물려 있어 퍼짐/줌 노브는 제외
       shape('piece', '조각 크기', 24, 10, 48, 2),
@@ -284,6 +341,7 @@ export const templates: TemplateDef[] = [
   },
   {
     id: 'confetti-cannon', label: '컨페티 캐논', category: 'effect', data: confettiCannon,
+    swapSlots: [{ match: 'Shot', label: '조각', fit: 32 }],
     knobs: [
       ampPos('spread', '발사 거리', 310, 120, 500, 10),
       ampRot('spin', '회전량', 480, 0, 960, 30),
@@ -297,6 +355,7 @@ export const templates: TemplateDef[] = [
   },
   {
     id: 'sparkle-twinkle', label: '반짝임', category: 'effect', data: sparkleTwinkle,
+    swapSlots: [{ match: 'Sparkle', label: '반짝이', fit: 120 }],
     knobs: [
       shape('size', '반짝이 크기', 60, 20, 120, 4, ['sr']),
       zoom('전체 크기', 512, 300, 640),
