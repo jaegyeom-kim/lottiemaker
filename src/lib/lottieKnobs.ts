@@ -82,6 +82,19 @@ export type KnobOp =
       }
     }
   /**
+   * 웨이브 바 개수 — 'Bar 1'을 원형으로 N개 재구성. 60px 피치 중앙 정렬,
+   * 바당 8f 시차(전체가 루프 80f를 넘으면 시차를 압축). 다른 연산보다 앞에 배치할 것.
+   * orderId가 가리키는 노브로 파동 순서 결정: 0 왼쪽부터 / 1 오른쪽부터 /
+   * 2 중앙부터 / 3 바깥부터 / 4 랜덤(시드 고정 — 재계산에도 안정).
+   * flowId 토글이 1이면 연속 파동: 쉬는 구간 없이 32f 주기로 계속 진동,
+   * 위상을 주기에 분산하고 루프를 2주기(64f)로 재설정 — 끊김 없는 무한 반복.
+   * seedId 노브로 랜덤 변주: 0 = 규칙적, 1 이상 = 시드별 위상/시차 지터 +
+   * 바·사이클별 피크 높이 변주. 같은 시드는 항상 같은 패턴(재계산 안정),
+   * 피크 패턴이 64f 주기라 루프 이음새 유지.
+   * 순서/연속/시드 노브가 기본값이 아닐 수 있으므로 항상 적용된다.
+   */
+  | { kind: 'barCount'; orderId?: string; flowId?: string; seedId?: string }
+  /**
    * 구도 방향 회전 — 값(옵션 인덱스) × 90°를 캔버스 중심 기준으로 전체 적용.
    * 루트 레이어의 위치(정적+키프레임)를 회전하고 레이어 회전값에 각도를 더한다.
    * 진폭(ampPos) 등 축 기준 연산 뒤에 배치할 것.
@@ -168,7 +181,7 @@ export function applyKnobs(
     // 문자열 값(로컬 폰트 등)은 자체 변환 없는 노브(none)에만 실림 — 수치 연산은 기본값으로 대체
     const v = typeof raw === 'number' ? raw : knob.default
     // 기본값 = 원본 그대로. 단 아래 연산들은 기본값이 원본과 다른 변환이므로 항상 적용.
-    const ALWAYS = ['arcChase', 'vanish', 'pickLayer', 'coinDepth', 'countStyle']
+    const ALWAYS = ['arcChase', 'vanish', 'pickLayer', 'coinDepth', 'countStyle', 'barCount']
     if (raw === knob.default && !ALWAYS.includes(knob.op.kind)) continue
     const op = knob.op
     switch (op.kind) {
@@ -248,6 +261,97 @@ export function applyKnobs(
             if (Math.abs(last[0] - first - 360) < 0.01) last[0] = first + 360 - stretchDeg
           })
         }
+        break
+      }
+      case 'barCount': {
+        const N = Math.max(2, Math.min(8, Math.round(v)))
+        const layers = out.layers as LottieLayer[]
+        const proto = layers.find((l) => l.nm === 'Bar 1')
+        if (!proto) break
+        const others = layers.filter((l) => typeof l.nm !== 'string' || !l.nm.startsWith('Bar'))
+        const e2 = () => ({ i: { x: [0.4, 0.4], y: [1, 1] }, o: { x: [0.6, 0.6], y: [0, 0] } })
+        // 파동 순서 — 바 i의 시차 랭크 계산
+        const orderIdx = op.orderId ? Math.round((values[op.orderId] as number) ?? 0) : 0
+        let ranks: number[]
+        if (orderIdx === 1) {
+          ranks = Array.from({ length: N }, (_, i) => N - 1 - i)
+        } else if (orderIdx === 2 || orderIdx === 3) {
+          // 중앙/바깥부터 — 중심 거리로 랭크, 대칭 쌍은 같은 위상(미러 파동)
+          const dists = Array.from({ length: N }, (_, i) => Math.abs(i - (N - 1) / 2))
+          const uniq = [...new Set(dists)].sort((a, b) => a - b)
+          ranks = dists.map((d) =>
+            orderIdx === 2 ? uniq.indexOf(d) : uniq.length - 1 - uniq.indexOf(d),
+          )
+        } else if (orderIdx === 4) {
+          // 랜덤 — 시드 고정 LCG 셔플: 노브 재계산마다 결과 동일
+          let seed = N * 1103 + 12345
+          const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
+          ranks = Array.from({ length: N }, (_, i) => i)
+          for (let i = N - 1; i > 0; i--) {
+            const j = Math.floor(rnd() * (i + 1))
+            ;[ranks[i], ranks[j]] = [ranks[j], ranks[i]]
+          }
+        } else {
+          ranks = Array.from({ length: N }, (_, i) => i)
+        }
+        const maxRank = Math.max(...ranks, 1)
+        const flowOn = op.flowId !== undefined && ((values[op.flowId] as number) ?? 0) !== 0
+        const seedVal = op.seedId ? Math.max(0, Math.round((values[op.seedId] as number) ?? 0)) : 0
+        // 시드 0 = 규칙적, 1+ = 풀 변주 — 시드 값마다 완전히 다른 패턴, 같은 시드는 항상 동일
+        const chaos = seedVal > 0 ? 1 : 0
+        let cseed = seedVal * 9973 + N * 733 + orderIdx * 97 + 41
+        const crnd = () => ((cseed = (cseed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
+        const PERIOD = 32 // 상승 16f + 하강 16f
+        // 연속 모드는 루프를 2주기로 — 그리드가 주기 배수라 t0 == t64, 심리스
+        if (flowOn) out.op = PERIOD * 2
+        // 기본 시차 8f — 마지막 파동(32f)이 루프 80f 안에 끝나도록 압축
+        const step = Math.min(8, 48 / maxRank)
+        const bars: LottieLayer[] = []
+        for (let i = 0; i < N; i++) {
+          const b = structuredClone(proto)
+          b.ind = i + 1
+          ;(b as Record<string, unknown>).nm = `Bar ${i + 1}`
+          if (flowOn) b.op = out.op
+          const ks = (b as Record<string, unknown>).ks as Record<string, unknown>
+          ;(ks.p as AnimatableProp).k = [256 + (i - (N - 1) / 2) * 60, 256, 0]
+          const rc = (
+            ((b as Record<string, unknown>).shapes as Record<string, unknown>[])[0]
+              .it as Record<string, unknown>[]
+          ).find((s) => s.ty === 'rc')
+          if (!rc) continue
+          // 불규칙 변주 — 지터(±), 피크 2종(아래로 최대 80px 변주)
+          const jit = (crnd() - 0.5) * chaos
+          const pk1 = 170 - crnd() * 80 * chaos
+          const pk2 = 170 - crnd() * 80 * chaos
+          const kfs: Record<string, unknown>[] = []
+          if (flowOn) {
+            // 위상을 주기에 균등 분산(+지터), 음수 시각부터 격자 생성 — t=0에서도 진동
+            // 중간값을 베지어 그대로 보간(선행 키프레임을 lottie가 평가), 쉬는 구간 없음
+            // 지터 포함 위상을 [0, PERIOD)로 정규화 — 격자 시작이 항상 t≤0이어야
+            // 루프 앞구간까지 키프레임이 커버된다
+            const raw = (ranks[i] / (maxRank + 1)) * PERIOD + jit * PERIOD
+            const phase = ((raw % PERIOD) + PERIOD) % PERIOD
+            let t = phase - PERIOD
+            let m = 0 // 격자 칸 — 홀수 = 피크, 피크 값은 4칸(64f) 주기라 루프 이음새 유지
+            while (t < out.op + 16) {
+              const val = m % 2 === 1 ? (m % 4 === 1 ? pk1 : pk2) : 60
+              kfs.push({ ...e2(), t: Math.round(t * 10) / 10, s: [36, Math.round(val)] })
+              t += 16
+              m++
+            }
+          } else {
+            const st =
+              Math.round(Math.max(0, Math.min(48, step * ranks[i] + jit * 16)) * 10) / 10
+            kfs.push({ ...e2(), t: 0, s: [36, 60] })
+            if (st > 0) kfs.push({ ...e2(), t: st, s: [36, 60] })
+            kfs.push({ ...e2(), t: st + 16, s: [36, Math.round(pk1)] })
+            kfs.push({ ...e2(), t: st + 32, s: [36, 60] })
+            if (st + 32 < out.op) kfs.push({ t: out.op, s: [36, 60] })
+          }
+          ;(rc as { s: unknown }).s = { a: 1, k: kfs }
+          bars.push(b)
+        }
+        out.layers = [...bars, ...others]
         break
       }
       case 'dirRotate': {

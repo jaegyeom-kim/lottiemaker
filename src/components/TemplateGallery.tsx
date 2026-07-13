@@ -4,10 +4,12 @@ import { useEditor } from '../store'
 import type { LottieJson } from '../lib/lottieUtils'
 import { durationKnob } from '../lib/lottieKnobs'
 import LottiePlayer from './LottiePlayer'
+import CustomBuilder from './CustomBuilder'
 
 export default function TemplateGallery() {
   const loadTemplate = useEditor((s) => s.loadTemplate)
   const [category, setCategory] = useState<string>('all')
+  const [side, setSide] = useState<'tpl' | 'custom'>('tpl')
 
   const list = category === 'all' ? templates : templates.filter((t) => t.category === category)
 
@@ -18,10 +20,23 @@ export default function TemplateGallery() {
     ])
   }
 
+  if (side === 'custom') {
+    return (
+      <aside className="gallery">
+        <div className="gallery__head">
+          <SideTabs side={side} setSide={setSide} />
+        </div>
+        <div className="gallery__body">
+          <CustomBuilder />
+        </div>
+      </aside>
+    )
+  }
+
   return (
     <aside className="gallery">
       <div className="gallery__head">
-        <h2 className="gallery__title">템플릿</h2>
+        <SideTabs side={side} setSide={setSide} />
         <div className="gallery__cats">
           <button
             className={`chip ${category === 'all' ? 'chip--on' : ''}`}
@@ -46,6 +61,28 @@ export default function TemplateGallery() {
         ))}
       </div>
     </aside>
+  )
+}
+
+function SideTabs({
+  side,
+  setSide,
+}: {
+  side: 'tpl' | 'custom'
+  setSide: (s: 'tpl' | 'custom') => void
+}) {
+  return (
+    <div className="opttabs opttabs--gallery">
+      <button className={`opttab ${side === 'tpl' ? 'opttab--on' : ''}`} onClick={() => setSide('tpl')}>
+        템플릿
+      </button>
+      <button
+        className={`opttab ${side === 'custom' ? 'opttab--on' : ''}`}
+        onClick={() => setSide('custom')}
+      >
+        커스텀
+      </button>
+    </div>
   )
 }
 

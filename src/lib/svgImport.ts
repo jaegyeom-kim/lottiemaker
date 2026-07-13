@@ -10,6 +10,37 @@ export interface ImportedGraphic {
   bbox: { x: number; y: number; w: number; h: number }
 }
 
+/** 래스터(PNG/JPG/WebP) 이미지 — 로티 이미지 에셋으로 임베드된다. */
+export interface ImportedImage {
+  /** base64 data URI — 원본 해상도 그대로 (표시 크기는 에셋 w/h가 결정) */
+  dataUri: string
+  /** 원본 픽셀 크기 */
+  w: number
+  h: number
+}
+
+/** 래스터 이미지 파일을 data URI + 원본 크기로 읽는다. */
+export function readImageFile(file: File): Promise<ImportedImage> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('파일을 읽을 수 없습니다'))
+    reader.onload = () => {
+      const dataUri = reader.result as string
+      const img = new Image()
+      img.onerror = () => reject(new Error('이미지를 해석할 수 없습니다'))
+      img.onload = () => resolve({ dataUri, w: img.naturalWidth, h: img.naturalHeight })
+      img.src = dataUri
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
+/** fit 박스에 맞춘 표시 크기 (비율 유지, 긴 변 = fit). */
+export function fitImageSize(img: ImportedImage, fit: number): { w: number; h: number } {
+  const s = fit / Math.max(img.w, img.h)
+  return { w: Math.round(img.w * s), h: Math.round(img.h * s) }
+}
+
 type Mat = [number, number, number, number, number, number] // a b c d e f
 
 const ID: Mat = [1, 0, 0, 1, 0, 0]

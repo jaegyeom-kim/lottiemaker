@@ -26,7 +26,7 @@ export default function App() {
         if (e.shiftKey) redo()
         else undo()
       }
-      // 스페이스: 재생/일시정지
+      // 스페이스: 재생/일시정지 (커스텀 빌더에선 프리뷰 토글 겸용)
       if (e.key === ' ') {
         const s = useEditor.getState()
         if (s.animationData) {

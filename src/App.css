@@ -1134,3 +1134,671 @@
   font-size: 11px;
   color: var(--text-dim);
 }
+
+/* 앵커 직접 조작 패드 */
+.anchorpad {
+  position: relative;
+  margin-top: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background:
+    repeating-conic-gradient(#2a2a33 0% 25%, #1e1e24 0% 50%) 0 0 / 16px 16px;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.anchorpad img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.anchorpad__hline,
+.anchorpad__vline {
+  position: absolute;
+  background: rgb(49 130 246 / 0.6);
+  pointer-events: none;
+}
+
+.anchorpad__hline {
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+
+.anchorpad__vline {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+
+.anchorpad__dot {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: var(--blue);
+  transform: translate(-50%, -50%);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.5);
+  pointer-events: none;
+}
+
+/* 커스텀 빌더 */
+.gallery__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.opttabs--gallery {
+  margin-bottom: 8px;
+}
+
+.custombuilder {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.custombuilder .chip:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* 커스텀 위치 드래그 */
+.preview__lottiewrap {
+  position: relative;
+}
+
+.preview__lottiefill {
+  width: 100%;
+  height: 100%;
+}
+
+.customdrag {
+  position: absolute;
+  inset: 0;
+  cursor: default; /* 이동 툴 기본 — 레이어 위에서만 move로 */
+  touch-action: none;
+}
+
+.customdrag--overlayer {
+  cursor: move;
+}
+
+/* 빈 곳 프레스 — 전체 레이어 영역 표시 */
+.allbox {
+  position: absolute;
+  border: 1px dashed rgb(49 130 246 / 0.55);
+  background: rgb(49 130 246 / 0.06);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* 스냅 가이드 (일러스트레이터 스타일) */
+.snapguide {
+  position: absolute;
+  background: #ff2ea6;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.snapguide--v {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+
+.snapguide--h {
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+
+/* 위치 수치 입력 */
+.posrow {
+  display: flex;
+  gap: 8px;
+}
+
+.posinput {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-raise2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px 8px;
+}
+
+.posinput:focus-within {
+  border-color: var(--blue);
+}
+
+.posinput__label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.posinput input {
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.posinput input:focus {
+  outline: none;
+}
+
+/* 캔버스 경계 + 크기 배지 */
+.preview__lottiewrap {
+  outline: 1px solid rgb(255 255 255 / 0.12);
+  outline-offset: -1px;
+}
+
+.canvasbadge {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  background: rgb(23 23 28 / 0.75);
+  padding: 2px 6px;
+  border-radius: 5px;
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* 스냅 가이드 수치 라벨 */
+.snapguide__label {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: #ff2ea6;
+  background: rgb(23 23 28 / 0.85);
+  padding: 1px 4px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.snapguide--h .snapguide__label {
+  top: auto;
+  bottom: 4px;
+}
+
+/* 드래그 좌표 표시 */
+.dragcoord {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  background: rgb(23 23 28 / 0.85);
+  border: 1px solid var(--line);
+  padding: 3px 8px;
+  border-radius: 6px;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* 커스텀 레이어 목록 */
+.layerlist {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.layerrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.layerrow:hover {
+  background: var(--bg-raise2);
+}
+
+.layerrow--on {
+  background: var(--bg-raise2);
+  border-color: var(--blue);
+}
+
+.layerrow__thumb {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: repeating-conic-gradient(#2a2a33 0 25%, transparent 0 50%) 0 0 / 8px 8px;
+  flex-shrink: 0;
+}
+
+.layerrow__thumb--svg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+.layerrow__name {
+  flex: 1;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.layerrow__del {
+  color: var(--text-dim);
+  font-size: 14px;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+
+.layerrow__del:hover {
+  color: var(--red);
+}
+
+/* 선택 레이어 바운딩 박스 */
+.selbox {
+  position: absolute;
+  border: 1px solid var(--blue);
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* 캔버스 툴바 */
+.canvastools {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: rgb(30 30 36 / 0.92);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 3px;
+  z-index: 6;
+}
+
+.canvastools__btn {
+  width: 28px;
+  height: 26px;
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.canvastools__btn:hover {
+  background: var(--bg-raise2);
+}
+
+.canvastools__btn--on {
+  background: var(--blue);
+  color: #fff;
+}
+
+.canvastools__zoom {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  padding: 0 6px;
+  min-width: 40px;
+  text-align: center;
+}
+
+.preview__canvas {
+  position: relative;
+  overflow: hidden;
+}
+
+.preview__canvas--hand {
+  cursor: grab;
+}
+
+.preview__canvas--hand:active {
+  cursor: grabbing;
+}
+
+/* 호버 하이라이트 박스 */
+.hoverbox {
+  position: absolute;
+  border: 1px solid rgb(49 130 246 / 0.45);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* 리사이즈 핸들 */
+.selbox {
+  pointer-events: none;
+}
+
+.selhandle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: #fff;
+  border: 1.5px solid var(--blue);
+  border-radius: 2px;
+  pointer-events: auto;
+  touch-action: none;
+  z-index: 6;
+}
+
+.selhandle--nw { left: -5px; top: -5px; cursor: nwse-resize; }
+.selhandle--se { right: -5px; bottom: -5px; cursor: nwse-resize; }
+.selhandle--ne { right: -5px; top: -5px; cursor: nesw-resize; }
+.selhandle--sw { left: -5px; bottom: -5px; cursor: nesw-resize; }
+
+/* 레이어 행 도구 버튼 */
+.layerrow__btn {
+  color: var(--text-dim);
+  font-size: 11px;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.layerrow__btn:hover:not(:disabled) {
+  background: var(--bg-raise);
+  color: var(--text);
+}
+
+.layerrow__btn:disabled {
+  opacity: 0.25;
+}
+
+.layerrow__btn--off {
+  color: var(--red);
+}
+
+.layerrow__rename {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--blue);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 1px 5px;
+}
+
+/* 레이어 드래그 재정렬 */
+.layerrow__grip {
+  color: var(--text-dim);
+  font-size: 14px;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  cursor: grab;
+  touch-action: none;
+  flex-shrink: 0;
+}
+
+.layerrow__grip:active {
+  cursor: grabbing;
+  color: var(--text);
+}
+
+.layerrow--drag {
+  opacity: 0.45;
+}
+
+.layerrow--insbefore {
+  box-shadow: 0 -2px 0 0 var(--blue);
+}
+
+.layerrow--insafter {
+  box-shadow: 0 2px 0 0 var(--blue);
+}
+
+/* 앵커 9점 그리드 */
+.anchorgrid {
+  display: grid;
+  grid-template-columns: repeat(3, 22px);
+  gap: 4px;
+  width: fit-content;
+  padding: 6px;
+  background: var(--bg-raise2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-bottom: 6px;
+}
+
+.anchorgrid__dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: var(--bg-raise);
+  position: relative;
+}
+
+.anchorgrid__dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+.anchorgrid__dot--on {
+  border-color: var(--blue);
+}
+
+.anchorgrid__dot--on::after {
+  background: var(--blue);
+}
+
+/* 타임라인 */
+.timeline {
+  margin-top: 8px;
+  background: var(--bg-raise);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.timeline__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.timeline__title {
+  font-size: 11px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.timeline__hint {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.timeline__body {
+  display: flex;
+  gap: 8px;
+}
+
+.timeline__labels {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.timeline__label {
+  height: 20px;
+  display: flex;
+  align-items: center;
+  font-size: 10px;
+  color: var(--text-dim);
+  width: 44px;
+}
+
+.timeline__tracks {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.timeline__track {
+  position: relative;
+  height: 20px;
+  background: var(--bg-raise2);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.timeline__bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgb(49 130 246 / 0.55);
+  border: 1px solid var(--blue);
+  border-radius: 5px;
+  cursor: grab;
+  touch-action: none;
+  min-width: 8px;
+}
+
+.timeline__bar:active {
+  cursor: grabbing;
+}
+
+.timeline__edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.timeline__edge--l { left: -2px; }
+.timeline__edge--r { right: -2px; }
+
+.timeline__edge::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 2px;
+  width: 2px;
+  border-radius: 1px;
+  background: rgb(255 255 255 / 0.75);
+}
+
+.timeline__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--text-dim);
+  opacity: 0.5;
+}
+
+.timeline__tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgb(255 255 255 / 0.06);
+  pointer-events: none;
+}
+
+.timeline__playhead {
+  position: absolute;
+  top: 0;
+  bottom: -2px;
+  width: 9px;
+  margin-left: -4px;
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: 3;
+}
+
+.timeline__playhead::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  background: var(--red);
+}
+
+.timeline__playhead-head {
+  position: absolute;
+  top: 0;
+  left: 1px;
+  width: 7px;
+  height: 8px;
+  background: var(--red);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+
+.timeline__ruler {
+  position: relative;
+  height: 14px;
+  background: var(--bg-raise2);
+  border-radius: 5px;
+  cursor: ew-resize;
+}
+
+.timeline__label--ruler {
+  height: 14px;
+}
+
+.check--inline {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.timeline__ticklabel {
+  position: absolute;
+  top: 1px;
+  font-size: 8px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  transform: translateX(3px);
+  pointer-events: none;
+}
+
+/* 커스텀 탭 그룹 헤더 */
+.grouphead {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin: 6px 0 -4px;
+}

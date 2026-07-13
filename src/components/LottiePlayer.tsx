@@ -29,6 +29,8 @@ export default function LottiePlayer({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const animRef = useRef<AnimationItem | null>(null)
+  // 파킹 프레임 — 일시정지 중 데이터가 바뀌어도(편집) 현재 프레임 유지 (AE 방식)
+  const lastFrameRef = useRef(0)
   const onFrameRef = useRef(onFrame)
   onFrameRef.current = onFrame
   const onCompleteRef = useRef(onComplete)
@@ -45,7 +47,12 @@ export default function LottiePlayer({
       animationData: structuredClone(data),
     })
     anim.setSpeed(speed)
+    // 일시정지 상태 재생성 → 직전 파킹 프레임 복원 (편집 결과를 그 시점 기준으로 표시)
+    if (!playing && lastFrameRef.current > 0) {
+      anim.goToAndStop(Math.min(lastFrameRef.current, Math.max(0, anim.totalFrames - 1)), true)
+    }
     const handler = () => {
+      lastFrameRef.current = anim.currentFrame
       onFrameRef.current?.(anim.currentFrame, anim.totalFrames)
     }
     const completeHandler = () => {
@@ -88,6 +95,8 @@ export default function LottiePlayer({
     const anim = animRef.current
     if (!anim || seekFrame === null) return
     anim.goToAndStop(seekFrame, true)
+    lastFrameRef.current = seekFrame
+    onFrameRef.current?.(seekFrame, anim.totalFrames)
   }, [seekFrame])
 
   useEffect(() => {

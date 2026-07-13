@@ -32,8 +32,9 @@ export interface TemplateDef {
   category: 'loading' | 'feedback' | 'interaction' | 'effect'
   data: unknown
   knobs: TemplateKnob[]
-  /** 커스텀 그래픽(SVG) 교체 슬롯들 — match로 시작하는 레이어의 셰이프를 교체. fit = 맞춤 크기 px. */
-  swapSlots?: { match: string; label: string; fit: number }[]
+  /** 커스텀 그래픽(SVG/PNG) 교체 슬롯들 — match로 시작하는 레이어의 셰이프를 교체. fit = 맞춤 크기 px.
+   *  anchor = 이미지 교체 시 기준점(0~1 비율, 기본 중앙) — 원본 피벗과 맞출 때 지정. */
+  swapSlots?: { match: string; label: string; fit: number; anchor?: [number, number] }[]
 }
 
 export const categories = [
@@ -106,6 +107,15 @@ export const templates: TemplateDef[] = [
   {
     id: 'wave-bars', label: '웨이브 바', category: 'loading', data: waveBars,
     knobs: [
+      // 레이어를 재구성하므로 맨 앞 — 이후 연산이 복제된 바 전체에 적용된다
+      { id: 'bars', label: '바 개수', min: 2, max: 8, step: 1, default: 4, unit: '개', op: { kind: 'barCount', orderId: 'order', flowId: 'flow', seedId: 'seed' } },
+      // 0 = 규칙적, 1+ = 시드별 랜덤 변주 — 슬라이더를 돌리며 마음에 드는 패턴을 고른다
+      { id: 'seed', label: '랜덤 시드 (0 = 끔)', min: 0, max: 50, step: 1, default: 0, unit: '', op: { kind: 'none' } },
+      { id: 'flow', label: '연속 파동 (쉼 없이 무한 반복)', min: 0, max: 1, step: 1, default: 0, unit: '', toggle: true, op: { kind: 'none' } },
+      {
+        id: 'order', label: '파동 순서', min: 0, max: 4, step: 1, default: 0, unit: '',
+        options: ['왼쪽부터', '오른쪽부터', '중앙부터', '바깥부터', '랜덤'], op: { kind: 'none' },
+      },
       shape('width', '바 너비', 36, 16, 64, 2, ['rc'], [0]),
       shape('height', '최대 높이', 170, 80, 260, 5, ['rc'], [1]),
       spreadX('바 간격', 90, 60, 130),
@@ -200,7 +210,11 @@ export const templates: TemplateDef[] = [
   },
   {
     id: 'bell-shake', label: '벨 알림', category: 'interaction', data: bellShake,
-    swapSlots: [{ match: 'bell', label: '벨', fit: 280 }, { match: 'badge', label: '배지', fit: 60 }],
+    swapSlots: [
+      // 벨은 종 꼭대기(위 8%) 피벗으로 흔들린다 — 이미지 앵커도 거기에
+      { match: 'bell', label: '벨', fit: 280, anchor: [0.5, 0.08] },
+      { match: 'badge', label: '배지', fit: 60 },
+    ],
     knobs: [
       zoom('전체 크기', 512, 300, 640),
       ampRot('swing', '흔들림 각도', 18, 4, 45, 1),
