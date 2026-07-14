@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useEditor } from '../store'
 import { durationSec, parseLottie, type LottieJson } from '../lib/lottieUtils'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
@@ -6,6 +7,7 @@ import type { CustomPayload } from '../lib/customBuilder'
 import LottiePlayer from './LottiePlayer'
 import MockupView from './MockupView'
 import Timeline from './Timeline'
+import AnchorControls from './AnchorControls'
 
 /** 문서에서 레이어 i의 기준 위치 (첫 키프레임 또는 정적 값). */
 function layerBaseOf(doc: LottieJson, i: number): [number, number] | null {
@@ -57,7 +59,7 @@ function layerHalfOf(doc: LottieJson, i: number): [number, number] {
 export default function Preview() {
   const {
     animationData, playing, speed, loop, bg, replayToken, templateId,
-    setPlaying, setSpeed, setLoop, setBg, load, replay, nudgeCustomBase, setCustomIdx,
+    setPlaying, setSpeed, setLoop, setBg, load, replay, setCustomIdx,
     addCustomLayer,
   } = useEditor()
   const sourceData = useEditor((s) => s.sourceData)
@@ -85,6 +87,11 @@ export default function Preview() {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null)
   // 빈 곳을 누르고 있는 동안 모든 레이어 영역 표시
   const [showAllBoxes, setShowAllBoxes] = useState(false)
+  // 앵커 팝오버 — 선택 박스 옆 픽토그램 클릭으로 토글
+  const [anchorPop, setAnchorPop] = useState(false)
+  useEffect(() => {
+    setAnchorPop(false)
+  }, [customIdx, templateId])
   const lastPick = useRef<{ x: number; y: number; pick: number } | null>(null)
   const resizeDrag = useRef<{
     f: number; bx: number; by: number; startSize: number; startDist: number
@@ -104,6 +111,8 @@ export default function Preview() {
   // 툴 + 뷰포트 (팬/줌)
   const [tool, setTool] = useState<'move' | 'hand'>('move')
   const [zoom, setZoom] = useState(1)
+  const zoomRef = useRef(1)
+  zoomRef.current = zoom
   const [pan, setPanState] = useState({ x: 0, y: 0 })
   const panDrag = useRef<{ x: number; y: number; px: number; py: number } | null>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
@@ -133,7 +142,8 @@ export default function Preview() {
     const down = (e: KeyboardEvent) => {
       if (isTyping(e.target)) return
       const s = useEditor.getState()
-      if (e.key.toLowerCase() === 'v' && !e.metaKey && !e.ctrlKey) setTool('move')
+      if (e.key === 'Escape') setAnchorPop(false)
+      else if (e.key.toLowerCase() === 'v' && !e.metaKey && !e.ctrlKey) setTool('move')
       else if (e.key.toLowerCase() === 'h' && !e.metaKey && !e.ctrlKey) setTool('hand')
       else if (e.key === '0' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
@@ -150,16 +160,29 @@ export default function Preview() {
         const n = s.sourceData?.layers.length ?? 0
         if (n) s.duplicateCustomLayer(Math.min(s.customIdx, n - 1))
       } else if (e.key.startsWith('Arrow')) {
-        // 방향키 넛지 — 1px, Shift = 10px
+        // 방향키 넛지 — 1px, Shift = 10px. 리핏 동안 라이브, 키 떼면 히스토리 1회
         e.preventDefault()
         const step = e.shiftKey ? 10 : 1
         const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0
         const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0
-        if (dx || dy) s.nudgeCustomBase(dx, dy)
+        if (dx || dy) {
+          const layer = s.sourceData?.layers[
+            Math.min(s.customIdx, (s.sourceData?.layers.length ?? 1) - 1)
+          ] as Record<string, unknown> | undefined
+          const xb = layer?.xbase as number[] | undefined
+          if (xb) s.setCustomBaseLive(xb[0] + dx, xb[1] + dy)
+        }
       }
     }
+    const up = (e: KeyboardEvent) => {
+      if (e.key.startsWith('Arrow')) useEditor.getState().commitEdit()
+    }
     window.addEventListener('keydown', down)
-    return () => window.removeEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    return () => {
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+    }
   }, [templateId])
 
   // 휠: ⌘/Ctrl+휠 = 줌 (캔버스 중심 기준), 휠 = 팬 — 비수동 리스너로 페이지 스크롤 차단
@@ -169,20 +192,20 @@ export default function Preview() {
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
       if (e.metaKey || e.ctrlKey) {
-        // 커서 기준 줌 — 커서 아래 지점이 화면에서 고정되도록 팬 보정
-        setZoom((z) => {
-          const z2 = Math.min(4, Math.max(0.25, z * (1 - e.deltaY * 0.01)))
-          const rect = wrapRef.current?.getBoundingClientRect()
-          if (rect) {
-            const cx = rect.left + rect.width / 2
-            const cy = rect.top + rect.height / 2
-            setPanState((p) => ({
-              x: p.x + ((z - z2) * (e.clientX - cx)) / z,
-              y: p.y + ((z - z2) * (e.clientY - cy)) / z,
-            }))
-          }
-          return z2
-        })
+        // 커서 기준 줌 — 커서 아래 지점이 화면에서 고정되도록 팬 보정.
+        // setState 업데이터 안에서 다른 setState 호출 금지 (StrictMode 이중 실행 시 보정 2배)
+        const z = zoomRef.current
+        const z2 = Math.min(4, Math.max(0.25, z * (1 - e.deltaY * 0.01)))
+        const rect = wrapRef.current?.getBoundingClientRect()
+        if (rect && z2 !== z) {
+          const cx = rect.left + rect.width / 2
+          const cy = rect.top + rect.height / 2
+          setPanState((p) => ({
+            x: p.x + ((z - z2) * (e.clientX - cx)) / z,
+            y: p.y + ((z - z2) * (e.clientY - cy)) / z,
+          }))
+        }
+        setZoom(z2)
       } else {
         setPanState((p) => ({ x: p.x - e.deltaX, y: p.y - e.deltaY }))
       }
@@ -240,6 +263,8 @@ export default function Preview() {
     const n = s.sourceData?.layers.length ?? 0
     const hits: number[] = []
     for (let i = 0; i < n; i++) {
+      // 숨김 레이어는 클릭/호버 대상에서 제외 (패널에서는 선택 가능)
+      if ((s.sourceData?.layers[i] as Record<string, unknown> | undefined)?.hd) continue
       const b = layerBase(i)
       if (!b || !s.sourceData) continue
       const [hw, hh] = layerHalf(i)
@@ -300,6 +325,22 @@ export default function Preview() {
   const openFile = (file: File) => {
     file.text().then((text) => {
       try {
+        // 프로젝트 세이브 파일 (.lmproj.json) — 세션 복원
+        const maybe = JSON.parse(text) as { app?: string; v?: number; sourceData?: unknown }
+        if (maybe?.app === 'lottiemaker' && maybe.v === 1 && maybe.sourceData) {
+          const s = useEditor.getState()
+          if (
+            s.past.length > 0 &&
+            !window.confirm('현재 작업을 프로젝트 파일 내용으로 교체할까요?')
+          )
+            return
+          s.restoreSession(maybe as Parameters<typeof s.restoreSession>[0])
+          return
+        }
+      } catch {
+        // JSON 파싱 실패 → 아래 parseLottie가 에러 메시지 처리
+      }
+      try {
         load(parseLottie(text), file.name)
       } catch (e) {
         alert((e as Error).message)
@@ -320,14 +361,16 @@ export default function Preview() {
       useEditor.getState().templateId !== '__custom' || !useEditor.getState().sourceData
     // 드롭 지점 → 캔버스 좌표 (세션 생성 전 rect 기준 — 새 세션이면 중앙 유지)
     const rect = wrapRef.current?.getBoundingClientRect()
-    addCustomLayer(payload, name)
-    if (first) useEditor.getState().setFileName(name)
+    let at: [number, number] | undefined
     if (rect) {
       const f = 512 / rect.width
-      const px = Math.max(0, Math.min(512, (clientX - rect.left) * f))
-      const py = Math.max(0, Math.min(512, (clientY - rect.top) * f))
-      nudgeCustomBase(px - 256, py - 256)
+      at = [
+        Math.max(0, Math.min(512, (clientX - rect.left) * f)),
+        Math.max(0, Math.min(512, (clientY - rect.top) * f)),
+      ]
     }
+    addCustomLayer(payload, name, at)
+    if (first) useEditor.getState().setFileName(name)
   }
 
   const handleDrop = (e: React.DragEvent) => {
@@ -391,6 +434,9 @@ export default function Preview() {
           setPanState({ x: d.px + (e.clientX - d.x), y: d.py + (e.clientY - d.y) })
         }}
         onPointerUp={() => {
+          panDrag.current = null
+        }}
+        onPointerCancel={() => {
           panDrag.current = null
         }}
       >
@@ -481,6 +527,48 @@ export default function Preview() {
                       }}
                     />
                   )}
+                  {selBox && !dragBox && (
+                    <>
+                      <button
+                        className="anchorbtn"
+                        title="앵커 포인트 조절"
+                        style={{
+                          left: `${((selBox.x + selBox.hw) / 512) * 100}%`,
+                          top: `${((selBox.y - selBox.hh) / 512) * 100}%`,
+                          transform: `translate(4px, -100%) scale(${1 / zoom})`,
+                        }}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setAnchorPop((v) => !v)
+                        }}
+                      >
+                        ⌖
+                      </button>
+                      {anchorPop &&
+                        (() => {
+                          // 포털 + 화면 좌표 — 캔버스 overflow에 안 잘리고 항상 전부 보이게
+                          const rect = wrapRef.current?.getBoundingClientRect()
+                          if (!rect) return null
+                          const W = 292
+                          const H = 220
+                          let px = rect.left + ((selBox.x + selBox.hw) / 512) * rect.width + 8
+                          let py = rect.top + ((selBox.y - selBox.hh) / 512) * rect.height + 26
+                          px = Math.max(8, Math.min(window.innerWidth - W - 8, px))
+                          py = Math.max(8, Math.min(window.innerHeight - H - 8, py))
+                          return createPortal(
+                            <div
+                              className="anchorpop anchorpop--fixed"
+                              style={{ left: px, top: py }}
+                              onPointerDown={(e) => e.stopPropagation()}
+                            >
+                              <AnchorControls />
+                            </div>,
+                            document.body,
+                          )
+                        })()}
+                    </>
+                  )}
                   {selBox && (
                     <div
                       className="selbox"
@@ -496,6 +584,7 @@ export default function Preview() {
                           <div
                             key={c}
                             className={`selhandle selhandle--${c}`}
+                            style={{ transform: `scale(${1 / zoom})` }}
                             onPointerDown={(e) => {
                               e.stopPropagation()
                               const rect = wrapRef.current?.getBoundingClientRect()
@@ -534,7 +623,7 @@ export default function Preview() {
                                 (e.clientY - rect.top) * d.f - d.by,
                               )
                               const px = Math.round(
-                                Math.min(480, Math.max(20, (d.startSize * dist) / d.startDist)),
+                                Math.min(480, Math.max(40, (d.startSize * dist) / d.startDist)),
                               )
                               useEditor.getState().setCustomSizeLive(px)
                             }}
@@ -542,6 +631,10 @@ export default function Preview() {
                               if (!resizeDrag.current) return
                               resizeDrag.current = null
                               ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+                              useEditor.getState().commitEdit()
+                            }}
+                            onPointerCancel={() => {
+                              resizeDrag.current = null
                               useEditor.getState().commitEdit()
                             }}
                           />
@@ -578,6 +671,7 @@ export default function Preview() {
                         const f = 512 / rect.width
                         const px = (e.clientX - rect.left) * f
                         const py = (e.clientY - rect.top) * f
+                        setAnchorPop(false)
                         // 프리뷰 중 클릭 → 편집 모드로 복귀 (정지 + 박스 표시)
                         if (useEditor.getState().playing) setPlaying(false)
                         const hit = pickLayer(px, py)
@@ -659,6 +753,20 @@ export default function Preview() {
                         useEditor.getState().setCustomBaseLive(last.tx, last.ty)
                         useEditor.getState().commitEdit()
                       }}
+                      onPointerCancel={() => {
+                        // 제스처 중단 — 스턱 드래그 방지, 진행분은 커밋
+                        setShowAllBoxes(false)
+                        dragStart.current = null
+                        dragLast.current = null
+                        setGuides({ v: null, h: null })
+                        setDragCoord(null)
+                        setDragBox(null)
+                        if (liveRaf.current !== null) {
+                          cancelAnimationFrame(liveRaf.current)
+                          liveRaf.current = null
+                        }
+                        useEditor.getState().commitEdit()
+                      }}
                     />
                   )}
                 </>
@@ -668,7 +776,9 @@ export default function Preview() {
         ) : (
           <div className="preview__empty">
             <p className="preview__empty-title">로티를 선택하거나 파일을 끌어다 놓으세요</p>
-            <p className="preview__empty-sub">왼쪽 템플릿 클릭 · JSON 드래그앤드롭</p>
+            <p className="preview__empty-sub">
+              왼쪽 템플릿 클릭 · JSON 드래그앤드롭 · 이미지(SVG/PNG)를 놓으면 커스텀 시작
+            </p>
             <button className="btn btn--secondary" onClick={() => fileInputRef.current?.click()}>
               JSON 파일 열기
             </button>
@@ -758,14 +868,20 @@ export default function Preview() {
 
       {templateId === '__custom' && mode === 'canvas' && animationData && (
         <Timeline
-          frameFrac={totalFrames ? frame / totalFrames : 0}
+          frameFrac={
+            (totalFrames || animationData.op - animationData.ip) > 0
+              ? frame / (totalFrames || animationData.op - animationData.ip)
+              : 0
+          }
           totalSec={durationSec(animationData)}
           onScrub={(frac, done) => {
             if (done) {
               setSeek(null)
             } else {
               setPlaying(false)
-              setSeek(frac * Math.max(1, totalFrames))
+              // 문서 기준 프레임 수 — 플레이어가 아직 보고 전이어도 스크럽 동작
+              const frames = Math.max(1, animationData.op - animationData.ip)
+              setSeek(frac * frames)
             }
           }}
         />

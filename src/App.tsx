@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useEditor } from './store'
+import { useEditor, loadLastSession } from './store'
 import TemplateGallery from './components/TemplateGallery'
 import Preview from './components/Preview'
 import ColorEditor from './components/ColorEditor'
@@ -14,6 +14,15 @@ type Tab = 'edit' | 'export'
 export default function App() {
   const { undo, redo, past, future, animationData } = useEditor()
   const [tab, setTab] = useState<Tab>('edit')
+
+  // 시작 시 자동 저장된 작업 복원 (한 번만)
+  useEffect(() => {
+    const s = useEditor.getState()
+    if (!s.animationData) {
+      const saved = loadLastSession()
+      if (saved) s.restoreSession(saved)
+    }
+  }, [])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -48,6 +57,7 @@ export default function App() {
           <span className="topbar__tag">로티, 빠르고 쉽게</span>
         </div>
         <div className="topbar__actions">
+          {animationData && <span className="topbar__saved">자동 저장됨</span>}
           <button className="btn btn--icon" onClick={undo} disabled={!past.length} title="실행 취소 (⌘Z)">
             ↩
           </button>

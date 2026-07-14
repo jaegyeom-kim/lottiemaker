@@ -55,6 +55,11 @@ export default function LottiePlayer({
       lastFrameRef.current = anim.currentFrame
       onFrameRef.current?.(anim.currentFrame, anim.totalFrames)
     }
+    // 일시정지 상태로 생성돼도 totalFrames를 즉시 보고 — 스크럽/타임라인이 죽지 않게
+    const ready = () => {
+      onFrameRef.current?.(anim.currentFrame, anim.totalFrames)
+    }
+    anim.addEventListener('DOMLoaded', ready)
     const completeHandler = () => {
       onCompleteRef.current?.()
     }
@@ -63,6 +68,7 @@ export default function LottiePlayer({
     animRef.current = anim
     return () => {
       anim.removeEventListener('enterFrame', handler)
+      anim.removeEventListener('DOMLoaded', ready)
       anim.removeEventListener('complete', completeHandler)
       anim.destroy()
       animRef.current = null

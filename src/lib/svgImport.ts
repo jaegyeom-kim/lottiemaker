@@ -8,6 +8,8 @@ export interface ImportedGraphic {
   items: unknown[]
   /** 원본 좌표계 기준 바운딩 박스 */
   bbox: { x: number; y: number; w: number; h: number }
+  /** 업로드 원문 SVG — 프로젝트 파일 내장/재사용용 (선택). */
+  svgText?: string
 }
 
 /** 래스터(PNG/JPG/WebP) 이미지 — 로티 이미지 에셋으로 임베드된다. */
@@ -441,7 +443,7 @@ export function svgToLottie(svgText: string): ImportedGraphic {
 
   visit(svg, ID, null, null)
   if (!items.length || minX === Infinity) throw new Error('변환 가능한 도형이 없습니다 (path/도형 요소 필요).')
-  return { items, bbox: { x: minX, y: minY, w: maxX - minX, h: maxY - minY } }
+  return { items, bbox: { x: minX, y: minY, w: maxX - minX, h: maxY - minY }, svgText }
 }
 
 /**

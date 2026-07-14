@@ -7,12 +7,15 @@ export default function AnchorPad({
   frac,
   onLive,
   onCommit,
+  maxH = 180,
 }: {
   dataUri: string
   aspect: number
   frac: [number, number]
   onLive: (fx: number, fy: number) => void
   onCommit: () => void
+  /** 패드 최대 높이 px — 레이아웃에 맞게 축소. */
+  maxH?: number
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const dragging = useRef(false)
@@ -29,8 +32,8 @@ export default function AnchorPad({
     <div
       ref={ref}
       className="anchorpad"
-      // 세로로 긴 이미지는 높이 180px 기준으로 폭 축소 — 레터박스 없이 패드 = 이미지 영역
-      style={{ aspectRatio: String(aspect), width: `min(100%, ${Math.round(180 * aspect)}px)` }}
+      // 세로로 긴 이미지는 maxH 기준으로 폭 축소 — 레터박스 없이 패드 = 이미지 영역
+      style={{ aspectRatio: String(aspect), width: `min(100%, ${Math.round(maxH * aspect)}px)`, maxHeight: maxH }}
       onPointerDown={(e) => {
         dragging.current = true
         e.currentTarget.setPointerCapture(e.pointerId)
@@ -42,6 +45,10 @@ export default function AnchorPad({
       onPointerUp={(e) => {
         dragging.current = false
         e.currentTarget.releasePointerCapture(e.pointerId)
+        onCommit()
+      }}
+      onPointerCancel={() => {
+        dragging.current = false
         onCommit()
       }}
     >

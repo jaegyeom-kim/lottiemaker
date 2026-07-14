@@ -1,9 +1,35 @@
 import { useState } from 'react'
-import { useEditor } from '../store'
+import { useEditor, type SavedSession } from '../store'
 import { bakeSpeed, download, durationSec } from '../lib/lottieUtils'
 
 export default function ExportPanel() {
   const { animationData, fileName, setFileName, speed } = useEditor()
+  const sourceData = useEditor((s) => s.sourceData)
+
+  // 프로젝트 세이브 파일 — 세션 전체(레이어/슬롯/노브/원본)를 담는다.
+  // app 마커로 로티 JSON과 구분, 드래그 드롭으로 다시 불러온다.
+  const saveProject = () => {
+    const s = useEditor.getState()
+    if (!s.sourceData) return
+    const payload: SavedSession & { app: string } = {
+      app: 'lottiemaker',
+      v: 1,
+      sourceData: s.sourceData,
+      pristineData: s.pristineData,
+      templateId: s.templateId,
+      templateKnobs: s.templateKnobs,
+      knobValues: s.knobValues,
+      fileName: s.fileName,
+      customIdx: s.customIdx,
+    }
+    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${s.fileName}.lmproj.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
   const [applySpeed, setApplySpeed] = useState(false)
   const [copied, setCopied] = useState<'json' | 'code' | null>(null)
 
@@ -68,6 +94,25 @@ lottie.loadAnimation({
       <button className="btn btn--secondary btn--full" onClick={copyCode}>
         {copied === 'code' ? '복사됨 ✓' : 'lottie-web 코드 복사'}
       </button>
+      {sourceData && (
+        <>
+          <button className="btn btn--secondary btn--full" onClick={saveProject} title="편집 가능한 프로젝트 파일 — 미리보기에 드롭하면 이어서 편집">
+            프로젝트 파일 저장 (.lmproj)
+          </button>
+          <p className="panel__hint">
+            {(() => {
+              const imgs = ((sourceData.assets as { p?: string }[] | undefined) ?? []).filter(
+                (a) => typeof a.p === 'string' && a.p.startsWith('data:'),
+              ).length
+              const svgs = sourceData.layers.filter(
+                (l) => typeof (l as Record<string, unknown>).xsrc === 'string',
+              ).length
+              const kb = (JSON.stringify(sourceData).length / 1024).toFixed(0)
+              return `에셋 내장: 이미지 ${imgs} · SVG 원본 ${svgs} · 약 ${kb}KB — 파일 하나로 완결`
+            })()}
+          </p>
+        </>
+      )}
 
       <h3 className="panel__label">스펙</h3>
       <ul className="spec">

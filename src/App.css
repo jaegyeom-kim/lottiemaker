@@ -1802,3 +1802,268 @@
   color: var(--text-dim);
   margin: 6px 0 -4px;
 }
+
+/* 채널 꺼짐 — 값은 보이되 비활성 시각화 (만지면 자동 활성) */
+.chan-off {
+  opacity: 0.45;
+}
+
+/* 타임라인 고스트 바 — 다른 레이어의 채널 구간 */
+.timeline__ghost {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border: 1px dashed rgb(139 143 154 / 0.5);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+/* 타임라인 슬롯 바 (등장/루프/퇴장) */
+.timeline__track--slots {
+  height: 24px;
+}
+
+.timeline__bar--in {
+  background: rgb(49 130 246 / 0.55);
+  border-color: var(--blue);
+}
+
+.timeline__bar--out {
+  background: rgb(240 68 82 / 0.4);
+  border-color: var(--red);
+}
+
+.timeline__bar--loop {
+  background: repeating-linear-gradient(
+    -45deg,
+    rgb(139 143 154 / 0.25) 0 6px,
+    rgb(139 143 154 / 0.1) 6px 12px
+  );
+  border: 1px solid rgb(139 143 154 / 0.4);
+  border-radius: 5px;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+
+.timeline__barlabel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  color: rgb(255 255 255 / 0.95);
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.7);
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.topbar__saved {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-right: 6px;
+}
+
+/* 클립 바 */
+.timeline__clip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgb(139 143 154 / 0.18);
+  border: 1px solid rgb(139 143 154 / 0.55);
+  border-radius: 5px;
+  cursor: grab;
+  touch-action: none;
+  min-width: 10px;
+  overflow: hidden;
+}
+
+.timeline__clip:active {
+  cursor: grabbing;
+}
+
+.timeline__seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+
+/* 등장 = 초록(시작), 퇴장 = 빨강(끝) — 레이어 팔레트에서 예약 제외된 전용 색.
+   램프 방향으로 페이드 형태도 표현. */
+.timeline__seg--in {
+  background: linear-gradient(90deg, rgb(46 204 113 / 0.25), rgb(46 204 113 / 0.75));
+  border-right: 1.5px solid #2ecc71;
+}
+
+.timeline__seg--out {
+  background: linear-gradient(90deg, rgb(231 76 60 / 0.75), rgb(231 76 60 / 0.25));
+  border-left: 1.5px solid #e74c3c;
+}
+
+.timeline__seg--loop {
+  background: repeating-linear-gradient(
+    -45deg,
+    rgb(0 0 0 / 0.22) 0 5px,
+    transparent 5px 10px
+  );
+}
+
+.timeline__barlabel--dim {
+  color: var(--text-dim);
+}
+
+
+.timeline__seg--drag {
+  pointer-events: auto;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+/* 멀티 레이어 타임라인 */
+.timeline__body--multi .timeline__tracks,
+.timeline__body--multi .timeline__labels {
+  max-height: 140px;
+}
+
+.timeline__body--multi {
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.timeline__label--row {
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  height: 24px;
+  width: 72px;
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.timeline__label--row:hover {
+  background: var(--bg-raise2);
+}
+
+.timeline__label--on {
+  color: var(--text);
+  background: var(--bg-raise2);
+}
+
+.timeline__clip--on {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 1px rgb(49 130 246 / 0.4);
+}
+
+.timeline__track--hidden {
+  opacity: 0.35;
+}
+
+/* 레이어 라벨 컬러 점 */
+.colordot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+  margin-right: 4px;
+}
+
+.timeline__label--row {
+  display: flex;
+  align-items: center;
+}
+
+/* 앵커 픽토그램 버튼 + 팝오버 */
+.anchorbtn {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: rgb(30 30 36 / 0.92);
+  border: 1px solid var(--line);
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1;
+  z-index: 7;
+  transform-origin: bottom left;
+  cursor: pointer;
+}
+
+.anchorbtn:hover {
+  color: var(--text);
+  border-color: var(--blue);
+}
+
+.anchorpop {
+  position: absolute;
+  width: 190px;
+}
+
+.anchorpop--fixed {
+  position: fixed;
+  width: 200px;
+  background: var(--bg-raise);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  z-index: 8;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+  transform-origin: top left;
+}
+
+/* 앵커 퀵설정 + 직접 조정 좌우 배치 (동일 크기) */
+.anchorrow {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.anchorgrid--big {
+  width: 128px;
+  height: 128px;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 6px;
+  padding: 8px;
+  margin-bottom: 0;
+  box-sizing: border-box;
+}
+
+.anchorgrid--big .anchorgrid__dot {
+  width: 100%;
+  height: 100%;
+}
+
+.anchorcell {
+  width: 128px;
+  height: 128px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: repeating-conic-gradient(#2a2a33 0 25%, #1e1e24 0 50%) 0 0 / 16px 16px;
+  overflow: hidden;
+}
+
+.anchorcell .anchorpad {
+  margin-top: 0;
+  border: none;
+  border-radius: 0;
+}
+
+.anchorcell__empty {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-align: center;
+  line-height: 1.6;
+}
+
+.anchorpop--fixed {
+  width: 292px;
+}

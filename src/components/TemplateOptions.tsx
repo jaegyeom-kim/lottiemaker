@@ -6,7 +6,8 @@ const GROUP_LABELS: Record<string, string> = { font: '폰트' }
 
 /** 템플릿 파라메트릭 옵션. 그룹이 있으면 탭으로 분리, 슬라이더 + 직접 입력 + 칩 + 폰트 드롭다운. */
 export default function TemplateOptions() {
-  const { sourceData, templateKnobs, knobValues, setKnobLive, resetTemplate, commitEdit } = useEditor()
+  const { sourceData, templateKnobs, knobValues, setKnobLive, resetTemplate, commitEdit, templateId } =
+    useEditor()
   const [tab, setTab] = useState('기본')
 
   // 템플릿 전환 시 탭 초기화
@@ -24,11 +25,13 @@ export default function TemplateOptions() {
   return (
     <div className="panel__section">
       <div className="panel__labelrow">
-        <h3 className="panel__label">템플릿 옵션</h3>
-        {/* 상시 노출 — 노브·색상·커스텀 그래픽·크기 전부 원본 복원 (undo 가능) */}
-        <button className="linkbtn" onClick={resetTemplate}>
-          초기화
-        </button>
+        <h3 className="panel__label">{templateId === '__custom' ? '재생 설정' : '템플릿 옵션'}</h3>
+        {/* 커스텀 모드에선 숨김 — 초기화가 레이어 작업 전체를 파기하므로 위험 */}
+        {templateId !== '__custom' && (
+          <button className="linkbtn" onClick={resetTemplate}>
+            초기화
+          </button>
+        )}
       </div>
       {tabs.length > 1 && (
         <div className="opttabs">

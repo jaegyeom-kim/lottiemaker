@@ -1,30 +1,30 @@
 import { useRef, useState } from 'react'
-import { useEditor } from '../store'
+import { useEditor, loadSavedSession } from '../store'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
-import AnchorPad from './AnchorPad'
 import {
-  POS_PRESETS,
-  DEFAULT_SEL,
+  IN_TYPES,
+  LOOP_TYPES,
+  OUT_TYPES,
+  normSel,
   type CustomSel,
   type CustomPayload,
 } from '../lib/customBuilder'
 
 /**
- * 커스텀 탭 — 그래픽(SVG/PNG)을 여러 장 올려 레이어로 쌓고,
- * 레이어별로 포지션/스케일/오퍼시티 프리셋을 조합한다. 위치는 프리뷰에서 직접 드래그.
+ * 커스텀 탭 — 그래픽(SVG/PNG)을 레이어로 쌓고, 레이어별로
+ * 등장/루프/퇴장 3슬롯(상용 모션 툴 방식)을 조합한다. 위치는 프리뷰에서 직접 드래그.
  */
 export default function CustomBuilder() {
   const {
     templateId, addCustomLayer,
     setCustomChannels, setCustomChannelsLive, setCustomSizeLive, nudgeCustomBase,
-    setCustomAnchor, setCustomAnchorLive, setFileName, commitEdit,
+    setFileName, commitEdit,
+    setCompLengthLive,
   } = useEditor()
   const sourceData = useEditor((s) => s.sourceData)
   const customIdx = useEditor((s) => s.customIdx)
   const [error, setError] = useState('')
   const [dragOver, setDragOver] = useState(false)
-  // 포지션 비활성화 시 마지막 프리셋 기억 — 다시 켜면 복원
-  const [lastPos, setLastPos] = useState(1)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const active = templateId === '__custom'
@@ -33,25 +33,28 @@ export default function CustomBuilder() {
   const selLayer = layers[idx] as
     | (Record<string, unknown> & { nm?: string; refId?: string })
     | undefined
-  // 부분 xsel(이전 버전 레이어) 방어 — 새 필드는 기본값으로 채움
-  const xsel: CustomSel = { ...DEFAULT_SEL, ...((selLayer?.xsel as Partial<CustomSel>) ?? {}) }
+  // 부분/구버전 xsel 방어 — normSel이 기본값 채움 + 구버전 이관
+  const compOp = (active && sourceData?.op) || 90
+  const xsel: CustomSel = normSel(selLayer?.xsel as Partial<CustomSel> | undefined, compOp)
 
-  // 선택 레이어 기준(정착) 위치 — xbase 우선
+  // 선택 레이어 기준(정착) 위치 — xbase
   let base: [number, number] | null = null
   if (selLayer) {
-    if (Array.isArray(selLayer.xbase)) {
-      base = [(selLayer.xbase as number[])[0], (selLayer.xbase as number[])[1]]
-    } else {
-      const p = (selLayer.ks as Record<string, unknown>).p as { a?: number; k: unknown }
-      base =
-        p.a === 1
-          ? [(p.k as { s: number[] }[]).at(-1)!.s[0], (p.k as { s: number[] }[]).at(-1)!.s[1]]
-          : [(p.k as number[])[0], (p.k as number[])[1]]
-    }
+    base = Array.isArray(selLayer.xbase)
+      ? [(selLayer.xbase as number[])[0], (selLayer.xbase as number[])[1]]
+      : [256, 256]
   }
 
   const onFiles = async (files: FileList | File[]) => {
+    // 편집된 템플릿 위에 커스텀 세션을 시작하면 템플릿 작업이 파기됨 — 확인
+    const s0 = useEditor.getState()
+    if (
+      s0.templateId && s0.templateId !== '__custom' && s0.past.length > 0 &&
+      !window.confirm('편집 중인 템플릿 작업이 사라집니다. 커스텀을 시작할까요?')
+    )
+      return
     setError('')
+    const errors: string[] = []
     for (const file of files) {
       try {
         let payload: CustomPayload
@@ -71,13 +74,10 @@ export default function CustomBuilder() {
         addCustomLayer(payload, name)
         if (first) setFileName(name)
       } catch (e) {
-        setError((e as Error).message)
+        errors.push((e as Error).message)
       }
     }
-  }
-
-  const pickChannel = (key: 'pos', i: number) => {
-    setCustomChannels({ ...xsel, [key]: i })
+    if (errors.length) setError(errors.join(' · '))
   }
 
   return (
@@ -116,136 +116,208 @@ export default function CustomBuilder() {
       />
       {error && <p className="panel__error">{error}</p>}
 
+      {!active && loadSavedSession('custom') && (
+        <button
+          className="btn btn--secondary btn--full"
+          onClick={() => {
+            const saved = loadSavedSession('custom')
+            if (saved) useEditor.getState().restoreSession(saved)
+          }}
+        >
+          이전 커스텀 작업 이어하기
+        </button>
+      )}
+
       {active && selLayer && (
         <>
+          <h4 className="grouphead">컴포지션</h4>
+          <div className="knob">
+            {/* AE 컴프 길이 — 레이어 클립/키프레임은 절대 시간 유지 */}
+            <SliderRow
+              label="재생 길이"
+              min={0.5}
+              max={6}
+              step={0.1}
+              unit="s"
+              value={compOp / 60}
+              onLive={(v) => setCompLengthLive(v)}
+              onCommit={commitEdit}
+            />
+            <p className="knob__note">길이를 늘려도 각 레이어의 애니메이션 타이밍은 그대로입니다.</p>
+          </div>
+
           <h4 className="grouphead">애니메이션</h4>
+
+          {/* 등장 (In) */}
           <div className="knob">
             <div className="knob__head">
-              <span className="knob__name">포지션</span>
-              <label className="check check--inline">
-                <input
-                  type="checkbox"
-                  checked={xsel.pos !== 0}
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      setCustomChannels({ ...xsel, pos: lastPos })
-                    } else {
-                      setLastPos(xsel.pos || 1)
-                      setCustomChannels({ ...xsel, pos: 0 })
-                    }
-                  }}
-                />
-                활성화
-              </label>
+              <span className="knob__name">등장</span>
             </div>
             <div className="knob__chips">
-              {POS_PRESETS.slice(1).map((label, i) => (
+              {IN_TYPES.map((label, i) => (
                 <button
                   key={label}
-                  className={`chip ${xsel.pos === i + 1 ? 'chip--on' : ''}`}
-                  onClick={() => pickChannel('pos', i + 1)}
+                  className={`chip ${xsel.in.type === i ? 'chip--on' : ''}`}
+                  onClick={() => setCustomChannels({ ...xsel, in: { ...xsel.in, type: i } })}
                 >
                   {label}
                 </button>
               ))}
             </div>
-            <SliderRow
-              label="이동량"
-              min={8}
-              max={300}
-              step={2}
-              unit="px"
-              value={xsel.amount}
-              onLive={(v) => setCustomChannelsLive({ ...xsel, amount: v })}
-              onCommit={commitEdit}
-            />
+            {xsel.in.type > 0 && (
+              <>
+                <SliderRow
+                  label="시간"
+                  min={0.1}
+                  max={1.2}
+                  step={0.05}
+                  unit="s"
+                  value={xsel.in.dur / 60}
+                  onLive={(v) =>
+                    setCustomChannelsLive({ ...xsel, in: { ...xsel.in, dur: Math.round(v * 60) } })
+                  }
+                  onCommit={commitEdit}
+                />
+                {((xsel.in.type >= 2 && xsel.in.type <= 5) || xsel.in.type === 7) && (
+                  <SliderRow
+                    label="거리"
+                    min={10}
+                    max={400}
+                    step={5}
+                    unit="px"
+                    value={xsel.in.dist}
+                    onLive={(v) => setCustomChannelsLive({ ...xsel, in: { ...xsel.in, dist: v } })}
+                    onCommit={commitEdit}
+                  />
+                )}
+                {xsel.in.type !== 1 && xsel.in.type !== 7 && (
+                  <label className="check" style={{ marginTop: 8 }}>
+                    <input
+                      type="checkbox"
+                      checked={xsel.in.bounce !== 0}
+                      onChange={(e) =>
+                        setCustomChannels({
+                          ...xsel,
+                          in: { ...xsel.in, bounce: e.target.checked ? 1 : 0 },
+                        })
+                      }
+                    />
+                    바운스 (오버슈트)
+                  </label>
+                )}
+              </>
+            )}
           </div>
 
+          {/* 루프 (Loop) */}
           <div className="knob">
             <div className="knob__head">
-              <span className="knob__name">스케일</span>
-              <label className="check check--inline">
-                <input
-                  type="checkbox"
-                  checked={(xsel.scaleOn ?? 0) !== 0}
-                  onChange={(e) => setCustomChannels({ ...xsel, scaleOn: e.target.checked ? 1 : 0 })}
-                />
-                활성화
-              </label>
+              <span className="knob__name">루프</span>
             </div>
-            <SliderRow
-              label="시작 스케일"
-              min={0}
-              max={300}
-              step={5}
-              unit="%"
-              value={xsel.scaleFrom}
-              onLive={(v) => setCustomChannelsLive({ ...xsel, scaleOn: 1, scaleFrom: v })}
-              onCommit={commitEdit}
-            />
-            <SliderRow
-              label="끝 스케일"
-              min={0}
-              max={300}
-              step={5}
-              unit="%"
-              value={xsel.scaleTo}
-              onLive={(v) => setCustomChannelsLive({ ...xsel, scaleOn: 1, scaleTo: v })}
-              onCommit={commitEdit}
-            />
-            <label className="check" style={{ marginTop: 8 }}>
-              <input
-                type="checkbox"
-                checked={xsel.scaleBounce !== 0}
-                onChange={(e) => setCustomChannels({ ...xsel, scaleBounce: e.target.checked ? 1 : 0 })}
-              />
-              바운싱 (오버슈트 후 정착)
-            </label>
+            <div className="knob__chips">
+              {LOOP_TYPES.map((label, i) => (
+                <button
+                  key={label}
+                  className={`chip ${xsel.loop.type === i ? 'chip--on' : ''}`}
+                  onClick={() => setCustomChannels({ ...xsel, loop: { ...xsel.loop, type: i } })}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {xsel.loop.type > 0 && (
+              <>
+                {xsel.loop.type !== 4 && (
+                  <SliderRow
+                    label="세기"
+                    min={2}
+                    max={xsel.loop.type === 2 ? 60 : 200}
+                    step={2}
+                    unit={xsel.loop.type === 2 ? '%' : 'px'}
+                    value={xsel.loop.amount}
+                    onLive={(v) =>
+                      setCustomChannelsLive({ ...xsel, loop: { ...xsel.loop, amount: v } })
+                    }
+                    onCommit={commitEdit}
+                  />
+                )}
+                <SliderRow
+                  label="주기"
+                  min={0.2}
+                  max={1.5}
+                  step={0.05}
+                  unit="s"
+                  value={xsel.loop.period / 60}
+                  onLive={(v) =>
+                    setCustomChannelsLive({
+                      ...xsel,
+                      loop: { ...xsel.loop, period: Math.round(v * 60) },
+                    })
+                  }
+                  onCommit={commitEdit}
+                />
+              </>
+            )}
           </div>
 
+          {/* 퇴장 (Out) */}
           <div className="knob">
             <div className="knob__head">
-              <span className="knob__name">오퍼시티</span>
-              <label className="check check--inline">
-                <input
-                  type="checkbox"
-                  checked={(xsel.fadeOn ?? 0) !== 0}
-                  onChange={(e) => setCustomChannels({ ...xsel, fadeOn: e.target.checked ? 1 : 0 })}
-                />
-                활성화
-              </label>
+              <span className="knob__name">퇴장</span>
             </div>
-            <SliderRow
-              label="시작 값"
-              min={0}
-              max={100}
-              step={1}
-              unit="%"
-              value={xsel.fadeFrom ?? 0}
-              onLive={(v) => setCustomChannelsLive({ ...xsel, fadeOn: 1, fadeFrom: v })}
-              onCommit={commitEdit}
-            />
-            <SliderRow
-              label="끝 값"
-              min={0}
-              max={100}
-              step={1}
-              unit="%"
-              value={xsel.fadeTo ?? 100}
-              onLive={(v) => setCustomChannelsLive({ ...xsel, fadeOn: 1, fadeTo: v })}
-              onCommit={commitEdit}
-            />
-            {(xsel.fadeOn ?? 0) === 0 && (
-              <SliderRow
-                label="불투명도"
-                min={0}
-                max={100}
-                step={1}
-                unit="%"
-                value={xsel.opacity}
-                onLive={(v) => setCustomChannelsLive({ ...xsel, opacity: v })}
-                onCommit={commitEdit}
-              />
+            <div className="knob__chips">
+              {OUT_TYPES.map((label, i) => (
+                <button
+                  key={label}
+                  className={`chip ${xsel.out.type === i ? 'chip--on' : ''}`}
+                  onClick={() => setCustomChannels({ ...xsel, out: { ...xsel.out, type: i } })}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {xsel.out.type > 0 && (
+              <>
+                <SliderRow
+                  label="시간"
+                  min={0.1}
+                  max={1.0}
+                  step={0.05}
+                  unit="s"
+                  value={xsel.out.dur / 60}
+                  onLive={(v) =>
+                    setCustomChannelsLive({ ...xsel, out: { ...xsel.out, dur: Math.round(v * 60) } })
+                  }
+                  onCommit={commitEdit}
+                />
+                {xsel.out.type >= 2 && xsel.out.type <= 5 && (
+                  <SliderRow
+                    label="거리"
+                    min={10}
+                    max={400}
+                    step={5}
+                    unit="px"
+                    value={xsel.out.dist}
+                    onLive={(v) => setCustomChannelsLive({ ...xsel, out: { ...xsel.out, dist: v } })}
+                    onCommit={commitEdit}
+                  />
+                )}
+                {xsel.out.type !== 1 && (
+                  <label className="check" style={{ marginTop: 8 }}>
+                    <input
+                      type="checkbox"
+                      checked={xsel.out.bounce !== 0}
+                      onChange={(e) =>
+                        setCustomChannels({
+                          ...xsel,
+                          out: { ...xsel.out, bounce: e.target.checked ? 1 : 0 },
+                        })
+                      }
+                    />
+                    바운스 (윈드업 — 당겼다가 나감)
+                  </label>
+                )}
+              </>
             )}
           </div>
 
@@ -277,38 +349,16 @@ export default function CustomBuilder() {
           </div>
 
           <div className="knob">
-            <div className="knob__head">
-              <span className="knob__name">앵커 포인트</span>
-              <span className="knob__unit">
-                {Math.round((xsel.anchor?.[0] ?? 0.5) * 100)}% · {Math.round((xsel.anchor?.[1] ?? 0.5) * 100)}%
-              </span>
-            </div>
-            {/* AE식 9점 그리드 — 회전·스케일 기준점 */}
-            <div className="anchorgrid">
-              {[0, 0.5, 1].map((fy) =>
-                [0, 0.5, 1].map((fx) => {
-                  const cur = xsel.anchor ?? [0.5, 0.5]
-                  const on = Math.abs(cur[0] - fx) < 0.02 && Math.abs(cur[1] - fy) < 0.02
-                  return (
-                    <button
-                      key={`${fx}-${fy}`}
-                      className={`anchorgrid__dot ${on ? 'anchorgrid__dot--on' : ''}`}
-                      onClick={() => setCustomAnchor(fx, fy)}
-                    />
-                  )
-                }),
-              )}
-            </div>
-            {selLayer?.refId && sourceData && (
-              <AnchorPadForLayer
-                sourceData={sourceData}
-                refId={String(selLayer.refId)}
-                frac={xsel.anchor ?? [0.5, 0.5]}
-                onLive={setCustomAnchorLive}
-                onCommit={commitEdit}
-              />
-            )}
-            <p className="knob__note">그래픽은 제자리 — 회전·스케일 피벗만 바뀝니다.</p>
+            <SliderRow
+              label="불투명도"
+              min={0}
+              max={100}
+              step={1}
+              unit="%"
+              value={xsel.opacity}
+              onLive={(v) => setCustomChannelsLive({ ...xsel, opacity: v })}
+              onCommit={commitEdit}
+            />
           </div>
 
           {base && (
@@ -333,8 +383,8 @@ export default function CustomBuilder() {
 
       <p className="panel__hint">
         {active
-          ? '미리보기에서 클릭으로 레이어 선택, 드래그로 이동. 레이어 관리는 오른쪽 레이어 패널.'
-          : '그래픽을 올리면 프리셋을 조합해 애니메이션을 만듭니다. 여러 장 올리면 레이어로 쌓입니다.'}
+          ? '등장·루프·퇴장을 조합하세요. 타이밍은 아래 타임라인에서 밀고 당기기.'
+          : '그래픽을 올리면 등장/루프/퇴장을 조합해 애니메이션을 만듭니다. 여러 장 올리면 레이어로 쌓입니다.'}
       </p>
     </div>
   )
@@ -353,7 +403,6 @@ function PosInput({
   const rounded = Math.round(value * 10) / 10
   const [draft, setDraft] = useState(String(rounded))
   const [focused, setFocused] = useState(false)
-  // 포커스 없을 때만 외부 값 반영 — 입력 중 덮어쓰기 방지
   const shown = focused ? draft : String(rounded)
 
   const commit = () => {
@@ -383,29 +432,6 @@ function PosInput({
   )
 }
 
-/** 이미지 레이어용 앵커 드래그 패드 래퍼 — 에셋에서 dataUri/비율 조회. */
-function AnchorPadForLayer({
-  sourceData,
-  refId,
-  frac,
-  onLive,
-  onCommit,
-}: {
-  sourceData: { assets?: unknown }
-  refId: string
-  frac: [number, number]
-  onLive: (fx: number, fy: number) => void
-  onCommit: () => void
-}) {
-  const asset = (sourceData.assets as Record<string, unknown>[] | undefined)?.find(
-    (a) => a.id === refId,
-  ) as { p?: string; w?: number; h?: number } | undefined
-  if (!asset?.p || !asset.w || !asset.h) return null
-  return (
-    <AnchorPad dataUri={asset.p} aspect={asset.w / asset.h} frac={frac} onLive={onLive} onCommit={onCommit} />
-  )
-}
-
 /** 슬라이더 + 수치 직접 입력 — 슬라이더는 라이브, 입력은 blur/Enter 커밋. */
 function SliderRow({
   label,
@@ -427,14 +453,16 @@ function SliderRow({
   onCommit: () => void
 }) {
   const [draft, setDraft] = useState<string | null>(null)
+  const decimals = step < 1 ? 2 : 0
+  const shownValue = Number(value.toFixed(decimals))
 
   const commitDraft = () => {
     if (draft === null) return
     const v = Number(draft)
     setDraft(null)
     if (Number.isFinite(v)) {
-      const clamped = Math.min(max, Math.max(min, Math.round(v)))
-      if (clamped !== value) {
+      const clamped = Number(Math.min(max, Math.max(min, v)).toFixed(decimals))
+      if (clamped !== shownValue) {
         onLive(clamped)
         onCommit()
       }
@@ -451,7 +479,7 @@ function SliderRow({
             min={min}
             max={max}
             step={step}
-            value={draft ?? String(value)}
+            value={draft ?? String(shownValue)}
             onChange={(e) => setDraft(e.target.value)}
             onBlur={commitDraft}
             onKeyDown={(e) => {
@@ -466,7 +494,7 @@ function SliderRow({
         min={min}
         max={max}
         step={step}
-        value={value}
+        value={shownValue}
         onChange={(e) => onLive(Number(e.target.value))}
         onPointerUp={onCommit}
         onKeyUp={onCommit}

@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { useEditor } from '../store'
 import { getLayers } from '../lib/lottieUtils'
+import { layerColor } from '../lib/customBuilder'
 
 export default function LayerPanel() {
   const { animationData, templateId } = useEditor()
@@ -83,6 +84,10 @@ function CustomLayerPanel() {
               ].join(' ')}
               onClick={() => setCustomIdx(i)}
             >
+              <span
+                className="colordot"
+                style={{ background: layerColor(lr, i) }}
+              />
               {thumb ? (
                 <img className="layerrow__thumb" src={thumb} alt="" />
               ) : (
@@ -125,7 +130,7 @@ function CustomLayerPanel() {
                   toggleLayer(i)
                 }}
               >
-                {lr.hd ? '−' : '👁'}
+                {lr.hd ? '◌' : '●'}
               </button>
               <button
                 className="layerrow__btn"
@@ -182,6 +187,10 @@ function CustomLayerPanel() {
                   const cur = drag
                   setDrag(null)
                   if (d && cur && cur.to !== d.from) reorderCustomLayer(d.from, cur.to)
+                }}
+                onPointerCancel={() => {
+                  dragRef.current = null
+                  setDrag(null)
                 }}
               >
                 ≡
