@@ -1935,6 +1935,48 @@
   color: #e5a34d;
 }
 
+/* 테마 전환 토스트 — 상단 중앙, 잠깐 표시 후 사라짐 */
+.themetoast {
+  position: fixed;
+  top: 68px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--bg-raise);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.25);
+  z-index: 60;
+  pointer-events: none;
+  animation: themetoast-in 1.6s ease forwards;
+}
+
+.themetoast__icon {
+  font-size: 15px;
+}
+
+@keyframes themetoast-in {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+  10%,
+  80% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -4px);
+  }
+}
+
 /* 클립 바 */
 .timeline__clip {
   position: absolute;

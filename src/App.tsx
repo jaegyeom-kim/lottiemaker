@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useEditor, loadLastSession } from './store'
 import TemplateGallery from './components/TemplateGallery'
 import Preview from './components/Preview'
@@ -17,7 +17,7 @@ type ThemePref = 'dark' | 'light' | 'system'
 const THEME_KEY = 'lottiemaker.theme'
 const THEME_NEXT: Record<ThemePref, ThemePref> = { system: 'light', light: 'dark', dark: 'system' }
 const THEME_ICON: Record<ThemePref, string> = { system: '◐', light: '☀︎', dark: '☾︎' }
-const THEME_LABEL: Record<ThemePref, string> = { system: '시스템 설정', light: '라이트', dark: '다크' }
+const THEME_LABEL: Record<ThemePref, string> = { system: '시스템 설정', light: '라이트 모드', dark: '다크 모드' }
 
 /** 저장된 설정 없으면 시스템 따라가기 (구버전 'light'/'dark' 저장값도 그대로 존중). */
 function initialThemePref(): ThemePref {
@@ -35,6 +35,17 @@ export default function App() {
   const saveStatus = useEditor((s) => s.saveStatus)
   const [tab, setTab] = useState<Tab>('edit')
   const [themePref, setThemePref] = useState<ThemePref>(initialThemePref)
+  // 테마 전환 피드백 토스트 — 뭘 선택했는지 잠깐 표시 후 자동 소멸
+  const [themeToast, setThemeToast] = useState<{ pref: ThemePref; id: number } | null>(null)
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  const cycleTheme = () => {
+    const next = THEME_NEXT[themePref]
+    setThemePref(next)
+    setThemeToast({ pref: next, id: Date.now() })
+    clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setThemeToast(null), 1600)
+  }
 
   useEffect(() => {
     const mq = window.matchMedia?.('(prefers-color-scheme: light)')
@@ -108,7 +119,7 @@ export default function App() {
           )}
           <button
             className="btn btn--icon"
-            onClick={() => setThemePref(THEME_NEXT[themePref])}
+            onClick={cycleTheme}
             title={`테마: ${THEME_LABEL[themePref]} — 클릭하면 ${THEME_LABEL[THEME_NEXT[themePref]]}`}
           >
             {THEME_ICON[themePref]}
@@ -121,6 +132,17 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      {themeToast && (
+        <div className="themetoast" key={themeToast.id}>
+          <span className="themetoast__icon">{THEME_ICON[themeToast.pref]}</span>
+          <span>
+            {THEME_LABEL[themeToast.pref]}
+            {themeToast.pref === 'system' &&
+              ` · 현재 ${window.matchMedia?.('(prefers-color-scheme: light)').matches ? '라이트' : '다크'}`}
+          </span>
+        </div>
+      )}
 
       <main className="layout">
         <TemplateGallery />
