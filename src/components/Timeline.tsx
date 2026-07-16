@@ -22,6 +22,7 @@ export default function Timeline({
   const { setCustomChannelsLive, commitEdit, setPlaying, setCustomIdx } = useEditor()
   const sourceData = useEditor((s) => s.sourceData)
   const customIdx = useEditor((s) => s.customIdx)
+  const customIdxs = useEditor((s) => s.customIdxs)
   const trackRef = useRef<HTMLDivElement>(null)
   const drag = useRef<{
     li: number
@@ -187,7 +188,14 @@ export default function Timeline({
           {layers.map((l, li) => (
             <div
               key={li}
-              className={`timeline__label timeline__label--row ${li === idx ? 'timeline__label--on' : ''}`}
+              className={`timeline__label timeline__label--row ${
+                li === idx && customIdxs.includes(li) ? 'timeline__label--on' : ''
+              } ${li !== idx && customIdxs.includes(li) ? 'timeline__label--multi' : ''}`}
+              style={
+                customIdxs.includes(li)
+                  ? { boxShadow: `inset 2.5px 0 0 ${layerColor(l as Record<string, unknown>, li)}` }
+                  : undefined
+              }
               title={String(l.nm ?? '')}
               onClick={() => setCustomIdx(li)}
             >
@@ -252,18 +260,25 @@ export default function Timeline({
             const outW = spans.clipB - spans.outStart
             const hidden = (l as Record<string, unknown>).hd === true
             const color = layerColor(l as Record<string, unknown>, li)
+            const isPrimary = li === idx && customIdxs.includes(li)
+            const isMulti = li !== idx && customIdxs.includes(li)
             return (
               <div
                 key={li}
-                className={`timeline__track timeline__track--slots ${hidden ? 'timeline__track--hidden' : ''}`}
+                className={`timeline__track timeline__track--slots ${hidden ? 'timeline__track--hidden' : ''} ${
+                  isPrimary || isMulti ? 'timeline__track--sel' : ''
+                }`}
               >
                 <div
-                  className={`timeline__clip ${li === idx ? 'timeline__clip--on' : ''}`}
+                  className={`timeline__clip ${isPrimary ? 'timeline__clip--on' : ''} ${
+                    isMulti ? 'timeline__clip--multi' : ''
+                  }`}
                   style={{
                     left: pct(spans.clipA),
                     width: pct(clipLen),
-                    background: tint(color, 0.28),
-                    borderColor: li === idx ? undefined : tint(color, 0.75),
+                    background: tint(color, isPrimary ? 0.55 : isMulti ? 0.4 : 0.22),
+                    borderColor: isPrimary ? '#fff' : tint(color, isMulti ? 0.95 : 0.6),
+                    boxShadow: isPrimary ? `0 0 0 1.5px ${tint(color, 0.65)}, 0 0 10px ${tint(color, 0.5)}` : undefined,
                   }}
                   onPointerDown={(e) => beginDrag(e, li, 'move')}
                   onPointerMove={moveDrag}

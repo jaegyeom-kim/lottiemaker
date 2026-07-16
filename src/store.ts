@@ -5,6 +5,7 @@ import { toggleLayer as toggleLayerUtil, resize as resizeUtil } from './lib/lott
 import { applyKnobs, type TemplateKnob } from './lib/lottieKnobs'
 import {
   buildAnimKs, buildCustomDoc, buildCustomLayer, animSpans, normSel,
+  layerHalfOf, layerCenterOffsetOf,
   CUSTOM_ASSET_PREFIX, DEFAULT_SEL, type CustomSel, type CustomPayload,
 } from './lib/customBuilder'
 
@@ -15,11 +16,13 @@ const HISTORY_CAP = 50
  * data만 저장하면 undo 후 노브 조작이 어긋난다 — 셋을 함께 스냅샷.
  */
 interface Snapshot {
-  data: LottieJson
+  /** null = 빈 작업공간(커스텀 전체 삭제 등) — undo/redo가 빈 상태를 오갈 수 있어야 한다. */
+  data: LottieJson | null
   source: LottieJson | null
   knobValues: Record<string, number | string>
   templateKnobs: TemplateKnob[]
   customIdx: number
+  customIdxs?: number[]
   templateId: string | null
 }
 
@@ -42,6 +45,33 @@ const SAVE_KEYS: Record<SaveKind, string> = {
 }
 const LAST_KEY = 'lottiemaker.session.last'
 
+/** 모드별 작업공간 스냅샷 — 탭 전환 시 통째로 스왑되어 어느 쪽 작업도 사라지지 않는다. */
+interface Workspace {
+  animationData: LottieJson | null
+  fileName: string
+  colorGroups: ColorGroup[]
+  past: Snapshot[]
+  future: Snapshot[]
+  sourceData: LottieJson | null
+  pristineData: LottieJson | null
+  templateKnobs: TemplateKnob[]
+  knobValues: Record<string, number | string>
+  templateId: string | null
+  customIdx: number
+  customIdxs: number[]
+  loop: boolean
+}
+const modeStash: Record<SaveKind, Workspace | null> = { template: null, custom: null }
+
+/** 시작 모드 — 마지막으로 작업한 쪽. 저장 기록이 없으면 템플릿 갤러리. */
+function initialMode(): SaveKind {
+  try {
+    return localStorage.getItem(LAST_KEY) === 'custom' ? 'custom' : 'template'
+  } catch {
+    return 'template'
+  }
+}
+
 /** 저장된 세션 읽기 — 손상/버전 불일치는 무시. */
 export function loadSavedSession(kind: SaveKind): SavedSession | null {
   try {
@@ -55,10 +85,13 @@ export function loadSavedSession(kind: SaveKind): SavedSession | null {
   }
 }
 
-/** 마지막으로 작업한 쪽 우선, 없으면 다른 쪽. */
+/**
+ * 마지막으로 작업한 모드의 세션만 — 다른 모드로 넘어가지 않는다.
+ * (반대 모드의 작업은 탭 전환 시 setMode가 슬롯에서 복원하므로 유실 없음.
+ *  넘어가면 새로고침 후 첫 화면의 탭·캔버스가 마지막 상태와 어긋난다.)
+ */
 export function loadLastSession(): SavedSession | null {
-  const last = (localStorage.getItem(LAST_KEY) as SaveKind | null) ?? 'custom'
-  return loadSavedSession(last) ?? loadSavedSession(last === 'custom' ? 'template' : 'custom')
+  return loadSavedSession(initialMode())
 }
 
 interface EditorState {
@@ -78,6 +111,10 @@ interface EditorState {
   knobValues: Record<string, number | string>
   /** 로드된 템플릿 id — 커스텀 그래픽 슬롯 조회용. 파일 로드 시 null. */
   templateId: string | null
+  /** 작업 모드 — 사이드바 탭·캔버스·우측 패널이 전부 이 값 하나로 갈린다. */
+  mode: SaveKind
+  /** 자동 저장 결과 — saved: 기록됨 / skipped: 저장 대상 아님 / blocked: 용량 초과 등 실패. */
+  saveStatus: 'saved' | 'skipped' | 'blocked'
 
   // 재생 상태 (파일에는 저장 안 됨)
   playing: boolean
@@ -89,6 +126,8 @@ interface EditorState {
 
   loadTemplate: (data: LottieJson, id: string, knobs: TemplateKnob[]) => void
   load: (data: LottieJson, fileName: string) => void
+  /** 모드 전환 — 현재 작업공간을 보관하고 대상 모드의 작업공간(스태시 → 저장 슬롯 순)으로 스왑. */
+  setMode: (m: SaveKind) => void
   /** 자동 저장된 세션 복원 — 앱 시작 시 1회. */
   restoreSession: (s: SavedSession) => void
   setColorLive: (group: ColorGroup, hex: string) => void
@@ -106,9 +145,17 @@ interface EditorState {
   setImageAnchorLive: (match: string, fx: number, fy: number) => void
   /** 슬롯을 원본 레이어 기준으로 복원 — 셰이프/레이어 타입/앵커, 이미지 에셋 제거까지. */
   restoreSlot: (match: string, byName: Record<string, LottieLayer>) => void
-  /** 커스텀 빌더: 선택된 레이어 인덱스 (layers 배열 기준, 0 = 맨 위). */
+  /** 커스텀 빌더: 주 선택 레이어 인덱스 (layers 배열 기준, 0 = 맨 위). */
   customIdx: number
+  /** 다중 선택 — 항상 customIdx 포함. 이동/삭제/정렬은 전체, 속성 편집은 주 선택. */
+  customIdxs: number[]
   setCustomIdx: (i: number) => void
+  /** Shift/⌘ 클릭 — 선택 토글. */
+  toggleCustomSel: (i: number) => void
+  /** 빈 곳 클릭 — 선택 해제. */
+  deselectCustom: () => void
+  /** 다중 레이어 삭제 (인덱스 목록). */
+  removeCustomLayers: (idxs: number[]) => void
   /** 커스텀 빌더: 그래픽 추가 — 세션 없으면 새 문서, 있으면 맨 위 레이어로. at = 배치 좌표. */
   addCustomLayer: (payload: CustomPayload, name: string, at?: [number, number]) => void
   /** 커스텀 빌더: 레이어 삭제 (에셋 포함). 마지막 레이어면 편집기 비움. */
@@ -121,8 +168,10 @@ interface EditorState {
   setCustomSizeLive: (px: number) => void
   /** 커스텀 빌더: 레이어를 from에서 to 위치로 이동 (드래그 재정렬). */
   reorderCustomLayer: (from: number, to: number) => void
-  /** 커스텀 빌더: 레이어 복제 — 에셋 공유, +12px 오프셋, 원본 위에 삽입. */
-  duplicateCustomLayer: (i: number) => void
+  /** 커스텀 빌더: 레이어 복제 — 에셋 분리, offset px 이동, 원본 위에 삽입. */
+  duplicateCustomLayer: (i: number, offset?: number) => void
+  /** 진행 중인 라이브 편집 취소 — editBaseline 시점으로 복원 (Esc). */
+  cancelEdit: () => void
   /** 커스텀 빌더: 레이어 이름 변경. */
   renameCustomLayer: (i: number, name: string) => void
   /** 커스텀 빌더: 선택 레이어 기준 위치 이동(px). */
@@ -131,6 +180,13 @@ interface EditorState {
   setCustomBaseLive: (x: number, y: number) => void
   /** 커스텀 빌더: 선택 레이어 크기(긴 변 px) 변경. */
   setCustomSize: (px: number) => void
+  /** 커스텀: 선택 레이어 정렬 (일러 Align) — basis: 캔버스 또는 선택 영역(합집합 바운드). 선택 없으면 무시. */
+  alignCustom: (
+    mode: 'left' | 'hc' | 'right' | 'top' | 'vc' | 'bottom',
+    basis?: 'canvas' | 'selection',
+  ) => void
+  /** 커스텀: 균등 분배 — 3개 이상 선택 시 선택끼리, 아니면 전체 레이어. */
+  distributeCustom: (axis: 'h' | 'v') => void
   /** 커스텀 컴포지션 길이(초) — AE 컴프처럼 키프레임/클립은 절대 시간 유지. */
   setCompLength: (sec: number) => void
   setCompLengthLive: (sec: number) => void
@@ -150,22 +206,49 @@ interface EditorState {
 }
 
 export const useEditor = create<EditorState>((set, get) => {
-  const snap = (): Snapshot | null => {
+  const snap = (): Snapshot => {
     const { animationData, sourceData, knobValues, templateKnobs, customIdx, templateId } = get()
-    return animationData
-      ? { data: animationData, source: sourceData, knobValues, templateKnobs, customIdx, templateId }
-      : null
+    return {
+      data: animationData, source: sourceData, knobValues, templateKnobs,
+      customIdx, customIdxs: get().customIdxs, templateId,
+    }
   }
 
   /** 현재 상태를 past에 올리고 next 필드를 반영한다. 드래그 세션이 열려 있으면 먼저 커밋. */
   const push = (next: Partial<EditorState>) => {
     get().commitEdit()
-    const s = snap()
     set({
-      past: s ? [...get().past.slice(-HISTORY_CAP + 1), s] : get().past,
+      past: [...get().past.slice(-HISTORY_CAP + 1), snap()],
       future: [],
       ...next,
     })
+  }
+
+  /**
+   * 현재 작업공간을 자기 모드의 스태시에 보관 — 모드 전환/교차 로드 직전에 호출.
+   * 자동 저장도 즉시 반영해 디바운스 대기 중인 편집이 유실되지 않게 한다.
+   */
+  const stashCurrent = () => {
+    const s = get()
+    saveSessionNow()
+    // 빈 작업공간도 undo 히스토리가 남아 있으면 보관 — 전체 삭제 후 탭을 오가도 undo 가능
+    modeStash[s.mode] = s.animationData || s.past.length || s.future.length
+      ? {
+          animationData: s.animationData,
+          fileName: s.fileName,
+          colorGroups: s.colorGroups,
+          past: s.past,
+          future: s.future,
+          sourceData: s.sourceData,
+          pristineData: s.pristineData,
+          templateKnobs: s.templateKnobs,
+          knobValues: s.knobValues,
+          templateId: s.templateId,
+          customIdx: s.customIdx,
+          customIdxs: s.customIdxs,
+          loop: s.loop,
+        }
+      : null
   }
 
   /** xci(라벨 컬러) 누락 레이어 백필 — 순서와 무관하게 색이 고정되도록. */
@@ -175,6 +258,28 @@ export const useEditor = create<EditorState>((set, get) => {
     for (const l of doc.layers) {
       const lr = l as Record<string, unknown>
       if (typeof lr.xci !== 'number') lr.xci = next++
+    }
+  }
+
+  /** 레이어의 위치 채널 전체 + xbase를 균등 이동 (공유 배열 이중 시프트 방지). */
+  const shiftLayer = (layer: Record<string, unknown>, dx: number, dy: number) => {
+    const p = (layer.ks as Record<string, unknown>).p as { a?: number; k: unknown }
+    if (p.a === 1 && Array.isArray(p.k)) {
+      const seen = new Set<number[]>()
+      for (const kf of p.k as { s?: number[] }[]) {
+        if (Array.isArray(kf.s) && !seen.has(kf.s)) {
+          seen.add(kf.s)
+          kf.s[0] += dx
+          kf.s[1] += dy
+        }
+      }
+    } else if (Array.isArray(p.k)) {
+      ;(p.k as number[])[0] += dx
+      ;(p.k as number[])[1] += dy
+    }
+    if (Array.isArray(layer.xbase)) {
+      ;(layer.xbase as number[])[0] += dx
+      ;(layer.xbase as number[])[1] += dy
     }
   }
 
@@ -287,8 +392,10 @@ export const useEditor = create<EditorState>((set, get) => {
     ks.a = { a: 0, k: newA }
     const p = ks.p as { a?: number; k: unknown }
     if (p.a === 1 && Array.isArray(p.k)) {
+      const seen = new Set<number[]>() // 공유 배열 이중 시프트 방지
       for (const kf of p.k as { s?: number[] }[]) {
-        if (Array.isArray(kf.s)) {
+        if (Array.isArray(kf.s) && !seen.has(kf.s)) {
+          seen.add(kf.s)
           kf.s[0] += dx
           kf.s[1] += dy
         }
@@ -333,8 +440,11 @@ export const useEditor = create<EditorState>((set, get) => {
     templateKnobs: [],
     knobValues: {},
     templateId: null,
+    mode: initialMode(),
+    saveStatus: 'skipped',
 
     customIdx: 0,
+    customIdxs: [0],
 
     playing: true,
     speed: 1,
@@ -343,6 +453,9 @@ export const useEditor = create<EditorState>((set, get) => {
     replayToken: 0,
 
     loadTemplate: (data, id, knobs) => {
+      const m: SaveKind = id === '__custom' ? 'custom' : 'template'
+      // 같은 모드 안의 교체라도 스태시 — 디바운스 대기 중인 직전 편집을 즉시 플러시
+      stashCurrent()
       const values = Object.fromEntries(knobs.map((k) => [k.id, k.default]))
       // 일부 노브(arcChase)는 기본값에서도 원본을 변환하므로 로드 시점에 적용
       const applied = applyKnobs(data, knobs, values)
@@ -353,6 +466,7 @@ export const useEditor = create<EditorState>((set, get) => {
         templateKnobs: knobs,
         knobValues: values,
         templateId: id,
+        mode: m,
         fileName: id,
         colorGroups: extractColorGroups(applied),
         past: [],
@@ -362,7 +476,9 @@ export const useEditor = create<EditorState>((set, get) => {
       })
     },
 
-    load: (data, fileName) =>
+    load: (data, fileName) => {
+      // 외부 로티 JSON은 템플릿 쪽 작업공간에서 연다 — 현재 작업은 보관·플러시
+      stashCurrent()
       set({
         animationData: data,
         sourceData: null,
@@ -370,15 +486,59 @@ export const useEditor = create<EditorState>((set, get) => {
         templateKnobs: [],
         knobValues: {},
         templateId: null,
+        mode: 'template',
         fileName: fileName.replace(/\.json$/i, ''),
         colorGroups: extractColorGroups(data),
         past: [],
         future: [],
         editBaseline: null,
         playing: true,
-      }),
+      })
+    },
+
+    setMode: (m) => {
+      if (get().mode === m) return
+      get().commitEdit()
+      stashCurrent()
+      try {
+        localStorage.setItem(LAST_KEY, m)
+      } catch {
+        // 저장 불가 환경 — 무시
+      }
+      const st = modeStash[m]
+      if (st) {
+        set({ ...st, mode: m, editBaseline: null, playing: false })
+        return
+      }
+      const saved = loadSavedSession(m)
+      if (saved) {
+        get().restoreSession(saved)
+        return
+      }
+      // 해당 모드에 보관된 작업 없음 — 빈 작업공간
+      set({
+        animationData: null,
+        fileName: '',
+        colorGroups: [],
+        past: [],
+        future: [],
+        editBaseline: null,
+        sourceData: null,
+        pristineData: null,
+        templateKnobs: [],
+        knobValues: {},
+        templateId: null,
+        mode: m,
+        customIdx: 0,
+        customIdxs: [0],
+        playing: false,
+        loop: m === 'template',
+      })
+    },
 
     restoreSession: (s) => {
+      const m: SaveKind = s.templateId === '__custom' ? 'custom' : 'template'
+      stashCurrent()
       if (s.templateId === '__custom') {
         ensureLayerColors(s.sourceData)
         // 구버전 세션의 timeStretch 노브 제거 — 커스텀은 컴프 길이 방식
@@ -393,13 +553,16 @@ export const useEditor = create<EditorState>((set, get) => {
         templateKnobs: s.templateKnobs,
         knobValues: s.knobValues,
         templateId: s.templateId,
+        mode: m,
         fileName: s.fileName,
         customIdx: s.customIdx ?? 0,
+        customIdxs: [s.customIdx ?? 0],
         colorGroups: extractColorGroups(applied),
         past: [],
         future: [],
         editBaseline: null,
         playing: false,
+        loop: m === 'template',
       })
     },
 
@@ -451,6 +614,20 @@ export const useEditor = create<EditorState>((set, get) => {
       if (!editBaseline) return
       set({
         past: [...past.slice(-HISTORY_CAP + 1), editBaseline],
+        editBaseline: null,
+      })
+    },
+
+    cancelEdit: () => {
+      const b = get().editBaseline
+      if (!b) return
+      set({
+        animationData: b.data,
+        sourceData: b.source,
+        knobValues: b.knobValues,
+        templateKnobs: b.templateKnobs,
+        customIdx: b.customIdx ?? get().customIdx,
+        colorGroups: b.data ? extractColorGroups(b.data) : [],
         editBaseline: null,
       })
     },
@@ -613,7 +790,16 @@ export const useEditor = create<EditorState>((set, get) => {
       })
     },
 
-    setCustomIdx: (i) => set({ customIdx: i }),
+    setCustomIdx: (i) => set({ customIdx: i, customIdxs: [i] }),
+
+    deselectCustom: () => set({ customIdxs: [] }),
+
+    toggleCustomSel: (i) => {
+      const cur = get().customIdxs
+      let next = cur.includes(i) ? cur.filter((x) => x !== i) : [...cur, i]
+      if (!next.length) next = [i]
+      set({ customIdxs: next, customIdx: next[next.length - 1] })
+    },
 
     addCustomLayer: (payload, name, at) => {
       const { templateId, sourceData, templateKnobs, knobValues } = get()
@@ -624,7 +810,7 @@ export const useEditor = create<EditorState>((set, get) => {
         // 커스텀은 timeStretch 노브 없음 — 컴포지션 길이는 setCompLength로 (절대 시간 유지)
         get().loadTemplate(doc, '__custom', [])
         // 편집 모드로 시작 — 재생(프리뷰) 버튼을 눌러야 루프 재생
-        set({ customIdx: 0, loop: false, playing: false })
+        set({ customIdx: 0, customIdxs: [0], loop: false, playing: false })
         return
       }
       const src = structuredClone(sourceData)
@@ -655,6 +841,46 @@ export const useEditor = create<EditorState>((set, get) => {
         sourceData: src,
         colorGroups: extractColorGroups(applied),
         customIdx: 0,
+        customIdxs: [0],
+      })
+    },
+
+    removeCustomLayers: (idxs) => {
+      const { sourceData, templateKnobs, knobValues } = get()
+      if (!sourceData) return
+      const uniq = [...new Set(idxs)].filter((i) => i >= 0 && i < sourceData.layers.length)
+      if (!uniq.length) return
+      if (uniq.length >= sourceData.layers.length) {
+        // 전부 삭제 = 세션 비움 (undo 가능)
+        push({
+          animationData: null, sourceData: null, pristineData: null, templateId: null,
+          templateKnobs: [], knobValues: {}, colorGroups: [], customIdx: 0, customIdxs: [0],
+        })
+        return
+      }
+      const src = structuredClone(sourceData)
+      ensureLayerColors(src)
+      // 내림차순 제거 — 인덱스 안정. 에셋은 남은 레이어가 참조 안 할 때만 정리
+      for (const i of [...uniq].sort((a, b) => b - a)) {
+        const removed = src.layers.splice(i, 1)[0] as Record<string, unknown> | undefined
+        const stillUsed = src.layers.some(
+          (l) => (l as Record<string, unknown>).refId === removed?.refId,
+        )
+        if (removed?.refId && !stillUsed && Array.isArray(src.assets)) {
+          src.assets = (src.assets as Record<string, unknown>[]).filter(
+            (a) => a.id !== removed.refId,
+          )
+        }
+      }
+      src.layers.forEach((l, li) => (l.ind = li + 1))
+      const applied = applyKnobs(src, templateKnobs, knobValues)
+      const nextIdx = Math.max(0, Math.min(Math.min(...uniq), src.layers.length - 1))
+      push({
+        animationData: applied,
+        sourceData: src,
+        colorGroups: extractColorGroups(applied),
+        customIdx: nextIdx,
+        customIdxs: [nextIdx],
       })
     },
 
@@ -665,7 +891,7 @@ export const useEditor = create<EditorState>((set, get) => {
         // 마지막 레이어 — 편집기 비움 (히스토리 유지 → undo로 복구 가능)
         push({
           animationData: null, sourceData: null, pristineData: null, templateId: null,
-          templateKnobs: [], knobValues: {}, colorGroups: [], customIdx: 0,
+          templateKnobs: [], knobValues: {}, colorGroups: [], customIdx: 0, customIdxs: [0],
         })
         return
       }
@@ -688,6 +914,7 @@ export const useEditor = create<EditorState>((set, get) => {
         sourceData: src,
         colorGroups: extractColorGroups(applied),
         customIdx: Math.max(0, nextIdx),
+        customIdxs: [Math.max(0, nextIdx)],
       })
     },
 
@@ -719,10 +946,11 @@ export const useEditor = create<EditorState>((set, get) => {
         sourceData: src,
         colorGroups: extractColorGroups(applied),
         customIdx: to,
+        customIdxs: [to],
       })
     },
 
-    duplicateCustomLayer: (i) => {
+    duplicateCustomLayer: (i, offset = 12) => {
       const { sourceData, templateKnobs, knobValues } = get()
       if (!sourceData?.layers[i]) return
       const src = structuredClone(sourceData)
@@ -756,19 +984,21 @@ export const useEditor = create<EditorState>((set, get) => {
       // 살짝 오프셋 — 겹쳐서 안 보이는 문제 방지
       const p = (copy.ks as Record<string, unknown>).p as { a?: number; k: unknown }
       if (p.a === 1 && Array.isArray(p.k)) {
+        const seen = new Set<number[]>()
         for (const kf of p.k as { s?: number[] }[]) {
-          if (Array.isArray(kf.s)) {
-            kf.s[0] += 12
-            kf.s[1] += 12
+          if (Array.isArray(kf.s) && !seen.has(kf.s)) {
+            seen.add(kf.s)
+            kf.s[0] += offset
+            kf.s[1] += offset
           }
         }
       } else if (Array.isArray(p.k)) {
-        ;(p.k as number[])[0] += 12
-        ;(p.k as number[])[1] += 12
+        ;(p.k as number[])[0] += offset
+        ;(p.k as number[])[1] += offset
       }
       if (Array.isArray(copy.xbase)) {
-        ;(copy.xbase as number[])[0] += 12
-        ;(copy.xbase as number[])[1] += 12
+        ;(copy.xbase as number[])[0] += offset
+        ;(copy.xbase as number[])[1] += offset
       }
       copy.xci =
         Math.max(-1, ...src.layers.map((l) => Number((l as Record<string, unknown>).xci ?? -1))) + 1
@@ -780,6 +1010,7 @@ export const useEditor = create<EditorState>((set, get) => {
         sourceData: src,
         colorGroups: extractColorGroups(applied),
         customIdx: i,
+        customIdxs: [i],
       })
     },
 
@@ -793,27 +1024,15 @@ export const useEditor = create<EditorState>((set, get) => {
     },
 
     nudgeCustomBase: (dx, dy) => {
-      const { sourceData, templateKnobs, knobValues, customIdx } = get()
+      const { sourceData, templateKnobs, knobValues, customIdxs } = get()
       if (!sourceData) return
       const src = structuredClone(sourceData)
       ensureLayerColors(src)
-      const layer = src.layers[Math.min(customIdx, src.layers.length - 1)] as Record<string, unknown>
-      if (!layer) return
-      const p = (layer.ks as Record<string, unknown>).p as { a?: number; k: unknown }
-      if (p.a === 1 && Array.isArray(p.k)) {
-        for (const kf of p.k as { s?: number[] }[]) {
-          if (Array.isArray(kf.s)) {
-            kf.s[0] += dx
-            kf.s[1] += dy
-          }
-        }
-      } else if (Array.isArray(p.k)) {
-        ;(p.k as number[])[0] += dx
-        ;(p.k as number[])[1] += dy
-      }
-      if (Array.isArray(layer.xbase)) {
-        ;(layer.xbase as number[])[0] += dx
-        ;(layer.xbase as number[])[1] += dy
+      // 다중 선택 전체 이동 — 선택이 없으면 아무것도 안 움직인다
+      const sel = [...new Set(customIdxs)].filter((i) => i >= 0 && i < src.layers.length)
+      if (!sel.length) return
+      for (const i of sel) {
+        shiftLayer(src.layers[i] as Record<string, unknown>, dx, dy)
       }
       const applied = applyKnobs(src, templateKnobs, knobValues)
       push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
@@ -833,26 +1052,21 @@ export const useEditor = create<EditorState>((set, get) => {
 
     setCustomBaseLive: (x, y) => {
       const st = get()
-      const { sourceData, templateKnobs, knobValues, customIdx } = st
+      const { sourceData, templateKnobs, knobValues, customIdx, customIdxs } = st
       if (!sourceData) return
       const src = structuredClone(sourceData)
-      const layer = src.layers[Math.min(customIdx, src.layers.length - 1)] as Record<string, unknown>
+      const primary = Math.min(customIdx, src.layers.length - 1)
+      const layer = src.layers[primary] as Record<string, unknown>
       if (!layer || !Array.isArray(layer.xbase)) return
       const xb = layer.xbase as number[]
       const dx = x - xb[0]
       const dy = y - xb[1]
       if (!dx && !dy) return
-      const p = (layer.ks as Record<string, unknown>).p as { a?: number; k: unknown }
-      if (p.a === 1 && Array.isArray(p.k)) {
-        for (const kf of p.k as { s?: number[] }[]) {
-          if (Array.isArray(kf.s)) {
-            kf.s[0] += dx
-            kf.s[1] += dy
-          }
-        }
-      } else if (Array.isArray(p.k)) {
-        ;(p.k as number[])[0] += dx
-        ;(p.k as number[])[1] += dy
+      // 주 선택은 절대 좌표, 함께 선택된 레이어들은 같은 델타로 동반 이동 — 선택 없으면 무시
+      const sel = [...new Set(customIdxs)].filter((i) => i >= 0 && i < src.layers.length)
+      if (!sel.length) return
+      for (const i of sel) {
+        shiftLayer(src.layers[i] as Record<string, unknown>, dx, dy)
       }
       xb[0] = x
       xb[1] = y
@@ -864,6 +1078,81 @@ export const useEditor = create<EditorState>((set, get) => {
         editBaseline: st.editBaseline ?? snap(),
         future: [],
       })
+    },
+
+    alignCustom: (mode, basis = 'canvas') => {
+      const { sourceData, templateKnobs, knobValues } = get()
+      if (!sourceData) return
+      const src = structuredClone(sourceData)
+      ensureLayerColors(src)
+      // 선택된 레이어만 — 선택이 없으면 아무 일도 하지 않는다 (일러와 동일)
+      const targets = [...new Set(get().customIdxs)].filter((i) => i >= 0 && i < src.layers.length)
+      if (!targets.length) return
+      // 각 레이어의 시각적 박스
+      const boxes = targets.map((i) => {
+        const layer = src.layers[i] as Record<string, unknown>
+        const xb = (layer.xbase as number[]) ?? [256, 256]
+        const [hw, hh] = layerHalfOf(src, i)
+        const [ox, oy] = layerCenterOffsetOf(src, i)
+        return { i, layer, cx: xb[0] + ox, cy: xb[1] + oy, hw, hh }
+      })
+      // 정렬 기준 경계: 캔버스 또는 선택 합집합 바운드 (2개 미만이면 캔버스로 폴백)
+      let L = 0, R = 512, T = 0, B = 512
+      if (basis === 'selection' && boxes.length >= 2) {
+        L = Math.min(...boxes.map((b) => b.cx - b.hw))
+        R = Math.max(...boxes.map((b) => b.cx + b.hw))
+        T = Math.min(...boxes.map((b) => b.cy - b.hh))
+        B = Math.max(...boxes.map((b) => b.cy + b.hh))
+      }
+      const MX = (L + R) / 2
+      const MY = (T + B) / 2
+      let moved = false
+      for (const b of boxes) {
+        if (!Array.isArray(b.layer.xbase)) continue
+        const tx =
+          mode === 'left' ? L + b.hw : mode === 'hc' ? MX : mode === 'right' ? R - b.hw : b.cx
+        const ty =
+          mode === 'top' ? T + b.hh : mode === 'vc' ? MY : mode === 'bottom' ? B - b.hh : b.cy
+        const dx = tx - b.cx
+        const dy = ty - b.cy
+        if (!dx && !dy) continue
+        shiftLayer(b.layer, dx, dy)
+        moved = true
+      }
+      if (!moved) return
+      const applied = applyKnobs(src, templateKnobs, knobValues)
+      push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
+    },
+
+    distributeCustom: (axis) => {
+      const { sourceData, templateKnobs, knobValues } = get()
+      if (!sourceData || sourceData.layers.length < 3) return
+      const src = structuredClone(sourceData)
+      ensureLayerColors(src)
+      // 다중 선택 3개 이상이면 선택만, 아니면 전체 — 양끝 고정, 사이 균등
+      const selD = [...new Set(get().customIdxs)].filter((i) => i >= 0 && i < src.layers.length)
+      const pool = selD.length >= 3 ? selD : src.layers.map((_, i) => i)
+      const items = pool.map((i) => {
+        const l = src.layers[i]
+        const xb = ((l as Record<string, unknown>).xbase as number[]) ?? [256, 256]
+        const [ox, oy] = layerCenterOffsetOf(src, i)
+        return { i, c: axis === 'h' ? xb[0] + ox : xb[1] + oy }
+      })
+      if (items.length < 3) return
+      items.sort((a, b) => a.c - b.c)
+      const first = items[0].c
+      const last = items[items.length - 1].c
+      if (last - first < 1) return
+      const step = (last - first) / (items.length - 1)
+      items.forEach((it, rank) => {
+        const target = first + rank * step
+        const d = target - it.c
+        if (!d) return
+        const layer = src.layers[it.i] as Record<string, unknown>
+        shiftLayer(layer, axis === 'h' ? d : 0, axis === 'h' ? 0 : d)
+      })
+      const applied = applyKnobs(src, templateKnobs, knobValues)
+      push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
     },
 
     setCompLength: (sec) => {
@@ -893,8 +1182,8 @@ export const useEditor = create<EditorState>((set, get) => {
     undo: () => {
       get().commitEdit()
       const { past, future } = get()
-      const cur = snap()
       if (!past.length) return
+      const cur = snap()
       const prev = past[past.length - 1]
       set({
         animationData: prev.data,
@@ -902,18 +1191,19 @@ export const useEditor = create<EditorState>((set, get) => {
         knobValues: prev.knobValues,
         templateKnobs: prev.templateKnobs,
         customIdx: prev.customIdx ?? 0,
-        templateId: prev.templateId ?? get().templateId,
-        colorGroups: extractColorGroups(prev.data),
+        customIdxs: prev.customIdxs ?? [prev.customIdx ?? 0],
+        templateId: prev.templateId,
+        colorGroups: prev.data ? extractColorGroups(prev.data) : [],
         past: past.slice(0, -1),
-        future: cur ? [cur, ...future].slice(0, HISTORY_CAP) : future,
+        future: [cur, ...future].slice(0, HISTORY_CAP),
       })
     },
 
     redo: () => {
       get().commitEdit()
       const { future, past } = get()
+      if (!future.length) return
       const cur = snap()
-      if (!future.length || !cur) return
       const next = future[0]
       set({
         animationData: next.data,
@@ -921,10 +1211,11 @@ export const useEditor = create<EditorState>((set, get) => {
         knobValues: next.knobValues,
         templateKnobs: next.templateKnobs,
         customIdx: next.customIdx ?? 0,
-        templateId: next.templateId ?? get().templateId,
-        colorGroups: extractColorGroups(next.data),
+        customIdxs: next.customIdxs ?? [next.customIdx ?? 0],
+        templateId: next.templateId,
+        colorGroups: next.data ? extractColorGroups(next.data) : [],
         future: future.slice(1),
-        past: cur ? [...past.slice(-HISTORY_CAP + 1), cur] : past,
+        past: [...past.slice(-HISTORY_CAP + 1), cur],
       })
     },
 
@@ -939,45 +1230,79 @@ export const useEditor = create<EditorState>((set, get) => {
 
 // ── 자동 저장: 편집이 멈추고 0.8s 후 localStorage에 기록.
 // 템플릿/커스텀 슬롯 분리 — 서로 덮어쓰지 않는다. 그냥 열어본(무편집) 템플릿은 저장 안 함.
-// 대형 임베드 이미지 세션은 쿼터(약 5MB) 보호를 위해 4.5MB 초과 시 스킵.
+// 대형 임베드 이미지 세션은 쿼터(약 5MB) 보호를 위해 4.5MB 초과 시 스킵 → saveStatus로 알림.
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 let lastSavedSource: unknown = null
-let lastActiveKind: SaveKind | null = null
-useEditor.subscribe((state) => {
-  if (state.sourceData === lastSavedSource) return
+let lastSavedKnobs: unknown = null
+
+/** 배지용 저장 상태 — 값이 바뀔 때만 set (subscribe 재귀 루프 방지). */
+function setSaveStatus(v: 'saved' | 'skipped' | 'blocked') {
+  if (useEditor.getState().saveStatus !== v) useEditor.setState({ saveStatus: v })
+}
+
+/** 현재 상태를 즉시 저장 — 모드 전환(stashCurrent)·pagehide가 디바운스를 기다리지 않고 호출한다. */
+function saveSessionNow() {
   clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => {
-    const s = useEditor.getState()
-    lastSavedSource = s.sourceData
-    try {
-      if (!s.sourceData) {
-        // 세션 비움(커스텀 마지막 레이어 삭제 등) — 직전에 활성이던 슬롯만 정리
-        if (lastActiveKind === 'custom') localStorage.removeItem(SAVE_KEYS.custom)
-        lastActiveKind = null
-        return
+  const s = useEditor.getState()
+  try {
+    if (!s.sourceData) {
+      lastSavedSource = null
+      lastSavedKnobs = null
+      // 커스텀 모드 안에서 실제 세션이 비워진 경우(마지막 레이어 삭제 = 히스토리 존재)만 슬롯 정리.
+      // 부팅 직후·모드 전환·외부 파일 열기의 빈 상태(히스토리 없음)는 저장본을 지우지 않는다.
+      if (s.mode === 'custom' && (s.past.length > 0 || s.future.length > 0)) {
+        localStorage.removeItem(SAVE_KEYS.custom)
       }
-      const kind: SaveKind | null =
-        s.templateId === '__custom' ? 'custom' : s.templateId ? 'template' : null
-      if (!kind) return
-      lastActiveKind = kind
-      // 템플릿은 편집 흔적이 있을 때만 저장 — 미리보기로 연 것까지 남기지 않는다
-      if (kind === 'template' && s.past.length === 0 && !s.editBaseline) return
-      const payload: SavedSession = {
-        v: 1,
-        sourceData: s.sourceData,
-        pristineData: s.pristineData,
-        templateId: s.templateId,
-        templateKnobs: s.templateKnobs,
-        knobValues: s.knobValues,
-        fileName: s.fileName,
-        customIdx: s.customIdx,
-      }
-      const str = JSON.stringify(payload)
-      if (str.length > 4_500_000) return
-      localStorage.setItem(SAVE_KEYS[kind], str)
-      localStorage.setItem(LAST_KEY, kind)
-    } catch {
-      // 쿼터 초과 등 — 저장 실패는 조용히 무시 (편집엔 영향 없음)
+      setSaveStatus('skipped')
+      return
     }
-  }, 800)
+    // 노브만 바뀐 편집도 저장돼야 하므로 sourceData와 knobValues 둘 다 비교
+    if (s.sourceData === lastSavedSource && s.knobValues === lastSavedKnobs) return
+    const kind: SaveKind | null =
+      s.templateId === '__custom' ? 'custom' : s.templateId ? 'template' : null
+    if (!kind) {
+      // 외부 로티 파일 등 — 자동 저장 대상 아님 (마커도 진행 안 함)
+      setSaveStatus('skipped')
+      return
+    }
+    // 템플릿은 편집 흔적이 있을 때만 저장 — 미리보기로 연 것까지 남기지 않는다.
+    // 마커를 진행하지 않아야 이후 첫 편집(노브 등)이 정상 저장된다.
+    if (kind === 'template' && s.past.length === 0 && !s.editBaseline) {
+      setSaveStatus('skipped')
+      return
+    }
+    lastSavedSource = s.sourceData
+    lastSavedKnobs = s.knobValues
+    const payload: SavedSession = {
+      v: 1,
+      sourceData: s.sourceData,
+      pristineData: s.pristineData,
+      templateId: s.templateId,
+      templateKnobs: s.templateKnobs,
+      knobValues: s.knobValues,
+      fileName: s.fileName,
+      customIdx: s.customIdx,
+    }
+    const str = JSON.stringify(payload)
+    if (str.length > 4_500_000) {
+      // 쿼터 보호 — 저장 못 했음을 배지로 알린다 (.lmproj 저장 유도)
+      setSaveStatus('blocked')
+      return
+    }
+    localStorage.setItem(SAVE_KEYS[kind], str)
+    localStorage.setItem(LAST_KEY, kind)
+    setSaveStatus('saved')
+  } catch {
+    // 쿼터 초과·프라이빗 모드 등 — 편집엔 영향 없지만 배지로 알린다
+    setSaveStatus('blocked')
+  }
+}
+
+useEditor.subscribe((state) => {
+  if (state.sourceData === lastSavedSource && state.knobValues === lastSavedKnobs) return
+  clearTimeout(saveTimer)
+  saveTimer = setTimeout(saveSessionNow, 800)
 })
+
+// 새로고침·창 닫기 직전 플러시 — 디바운스 창(0.8s) 안의 마지막 편집 유실 방지
+if (typeof window !== 'undefined') window.addEventListener('pagehide', saveSessionNow)

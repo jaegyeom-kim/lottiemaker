@@ -6,35 +6,58 @@ import { durationKnob } from '../lib/lottieKnobs'
 import LottiePlayer from './LottiePlayer'
 import CustomBuilder from './CustomBuilder'
 
+const RECENT_KEY = 'lottiemaker.recent.templates'
+
+function loadRecents(): string[] {
+  try {
+    const arr = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]')
+    return Array.isArray(arr) ? arr.filter((id) => templates.some((t) => t.id === id)) : []
+  } catch {
+    return []
+  }
+}
+
 export default function TemplateGallery() {
   const loadTemplate = useEditor((s) => s.loadTemplate)
   // 훅은 조건부 return보다 먼저 — 사이드 전환 시 훅 순서 불변
   const currentId = useEditor((s) => s.templateId)
+  // 사이드바 탭 = 전역 작업 모드 — 캔버스·우측 패널과 항상 함께 전환된다
+  const mode = useEditor((s) => s.mode)
   const [category, setCategory] = useState<string>('all')
-  const [side, setSide] = useState<'tpl' | 'custom'>('tpl')
+  const [query, setQuery] = useState('')
+  const [recents, setRecents] = useState<string[]>(loadRecents)
 
-  const list = category === 'all' ? templates : templates.filter((t) => t.category === category)
+  const byCategory =
+    category === 'recent'
+      ? recents.map((id) => templates.find((t) => t.id === id)).filter(Boolean) as TemplateDef[]
+      : category === 'all'
+        ? templates
+        : templates.filter((t) => t.category === category)
+  const q = query.trim().toLowerCase()
+  const list = q
+    ? byCategory.filter((t) => t.label.toLowerCase().includes(q) || t.id.includes(q))
+    : byCategory
 
   const pick = (t: TemplateDef) => {
-    // 진행 중인 커스텀 작업 보호 — 템플릿 로드는 히스토리까지 파기한다
-    const s = useEditor.getState()
-    if (
-      s.templateId === '__custom' &&
-      s.past.length > 0 &&
-      !window.confirm('커스텀 작업이 사라집니다. 템플릿을 열까요?')
-    )
-      return
     loadTemplate(structuredClone(t.data) as LottieJson, t.id, [
       ...t.knobs,
       durationKnob(t.data as LottieJson),
     ])
+    // 최근 사용 기록 — 맨 앞으로, 최대 8개
+    const next = [t.id, ...recents.filter((id) => id !== t.id)].slice(0, 8)
+    setRecents(next)
+    try {
+      localStorage.setItem(RECENT_KEY, JSON.stringify(next))
+    } catch {
+      // 저장 불가 환경 — 무시
+    }
   }
 
-  if (side === 'custom') {
+  if (mode === 'custom') {
     return (
       <aside className="gallery">
         <div className="gallery__head">
-          <SideTabs side={side} setSide={setSide} />
+          <SideTabs />
         </div>
         <div className="gallery__body">
           <CustomBuilder />
@@ -48,7 +71,7 @@ export default function TemplateGallery() {
   return (
     <aside className="gallery">
       <div className="gallery__head">
-        <SideTabs side={side} setSide={setSide} />
+        <SideTabs />
         {savedTpl && currentId !== savedTpl.templateId && (
           <button
             className="btn btn--secondary btn--full"
@@ -58,6 +81,13 @@ export default function TemplateGallery() {
             이전 템플릿 작업 이어하기
           </button>
         )}
+        <input
+          className="gallery__search"
+          type="search"
+          placeholder="템플릿 검색"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
         <div className="gallery__cats">
           <button
             className={`chip ${category === 'all' ? 'chip--on' : ''}`}
@@ -65,6 +95,14 @@ export default function TemplateGallery() {
           >
             전체
           </button>
+          {recents.length > 0 && (
+            <button
+              className={`chip ${category === 'recent' ? 'chip--on' : ''}`}
+              onClick={() => setCategory('recent')}
+            >
+              최근
+            </button>
+          )}
           {categories.map((c) => (
             <button
               key={c.id}
@@ -78,28 +116,31 @@ export default function TemplateGallery() {
       </div>
       <div className="gallery__grid">
         {list.map((t) => (
-          <Tile key={t.id} template={t} onPick={pick} />
+          <Tile key={t.id} template={t} onPick={pick} current={t.id === currentId} />
         ))}
+        {list.length === 0 && (
+          <p className="gallery__none">"{query}"에 맞는 템플릿이 없어요.</p>
+        )}
       </div>
     </aside>
   )
 }
 
-function SideTabs({
-  side,
-  setSide,
-}: {
-  side: 'tpl' | 'custom'
-  setSide: (s: 'tpl' | 'custom') => void
-}) {
+/** 모드 탭 — 전환 시 작업공간이 통째로 스왑되므로 어느 쪽 작업도 사라지지 않는다. */
+function SideTabs() {
+  const mode = useEditor((s) => s.mode)
+  const setMode = useEditor((s) => s.setMode)
   return (
     <div className="opttabs opttabs--gallery">
-      <button className={`opttab ${side === 'tpl' ? 'opttab--on' : ''}`} onClick={() => setSide('tpl')}>
+      <button
+        className={`opttab ${mode === 'template' ? 'opttab--on' : ''}`}
+        onClick={() => setMode('template')}
+      >
         템플릿
       </button>
       <button
-        className={`opttab ${side === 'custom' ? 'opttab--on' : ''}`}
-        onClick={() => setSide('custom')}
+        className={`opttab ${mode === 'custom' ? 'opttab--on' : ''}`}
+        onClick={() => setMode('custom')}
       >
         커스텀
       </button>
@@ -108,17 +149,25 @@ function SideTabs({
 }
 
 /** 평소엔 대표 프레임 정지, 호버 시 재생 — 24개 동시 재생으로 인한 부하 방지. */
-function Tile({ template, onPick }: { template: TemplateDef; onPick: (t: TemplateDef) => void }) {
+function Tile({
+  template,
+  onPick,
+  current,
+}: {
+  template: TemplateDef
+  onPick: (t: TemplateDef) => void
+  current?: boolean
+}) {
   const [hover, setHover] = useState(false)
   const poster = Math.floor(((template.data as LottieJson).op ?? 60) / 2)
 
   return (
     <button
-      className="tile"
+      className={`tile ${current ? 'tile--current' : ''}`}
       onClick={() => onPick(template)}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      title={template.label}
+      title={current ? `${template.label} (현재 열려 있음)` : template.label}
     >
       <LottiePlayer
         data={template.data}

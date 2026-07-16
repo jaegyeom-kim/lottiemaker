@@ -230,7 +230,7 @@ export function buildAnimKs(
     }
     pk.push(kf(3, clipB, P(dx * outDist, dy * outDist)))
   } else if (pk.length && pk[pk.length - 1].t < clipB) {
-    pk.push(kf(3, clipB, pk[pk.length - 1].s))
+    pk.push(kf(3, clipB, [...pk[pk.length - 1].s])) // 배열 복사 — 참조 공유 시 시프트가 두 번 적용됨
   }
 
   // ---- 스케일 채널 (팝 등장 / 펄스 루프 / 축소 퇴장)
@@ -260,7 +260,7 @@ export function buildAnimKs(
     if (sel.out.bounce) sk.push(kf(3, outStart + (clipB - outStart) * 0.3, S(112)))
     sk.push(kf(3, clipB, S(0)))
   } else if (sk.length && sk[sk.length - 1].t < clipB) {
-    sk.push(kf(3, clipB, sk[sk.length - 1].s))
+    sk.push(kf(3, clipB, [...sk[sk.length - 1].s]))
   }
 
   // ---- 불투명도 채널 (모든 등장/퇴장은 페이드 동반 — 상용 툴 관례)
@@ -299,6 +299,35 @@ export function buildAnimKs(
     p: prop(3, pk, [bx, by, 0]),
     s: prop(3, sk, [100, 100, 100]),
   }
+}
+
+/** 레이어 i의 반폭/반높이 — 이미지는 에셋 크기, SVG는 bbox×스케일. */
+export function layerHalfOf(doc: LottieJson, i: number): [number, number] {
+  const layer = doc.layers[i] as Record<string, unknown> | undefined
+  if (!layer) return [60, 60]
+  const asset = (doc.assets as Record<string, unknown>[] | undefined)?.find(
+    (a) => a.id === layer.refId,
+  )
+  if (asset) return [(asset.w as number) / 2, (asset.h as number) / 2]
+  const g = (layer.shapes as Record<string, unknown>[] | undefined)?.[0]
+  if (g && typeof g.bboxW === 'number' && typeof g.bboxH === 'number') {
+    const tr = (g.it as Record<string, unknown>[]).find((it) => it.ty === 'tr')
+    const sc = ((tr?.s as { k: number[] })?.k[0] ?? 100) / 100
+    return [((g.bboxW as number) * sc) / 2, ((g.bboxH as number) * sc) / 2]
+  }
+  return [60, 60]
+}
+
+/** 앵커 오프셋 — 시각적 중심 = 기준위치(xbase) + 이 값. (회전은 근사 무시) */
+export function layerCenterOffsetOf(doc: LottieJson, i: number): [number, number] {
+  const layer = doc.layers[i] as Record<string, unknown> | undefined
+  if (!layer) return [0, 0]
+  const a = (((layer.ks as Record<string, unknown>)?.a as { k?: number[] })?.k as number[]) ?? [0, 0]
+  const asset = (doc.assets as Record<string, unknown>[] | undefined)?.find(
+    (x) => x.id === layer.refId,
+  )
+  if (asset) return [(asset.w as number) / 2 - a[0], (asset.h as number) / 2 - a[1]]
+  return [-a[0], -a[1]]
 }
 
 export type CustomPayload =

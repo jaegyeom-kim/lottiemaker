@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { useEditor } from '../store'
 import { durationSec, parseLottie, type LottieJson } from '../lib/lottieUtils'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
-import type { CustomPayload } from '../lib/customBuilder'
+import { layerHalfOf, layerCenterOffsetOf, layerColor, tint, type CustomPayload } from '../lib/customBuilder'
 import LottiePlayer from './LottiePlayer'
 import MockupView from './MockupView'
 import Timeline from './Timeline'
@@ -26,36 +26,6 @@ function layerBaseOf(doc: LottieJson, i: number): [number, number] | null {
   return [(p.k as number[])[0], (p.k as number[])[1]]
 }
 
-/** 앵커 오프셋 — 시각적 중심 = 기준위치(p) + 이 값. (회전은 근사 무시) */
-function layerCenterOffsetOf(doc: LottieJson, i: number): [number, number] {
-  const layer = doc.layers[i] as Record<string, unknown> | undefined
-  if (!layer) return [0, 0]
-  const a = (((layer.ks as Record<string, unknown>)?.a as { k?: number[] })?.k as number[]) ?? [0, 0]
-  const asset = (doc.assets as Record<string, unknown>[] | undefined)?.find(
-    (x) => x.id === layer.refId,
-  )
-  // 이미지: 중심 = (w/2, h/2), SVG: 중심 = 원점
-  if (asset) return [(asset.w as number) / 2 - a[0], (asset.h as number) / 2 - a[1]]
-  return [-a[0], -a[1]]
-}
-
-/** 문서에서 레이어 i의 반폭/반높이 — 이미지는 에셋 크기, SVG는 bbox×스케일. */
-function layerHalfOf(doc: LottieJson, i: number): [number, number] {
-  const layer = doc.layers[i] as Record<string, unknown> | undefined
-  if (!layer) return [60, 60]
-  const asset = (doc.assets as Record<string, unknown>[] | undefined)?.find(
-    (a) => a.id === layer.refId,
-  )
-  if (asset) return [(asset.w as number) / 2, (asset.h as number) / 2]
-  const g = (layer.shapes as Record<string, unknown>[] | undefined)?.[0]
-  if (g && typeof g.bboxW === 'number' && typeof g.bboxH === 'number') {
-    const tr = (g.it as Record<string, unknown>[]).find((it) => it.ty === 'tr')
-    const sc = ((tr?.s as { k: number[] })?.k[0] ?? 100) / 100
-    return [((g.bboxW as number) * sc) / 2, ((g.bboxH as number) * sc) / 2]
-  }
-  return [60, 60]
-}
-
 export default function Preview() {
   const {
     animationData, playing, speed, loop, bg, replayToken, templateId,
@@ -64,6 +34,9 @@ export default function Preview() {
   } = useEditor()
   const sourceData = useEditor((s) => s.sourceData)
   const customIdx = useEditor((s) => s.customIdx)
+  const customIdxs = useEditor((s) => s.customIdxs)
+  // 전역 작업 모드 (템플릿/커스텀) — 아래 로컬 mode(canvas/mockup)와 다른 값
+  const appMode = useEditor((s) => s.mode)
   const [frame, setFrame] = useState(0)
   const [totalFrames, setTotalFrames] = useState(0)
   const [seek, setSeek] = useState<number | null>(null)
@@ -95,6 +68,7 @@ export default function Preview() {
   const lastPick = useRef<{ x: number; y: number; pick: number } | null>(null)
   const resizeDrag = useRef<{
     f: number; bx: number; by: number; startSize: number; startDist: number
+    ox: number; oy: number
   } | null>(null)
   // 캔버스 드래그 라이브 반영 — rAF 스로틀 (임베드 이미지 재계산 비용 완화)
   const liveRaf = useRef<number | null>(null)
@@ -142,7 +116,23 @@ export default function Preview() {
     const down = (e: KeyboardEvent) => {
       if (isTyping(e.target)) return
       const s = useEditor.getState()
-      if (e.key === 'Escape') setAnchorPop(false)
+      if (e.key === 'Escape') {
+        setAnchorPop(false)
+        // 진행 중인 드래그/리사이즈 취소 — 시작 시점으로 복원 (PS Esc)
+        if (dragStart.current || resizeDrag.current) {
+          dragStart.current = null
+          dragLast.current = null
+          resizeDrag.current = null
+          setGuides({ v: null, h: null })
+          setDragCoord(null)
+          setDragBox(null)
+          if (liveRaf.current !== null) {
+            cancelAnimationFrame(liveRaf.current)
+            liveRaf.current = null
+          }
+          s.cancelEdit()
+        }
+      }
       else if (e.key.toLowerCase() === 'v' && !e.metaKey && !e.ctrlKey) setTool('move')
       else if (e.key.toLowerCase() === 'h' && !e.metaKey && !e.ctrlKey) setTool('hand')
       else if (e.key === '0' && (e.metaKey || e.ctrlKey)) {
@@ -150,18 +140,18 @@ export default function Preview() {
         setZoom(1)
         setPanState({ x: 0, y: 0 })
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        // 선택 레이어 삭제
+        // 선택 레이어 전체 삭제
         e.preventDefault()
-        const n = s.sourceData?.layers.length ?? 0
-        if (n) s.removeCustomLayer(Math.min(s.customIdx, n - 1))
+        if (s.customIdxs.length) s.removeCustomLayers(s.customIdxs)
       } else if (e.key.toLowerCase() === 'd' && (e.metaKey || e.ctrlKey)) {
-        // 복제
+        // 복제 — 선택이 있을 때만 (빈 곳 클릭으로 해제된 상태에서 보이지 않는 레이어 편집 방지)
         e.preventDefault()
         const n = s.sourceData?.layers.length ?? 0
-        if (n) s.duplicateCustomLayer(Math.min(s.customIdx, n - 1))
+        if (n && s.customIdxs.length) s.duplicateCustomLayer(Math.min(s.customIdx, n - 1))
       } else if (e.key.startsWith('Arrow')) {
         // 방향키 넛지 — 1px, Shift = 10px. 리핏 동안 라이브, 키 떼면 히스토리 1회
         e.preventDefault()
+        if (!s.customIdxs.length) return
         const step = e.shiftKey ? 10 : 1
         const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0
         const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0
@@ -214,10 +204,15 @@ export default function Preview() {
     return () => el.removeEventListener('wheel', onWheel)
   }, [templateId])
 
+  const idxClamped =
+    sourceData?.layers.length ? Math.min(customIdx, sourceData.layers.length - 1) : 0
+
   // 선택 박스 — 드래그 중엔 커서 따라, 평소엔 선택 레이어 위치 (sourceData 구독으로 반응)
-  // 프리뷰(재생) 중에는 표시하지 않는다
-  let selBox: { x: number; y: number; hw: number; hh: number } | null = previewing ? null : dragBox
-  if (!selBox && !previewing && templateId === '__custom' && sourceData?.layers.length) {
+  // 프리뷰(재생) 중·선택 해제 상태에는 표시하지 않는다
+  const hasSelection = customIdxs.length > 0
+  let selBox: { x: number; y: number; hw: number; hh: number } | null =
+    previewing || !hasSelection ? null : dragBox
+  if (!selBox && !previewing && hasSelection && templateId === '__custom' && sourceData?.layers.length) {
     const i = Math.min(customIdx, sourceData.layers.length - 1)
     const b = layerBaseOf(sourceData, i)
     if (b) {
@@ -226,6 +221,11 @@ export default function Preview() {
       selBox = { x: b[0] + ox, y: b[1] + oy, hw, hh }
     }
   }
+  // 주/보조 선택 박스 스트로크 = 레이어 라벨 컬러
+  const primaryColor =
+    sourceData?.layers[idxClamped] !== undefined
+      ? layerColor(sourceData.layers[idxClamped] as Record<string, unknown>, idxClamped)
+      : '#5B8DEF'
 
   // 호버 박스 — 선택될 레이어 미리 표시 (선택된 레이어와 같으면 생략)
   let hoverBox: { x: number; y: number; hw: number; hh: number } | null = null
@@ -329,8 +329,9 @@ export default function Preview() {
         const maybe = JSON.parse(text) as { app?: string; v?: number; sourceData?: unknown }
         if (maybe?.app === 'lottiemaker' && maybe.v === 1 && maybe.sourceData) {
           const s = useEditor.getState()
+          // 히스토리 유무가 아니라 작업공간이 비어있지 않으면 확인 — 복원 직후 세션도 보호
           if (
-            s.past.length > 0 &&
+            s.animationData &&
             !window.confirm('현재 작업을 프로젝트 파일 내용으로 교체할까요?')
           )
             return
@@ -382,6 +383,13 @@ export default function Preview() {
       /\.(svg|png|jpe?g|webp)$/i.test(file.name) ||
       /^image\/(svg\+xml|png|jpeg|webp)$/.test(file.type)
     if (isGraphic) {
+      // 그래픽 업로드는 커스텀 전용 — 템플릿 모드에선 확인 후 전환 (템플릿 작업은 보관됨)
+      const s = useEditor.getState()
+      if (s.mode !== 'custom') {
+        if (!window.confirm('그래픽 업로드는 커스텀 기능입니다. 커스텀으로 전환할까요?\n(템플릿 작업은 그대로 보관됩니다)'))
+          return
+        s.setMode('custom')
+      }
       dropGraphic(file, e.clientX, e.clientY).catch((err) => alert((err as Error).message))
     } else {
       openFile(file)
@@ -419,7 +427,8 @@ export default function Preview() {
 
       <div
         ref={canvasRef}
-        className={`preview__canvas preview__canvas--${mode === 'mockup' ? 'dark' : bg} ${
+        // 배경 옵션(체커 등)은 아트보드 내부에만 — 바깥은 항상 페이스트보드
+        className={`preview__canvas ${mode === 'mockup' ? 'preview__canvas--dark' : 'preview__canvas--board'} ${
           handActive && templateId === '__custom' && mode === 'canvas' ? 'preview__canvas--hand' : ''
         }`}
         onPointerDown={(e) => {
@@ -475,7 +484,7 @@ export default function Preview() {
           ) : (
             <div
               ref={wrapRef}
-              className="preview__lottie preview__lottiewrap"
+              className={`preview__lottie preview__lottiewrap preview__lottiewrap--${bg}`}
               style={
                 templateId === '__custom'
                   ? { transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }
@@ -569,6 +578,29 @@ export default function Preview() {
                         })()}
                     </>
                   )}
+                  {!previewing &&
+                    customIdxs
+                      .filter((i) => i !== idxClamped && sourceData?.layers[i])
+                      .map((i) => {
+                        const b = layerBaseOf(sourceData!, i)
+                        if (!b) return null
+                        const [hw2, hh2] = layerHalfOf(sourceData!, i)
+                        const [ox2, oy2] = layerCenterOffsetOf(sourceData!, i)
+                        const mc = layerColor(sourceData!.layers[i] as Record<string, unknown>, i)
+                        return (
+                          <div
+                            key={`m${i}`}
+                            className="selbox selbox--multi"
+                            style={{
+                              left: `${((b[0] + ox2 - hw2) / 512) * 100}%`,
+                              top: `${((b[1] + oy2 - hh2) / 512) * 100}%`,
+                              width: `${((hw2 * 2) / 512) * 100}%`,
+                              height: `${((hh2 * 2) / 512) * 100}%`,
+                              borderColor: mc,
+                            }}
+                          />
+                        )
+                      })}
                   {selBox && (
                     <div
                       className="selbox"
@@ -577,6 +609,8 @@ export default function Preview() {
                         top: `${((selBox.y - selBox.hh) / 512) * 100}%`,
                         width: `${((selBox.hw * 2) / 512) * 100}%`,
                         height: `${((selBox.hh * 2) / 512) * 100}%`,
+                        borderColor: primaryColor,
+                        boxShadow: `0 0 0 1px ${tint(primaryColor, 0.35)}`,
                       }}
                     >
                       {!handActive &&
@@ -584,7 +618,7 @@ export default function Preview() {
                           <div
                             key={c}
                             className={`selhandle selhandle--${c}`}
-                            style={{ transform: `scale(${1 / zoom})` }}
+                            style={{ transform: `scale(${1 / zoom})`, borderColor: primaryColor }}
                             onPointerDown={(e) => {
                               e.stopPropagation()
                               const rect = wrapRef.current?.getBoundingClientRect()
@@ -599,11 +633,19 @@ export default function Preview() {
                               const startSize =
                                 ((layer?.xsel as { size?: number } | undefined)?.size ?? 240)
                               const b = layerBase(li)
-                              if (!rect || !b) return
+                              if (!rect || !b || !selBox) return
+                              // 반대 모서리(월드) — 기본 리사이즈의 고정점 (PS 방식)
+                              const sx = c.includes('w') ? 1 : -1
+                              const sy = c.includes('n') ? 1 : -1
+                              const opp: [number, number] = [
+                                selBox.x + sx * selBox.hw,
+                                selBox.y + sy * selBox.hh,
+                              ]
                               resizeDrag.current = {
                                 f: 512 / rect.width,
                                 bx: b[0], by: b[1],
                                 startSize,
+                                ox: opp[0] - b[0], oy: opp[1] - b[1],
                                 startDist: Math.max(
                                   8,
                                   Math.hypot(
@@ -622,10 +664,21 @@ export default function Preview() {
                                 (e.clientX - rect.left) * d.f - d.bx,
                                 (e.clientY - rect.top) * d.f - d.by,
                               )
-                              const px = Math.round(
+                              let px = Math.round(
                                 Math.min(480, Math.max(40, (d.startSize * dist) / d.startDist)),
                               )
-                              useEditor.getState().setCustomSizeLive(px)
+                              if (e.shiftKey) px = Math.round(px / 10) * 10 // Shift = 10px 스냅
+                              const stt = useEditor.getState()
+                              stt.setCustomSizeLive(px)
+                              if (!e.altKey) {
+                                // 기본: 반대 모서리 고정 — 크기 배율만큼 기준점 이동으로 보정.
+                                // Alt: 중심(앵커) 기준 — 기준점 고정.
+                                const k = px / d.startSize
+                                stt.setCustomBaseLive(
+                                  d.bx + (1 - k) * d.ox,
+                                  d.by + (1 - k) * d.oy,
+                                )
+                              }
                             }}
                             onPointerUp={(e) => {
                               if (!resizeDrag.current) return
@@ -664,7 +717,7 @@ export default function Preview() {
                   {!handActive && (
                     <div
                       className={`customdrag ${hoverIdx !== null || dragBox ? 'customdrag--overlayer' : ''}`}
-                      title="클릭: 레이어 선택 (같은 자리 재클릭: 아래 레이어) · 드래그: 이동 (Alt: 스냅 해제)"
+                      title="드래그: 이동 · Shift: 축 잠금 · Alt+드래그: 복제 · ⌘: 스냅 해제 · Esc: 취소"
                       onPointerDown={(e) => {
                         const rect = wrapRef.current?.getBoundingClientRect()
                         if (!rect) return
@@ -674,14 +727,30 @@ export default function Preview() {
                         setAnchorPop(false)
                         // 프리뷰 중 클릭 → 편집 모드로 복귀 (정지 + 박스 표시)
                         if (useEditor.getState().playing) setPlaying(false)
-                        const hit = pickLayer(px, py)
+                        let hit = pickLayer(px, py)
                         if (hit === null) {
-                          // 빈 곳 프레스 — 누르고 있는 동안 모든 레이어 영역 표시
+                          // 빈 곳 클릭 = 선택 해제 + 누르고 있는 동안 전체 영역 표시
+                          useEditor.getState().deselectCustom()
                           setShowAllBoxes(true)
                           e.currentTarget.setPointerCapture(e.pointerId)
                           return
                         }
-                        setCustomIdx(hit)
+                        // Shift/⌘+클릭 = 다중 선택 토글 (드래그 시작 안 함)
+                        if (e.shiftKey || e.metaKey || e.ctrlKey) {
+                          useEditor.getState().toggleCustomSel(hit)
+                          return
+                        }
+                        // Alt+드래그 = 복제해서 이동 (PS 방식) — 오프셋 없이 제자리 복제
+                        if (e.altKey) {
+                          useEditor.getState().duplicateCustomLayer(hit, 0)
+                          hit = Math.min(hit, (useEditor.getState().sourceData?.layers.length ?? 1) - 1)
+                          setCustomIdx(hit)
+                        } else if (useEditor.getState().customIdxs.includes(hit)) {
+                          // 이미 다중 선택에 포함 — 선택 유지한 채 그룹 드래그, 주 선택만 교체
+                          useEditor.setState({ customIdx: hit })
+                        } else {
+                          setCustomIdx(hit)
+                        }
                         setHoverIdx(null)
                         const base = layerBase(hit)
                         if (!base) return
@@ -712,9 +781,14 @@ export default function Preview() {
                         }
                         let tx = d.bx + (e.clientX - d.x) * d.f
                         let ty = d.by + (e.clientY - d.y) * d.f
+                        // Shift = 수평/수직 축 잠금 (지배적인 축만)
+                        if (e.shiftKey) {
+                          if (Math.abs(tx - d.bx) >= Math.abs(ty - d.by)) ty = d.by
+                          else tx = d.bx
+                        }
                         let gv: number | null = null
                         let gh: number | null = null
-                        if (!e.altKey) {
+                        if (!(e.metaKey || e.ctrlKey)) {
                           // 화면 10px 기준 흡착 — 시각적 중심/모서리 기준 (앵커 오프셋 반영)
                           const snapDist = 10 * d.f
                           const sx = snapAxis(tx + d.ox, d.hw, snapDist)
@@ -774,25 +848,56 @@ export default function Preview() {
             </div>
           )
         ) : (
-          <div className="preview__empty">
-            <p className="preview__empty-title">로티를 선택하거나 파일을 끌어다 놓으세요</p>
-            <p className="preview__empty-sub">
-              왼쪽 템플릿 클릭 · JSON 드래그앤드롭 · 이미지(SVG/PNG)를 놓으면 커스텀 시작
-            </p>
-            <button className="btn btn--secondary" onClick={() => fileInputRef.current?.click()}>
-              JSON 파일 열기
-            </button>
-          </div>
+          appMode === 'custom' ? (
+            <div className="preview__empty">
+              <p className="preview__empty-title">그래픽을 끌어다 놓아 커스텀을 시작하세요</p>
+              <p className="preview__empty-sub">
+                SVG/PNG/JPG/WebP · 왼쪽 커스텀 패널에서도 업로드 가능 · 프로젝트 파일(.lmproj.json) 드롭 시 복원
+              </p>
+              <button className="btn btn--secondary" onClick={() => fileInputRef.current?.click()}>
+                파일 열기
+              </button>
+            </div>
+          ) : (
+            <div className="preview__empty">
+              <p className="preview__empty-title">왼쪽에서 템플릿을 선택하세요</p>
+              <p className="preview__empty-sub">
+                로티 JSON · 프로젝트 파일(.lmproj.json)을 끌어다 놓아도 열립니다
+              </p>
+              <button className="btn btn--secondary" onClick={() => fileInputRef.current?.click()}>
+                JSON 파일 열기
+              </button>
+            </div>
+          )
         )}
         <input
           ref={fileInputRef}
           type="file"
-          accept=".json,application/json"
+          // 커스텀 모드에선 그래픽도 열 수 있다 — 빈 화면 안내 문구와 일치
+          accept={
+            appMode === 'custom'
+              ? '.json,application/json,.svg,image/svg+xml,.png,image/png,.jpg,.jpeg,image/jpeg,.webp,image/webp'
+              : '.json,application/json'
+          }
           hidden
           onChange={(e) => {
             const f = e.target.files?.[0]
-            if (f) openFile(f)
             e.target.value = ''
+            if (!f) return
+            const isGraphic =
+              /\.(svg|png|jpe?g|webp)$/i.test(f.name) ||
+              /^image\/(svg\+xml|png|jpeg|webp)$/.test(f.type)
+            if (isGraphic && useEditor.getState().mode === 'custom') {
+              // 좌표 없이 열면 캔버스 중앙 배치
+              const cx = wrapRef.current?.getBoundingClientRect()
+              dropGraphic(
+                f,
+                cx ? cx.left + cx.width / 2 : 0,
+                cx ? cx.top + cx.height / 2 : 0,
+              ).catch((err) => alert((err as Error).message))
+            } else {
+              openFile(f)
+            }
           }}
         />
       </div>
@@ -800,7 +905,7 @@ export default function Preview() {
       {animationData && (
         <div className="playbar">
           <button
-            className="btn btn--icon"
+            className="btn btn--icon playbar__play"
             onClick={() => setPlaying(!playing)}
             title={playing ? '일시정지 (Space)' : '재생 (Space)'}
           >
@@ -868,11 +973,13 @@ export default function Preview() {
 
       {templateId === '__custom' && mode === 'canvas' && animationData && (
         <Timeline
-          frameFrac={
+          // 랩 직전 frame이 total을 살짝 넘을 수 있음 — 플레이헤드가 트랙 밖으로 못 나가게 클램프
+          frameFrac={Math.min(
+            1,
             (totalFrames || animationData.op - animationData.ip) > 0
               ? frame / (totalFrames || animationData.op - animationData.ip)
-              : 0
-          }
+              : 0,
+          )}
           totalSec={durationSec(animationData)}
           onScrub={(frac, done) => {
             if (done) {

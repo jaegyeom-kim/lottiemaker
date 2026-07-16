@@ -40,11 +40,12 @@ function SimpleLayerPanel() {
 /** 커스텀 빌더용 레이어 패널 — 햄버거(≡) 홀드 드래그로 순서 변경. */
 function CustomLayerPanel() {
   const {
-    toggleLayer, setCustomIdx, duplicateCustomLayer, removeCustomLayer,
+    toggleLayer, setCustomIdx, toggleCustomSel, duplicateCustomLayer, removeCustomLayer,
     renameCustomLayer, reorderCustomLayer,
   } = useEditor()
   const sourceData = useEditor((s) => s.sourceData)
   const customIdx = useEditor((s) => s.customIdx)
+  const customIdxs = useEditor((s) => s.customIdxs)
   const [editingIdx, setEditingIdx] = useState<number | null>(null)
   const [nameDraft, setNameDraft] = useState('')
   const [drag, setDrag] = useState<{ from: number; to: number } | null>(null)
@@ -77,12 +78,17 @@ function CustomLayerPanel() {
               key={i}
               className={[
                 'layerrow',
-                i === idx ? 'layerrow--on' : '',
+                i === idx && customIdxs.includes(i) ? 'layerrow--on' : '',
+                i !== idx && customIdxs.includes(i) ? 'layerrow--multi' : '',
                 dragging ? 'layerrow--drag' : '',
                 insertBefore ? 'layerrow--insbefore' : '',
                 insertAfter ? 'layerrow--insafter' : '',
               ].join(' ')}
-              onClick={() => setCustomIdx(i)}
+              onClick={(e) => {
+                // Shift/⌘ = 다중 선택 토글
+                if (e.shiftKey || e.metaKey || e.ctrlKey) toggleCustomSel(i)
+                else setCustomIdx(i)
+              }}
             >
               <span
                 className="colordot"

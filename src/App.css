@@ -80,6 +80,35 @@
   gap: 5px;
 }
 
+/* 템플릿 검색 */
+.gallery__search {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  color: var(--text);
+  background: var(--bg-raise2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.gallery__search:focus {
+  outline: none;
+  border-color: var(--blue);
+}
+
+.gallery__search::placeholder {
+  color: var(--text-dim);
+}
+
+.gallery__none {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 16px 0;
+}
+
 .gallery__grid {
   flex: 1;
   overflow-y: auto;
@@ -100,6 +129,12 @@
   align-items: center;
   gap: 4px;
   transition: border-color 0.15s, transform 0.15s;
+}
+
+/* 지금 캔버스에 열려 있는 템플릿 표시 */
+.tile--current {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 1px var(--blue);
 }
 
 .tile:hover {
@@ -144,22 +179,13 @@
   padding: 32px;
 }
 
-.preview__canvas--checker {
-  background-image:
-    linear-gradient(45deg, #22222a 25%, transparent 25%),
-    linear-gradient(-45deg, #22222a 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #22222a 75%),
-    linear-gradient(-45deg, transparent 75%, #22222a 75%);
-  background-size: 24px 24px;
-  background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+/* 페이스트보드 — 아트보드 밖 작업 영역. 배경 옵션과 무관하게 균일 (테마 따라감) */
+.preview__canvas--board {
+  background: var(--pasteboard);
 }
 
 .preview__canvas--dark {
   background: #101014;
-}
-
-.preview__canvas--light {
-  background: #f2f4f6;
 }
 
 .preview__lottie {
@@ -205,11 +231,20 @@
   accent-color: var(--blue);
 }
 
+/* ▶/❚❚ 글리프 폭 차이로 재생 토글 때 옆 컨트롤이 1px씩 밀리는 것 방지 */
+.playbar__play {
+  min-width: 36px;
+  text-align: center;
+}
+
 .playbar__time {
   font-size: 12px;
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  /* 재생 중 자릿수 변화로 폭이 출렁여 flex-wrap 줄바꿈이 반복되는 것 방지 */
+  min-width: 17ch;
+  text-align: right;
 }
 
 .playbar__group {
@@ -1298,24 +1333,52 @@
   outline: none;
 }
 
-/* 캔버스 경계 + 크기 배지 */
+/* 아트보드 — 페이스트보드 위에 확실히 분리돼 보이는 작업 영역 */
 .preview__lottiewrap {
-  outline: 1px solid rgb(255 255 255 / 0.12);
+  outline: 1px solid var(--board-line);
   outline-offset: -1px;
+  box-shadow:
+    0 1px 3px rgb(0 0 0 / 0.5),
+    0 10px 36px rgb(0 0 0 / 0.45);
 }
 
+:root[data-theme='light'] .preview__lottiewrap {
+  box-shadow:
+    0 1px 3px rgb(30 34 46 / 0.14),
+    0 10px 32px rgb(30 34 46 / 0.16);
+}
+
+/* 배경 옵션은 아트보드 내부에만 적용 — 체커는 테마 따라 밝기 전환 */
+.preview__lottiewrap--checker {
+  background-color: var(--checker-bg);
+  background-image:
+    linear-gradient(45deg, var(--checker-sq) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--checker-sq) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--checker-sq) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--checker-sq) 75%);
+  background-size: 24px 24px;
+  background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+}
+
+.preview__lottiewrap--dark {
+  background: #101014;
+}
+
+.preview__lottiewrap--light {
+  background: #f2f4f6;
+}
+
+/* 크기 배지 — 아트보드 왼쪽 위 바깥, 일러 아트보드 라벨처럼 */
 .canvasbadge {
   position: absolute;
-  right: 6px;
-  bottom: 6px;
+  left: 0;
+  top: -22px;
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   color: var(--text-dim);
-  background: rgb(23 23 28 / 0.75);
-  padding: 2px 6px;
-  border-radius: 5px;
   pointer-events: none;
   z-index: 3;
+  white-space: nowrap;
 }
 
 /* 스냅 가이드 수치 라벨 */
@@ -1385,7 +1448,7 @@
   height: 28px;
   object-fit: contain;
   border-radius: 6px;
-  background: repeating-conic-gradient(#2a2a33 0 25%, transparent 0 50%) 0 0 / 8px 8px;
+  background: repeating-conic-gradient(var(--checker-sq) 0 25%, transparent 0 50%) 0 0 / 8px 8px;
   flex-shrink: 0;
 }
 
@@ -1712,7 +1775,7 @@
   left: 2px;
   width: 2px;
   border-radius: 1px;
-  background: rgb(255 255 255 / 0.75);
+  background: var(--grip);
 }
 
 .timeline__empty {
@@ -1731,7 +1794,7 @@
   top: 0;
   bottom: 0;
   width: 1px;
-  background: rgb(255 255 255 / 0.06);
+  background: var(--hairline);
   pointer-events: none;
 }
 
@@ -1867,6 +1930,11 @@
   margin-right: 6px;
 }
 
+/* 자동 저장 실패(용량 초과 등) — 눈에 띄는 경고색 */
+.topbar__saved--warn {
+  color: #e5a34d;
+}
+
 /* 클립 바 */
 .timeline__clip {
   position: absolute;
@@ -1932,6 +2000,11 @@
 .timeline__body--multi {
   max-height: 160px;
   overflow-y: auto;
+  /* 플레이헤드(폭 9px, 좌마진 -4px)가 루프 끝에서 오른쪽으로 삐져나가며
+     가로 스크롤바가 생겼다 사라져 UI가 흔들리던 것 방지 */
+  overflow-x: hidden;
+  /* 레이어가 늘어 세로 스크롤바가 생겨도 폭이 출렁이지 않게 자리 고정 */
+  scrollbar-gutter: stable;
 }
 
 .timeline__label--row {
@@ -2066,4 +2139,67 @@
 
 .anchorpop--fixed {
   width: 292px;
+}
+
+/* 정렬 패널 (일러스트레이터 Align) */
+.alignrow {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.alignbtn {
+  width: 30px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg-raise2);
+  color: var(--text-dim);
+}
+
+.alignbtn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--blue);
+}
+
+.alignbtn:disabled {
+  opacity: 0.35;
+}
+
+/* 다중 선택 표시 */
+.selbox--multi {
+  border-style: dashed;
+  border-color: rgb(49 130 246 / 0.65);
+}
+
+.layerrow--multi {
+  background: rgb(49 130 246 / 0.12);
+  border-color: rgb(49 130 246 / 0.4);
+}
+
+/* 타임라인 선택 강조 */
+.timeline__track--sel {
+  background: rgb(49 130 246 / 0.08);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.timeline__clip--on {
+  z-index: 2;
+}
+
+.timeline__clip--multi {
+  border-style: dashed;
+}
+
+.timeline__label--on {
+  color: #fff;
+  font-weight: 700;
+}
+
+.timeline__label--multi {
+  color: var(--text);
+  background: rgb(49 130 246 / 0.1);
 }

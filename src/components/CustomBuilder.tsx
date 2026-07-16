@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { useEditor, loadSavedSession } from '../store'
+import { useEditor } from '../store'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
 import {
   IN_TYPES,
@@ -23,6 +23,8 @@ export default function CustomBuilder() {
   } = useEditor()
   const sourceData = useEditor((s) => s.sourceData)
   const customIdx = useEditor((s) => s.customIdx)
+  // 선택 없음(빈 곳 클릭) 상태에선 레이어 옵션을 숨긴다 — 안 보이는 레이어를 편집하는 사고 방지
+  const hasSel = useEditor((s) => s.customIdxs.length > 0)
   const [error, setError] = useState('')
   const [dragOver, setDragOver] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -46,13 +48,6 @@ export default function CustomBuilder() {
   }
 
   const onFiles = async (files: FileList | File[]) => {
-    // 편집된 템플릿 위에 커스텀 세션을 시작하면 템플릿 작업이 파기됨 — 확인
-    const s0 = useEditor.getState()
-    if (
-      s0.templateId && s0.templateId !== '__custom' && s0.past.length > 0 &&
-      !window.confirm('편집 중인 템플릿 작업이 사라집니다. 커스텀을 시작할까요?')
-    )
-      return
     setError('')
     const errors: string[] = []
     for (const file of files) {
@@ -116,20 +111,9 @@ export default function CustomBuilder() {
       />
       {error && <p className="panel__error">{error}</p>}
 
-      {!active && loadSavedSession('custom') && (
-        <button
-          className="btn btn--secondary btn--full"
-          onClick={() => {
-            const saved = loadSavedSession('custom')
-            if (saved) useEditor.getState().restoreSession(saved)
-          }}
-        >
-          이전 커스텀 작업 이어하기
-        </button>
-      )}
-
-      {active && selLayer && (
+      {active && layers.length > 0 && (
         <>
+          {/* 컴포지션 설정은 레이어 선택과 무관 — 항상 표시 */}
           <h4 className="grouphead">컴포지션</h4>
           <div className="knob">
             {/* AE 컴프 길이 — 레이어 클립/키프레임은 절대 시간 유지 */}
@@ -145,7 +129,15 @@ export default function CustomBuilder() {
             />
             <p className="knob__note">길이를 늘려도 각 레이어의 애니메이션 타이밍은 그대로입니다.</p>
           </div>
+        </>
+      )}
 
+      {active && layers.length > 0 && !hasSel && (
+        <p className="knob__note">캔버스나 레이어 목록에서 레이어를 선택하면 애니메이션 옵션이 나타납니다.</p>
+      )}
+
+      {active && selLayer && hasSel && (
+        <>
           <h4 className="grouphead">애니메이션</h4>
 
           {/* 등장 (In) */}

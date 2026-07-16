@@ -18,6 +18,13 @@
   --blue-dim: #1b64d8;
   --red: #f04452;
   --radius: 12px;
+  /* 캔버스 주변 — 테마별로 갈리는 표면들 */
+  --pasteboard: #0c0c11;
+  --board-line: rgb(255 255 255 / 0.16);
+  --checker-bg: #17171d;
+  --checker-sq: #22222a;
+  --hairline: rgb(255 255 255 / 0.06);
+  --grip: rgb(255 255 255 / 0.75);
 
   font-family:
     'Pretendard Variable',
@@ -31,6 +38,23 @@
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+}
+
+/* 라이트 테마 — html[data-theme='light']로 전환 (기본은 다크) */
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f4f5f7;
+  --bg-raise: #ffffff;
+  --bg-raise2: #edeff3;
+  --line: #e3e5ec;
+  --text: #1b1d23;
+  --text-dim: #767b89;
+  --pasteboard: #e2e4e9;
+  --board-line: rgb(0 0 0 / 0.14);
+  --checker-bg: #ffffff;
+  --checker-sq: #e8eaee;
+  --hairline: rgb(0 0 0 / 0.08);
+  --grip: rgb(70 74 86 / 0.75);
 }
 
 html,
