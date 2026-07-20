@@ -1720,7 +1720,58 @@
   align-items: center;
   font-size: 10px;
   color: var(--text-dim);
-  width: 44px;
+  width: 92px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 레이어 + 프로퍼티 행 묶음 — 부모 gap과 동일한 내부 간격 */
+.timeline__labelgroup,
+.timeline__trackgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 펼침 화살표 (키프레임 레이어만) */
+.timeline__twirl {
+  width: 12px;
+  flex-shrink: 0;
+  font-size: 8px;
+  color: var(--text-dim);
+  text-align: left;
+  padding: 0;
+}
+
+.timeline__twirl--none {
+  display: inline-block;
+}
+
+/* 프로퍼티 행 라벨 — 트리 들여쓰기 + ◆ 토글 */
+.timeline__label--prop {
+  height: 16px;
+  padding-left: 14px;
+  font-size: 9.5px;
+  gap: 4px;
+}
+
+.timeline__propkey {
+  font-size: 9px;
+  color: var(--text-dim);
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.timeline__propkey--on {
+  color: var(--blue);
+}
+
+.timeline__propcount {
+  font-style: normal;
+  font-size: 8.5px;
+  color: var(--text-dim);
+  opacity: 0.8;
 }
 
 .timeline__tracks {
@@ -1816,17 +1867,19 @@
   bottom: 0;
   left: 4px;
   width: 1px;
-  background: var(--red);
+  background: var(--blue);
 }
 
+/* Figma Motion식 원형 헤드 */
 .timeline__playhead-head {
   position: absolute;
-  top: 0;
-  left: 1px;
-  width: 7px;
-  height: 8px;
-  background: var(--red);
-  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  top: -1px;
+  left: 0;
+  width: 9px;
+  height: 9px;
+  background: var(--blue);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.5px rgb(49 130 246 / 0.35);
 }
 
 .timeline__ruler {
@@ -1835,6 +1888,264 @@
   background: var(--bg-raise2);
   border-radius: 5px;
   cursor: ew-resize;
+}
+
+/* 키프레임 모드 패널 — 채널 행 (◀ ◆ ▶ 라벨 값) */
+.kfrow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.kfrow__nav,
+.kfrow__key {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  font-size: 9px;
+  color: var(--text-dim);
+  border-radius: 5px;
+  background: var(--bg-raise2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.kfrow__key {
+  font-size: 11px;
+}
+
+.kfrow__nav:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.kfrow__key--on {
+  color: #fff;
+  background: var(--blue);
+}
+
+.kfrow__label {
+  font-size: 11.5px;
+  flex: 1;
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.kfrow__count {
+  font-style: normal;
+  font-size: 9.5px;
+  color: var(--text-dim);
+  background: var(--bg-raise2);
+  padding: 0 5px;
+  border-radius: 8px;
+}
+
+.kfrow__vals {
+  display: flex;
+  gap: 4px;
+}
+
+.kfrow__vals {
+  flex-shrink: 0;
+}
+
+.kfrow__vals .posinput input {
+  width: 48px;
+}
+
+/* 타임라인 시간 표시 (ms) */
+.timeline__time {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  margin-left: 10px;
+  margin-right: auto;
+}
+
+/* 프로퍼티 레인 — 배경 없는 얇은 행, 키 연결선 */
+.timeline__track--prop {
+  height: 16px;
+  background: none;
+  border-radius: 0;
+  overflow: visible;
+}
+
+.timeline__proplink {
+  position: absolute;
+  top: 50%;
+  height: 1px;
+  margin-top: -0.5px;
+  background: var(--text-dim);
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* 키프레임 다이아몬드 */
+.timeline__kf {
+  position: absolute;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  background: #fff;
+  border: 1px solid rgb(0 0 0 / 0.4);
+  border-radius: 1.5px;
+  transform: rotate(45deg);
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: 2;
+}
+
+.timeline__kf:hover {
+  background: var(--blue);
+  border-color: #fff;
+}
+
+/* 프로퍼티 레인의 다이아몬드 — 작고 비어 보이는 스타일 (Figma Motion) */
+.timeline__kf--prop {
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  background: var(--bg-raise);
+  border: 1px solid var(--text-dim);
+}
+
+.timeline__kf--prop:hover {
+  background: var(--blue);
+  border-color: #fff;
+}
+
+/* 선택된 키 — 마키/클릭 선택 */
+.timeline__kf--sel {
+  background: var(--blue);
+  border-color: #fff;
+  box-shadow: 0 0 0 2px rgb(49 130 246 / 0.35);
+}
+
+/* 마키 선택 박스 */
+.timeline__marquee {
+  position: absolute;
+  border: 1px dashed var(--blue);
+  background: rgb(49 130 246 / 0.12);
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* 구간 이징 버튼 — 키 사이 중앙의 작대기 (Figma Motion) */
+.timeline__ease {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  background: var(--bg-raise);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  z-index: 2;
+  padding: 0;
+}
+
+.timeline__ease:hover {
+  color: #fff;
+  background: var(--blue);
+  border-color: var(--blue);
+}
+
+/* 이징 커브 팝업 */
+.easepop__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+}
+
+.easepop {
+  position: fixed;
+  z-index: 71;
+  background: var(--bg-raise);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.45);
+}
+
+.easepop__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.easepop__close {
+  color: var(--text-dim);
+  font-size: 14px;
+  padding: 0 4px;
+}
+
+.easepop__curve {
+  display: block;
+  background: var(--bg-raise2);
+  border-radius: 8px;
+  touch-action: none;
+}
+
+.easepop__grid {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.easepop__arm {
+  stroke: var(--text-dim);
+  stroke-width: 1.2;
+  opacity: 0.7;
+}
+
+.easepop__path {
+  stroke: var(--text);
+  stroke-width: 2;
+  fill: none;
+  stroke-linecap: round;
+}
+
+.easepop__end {
+  fill: var(--text-dim);
+}
+
+.easepop__handle {
+  fill: var(--bg-raise);
+  stroke: var(--blue);
+  stroke-width: 2;
+  cursor: grab;
+}
+
+.easepop__handle:active {
+  cursor: grabbing;
+}
+
+.easepop__vals {
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  background: var(--bg-raise2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.easepop__vals:focus {
+  outline: none;
+  border-color: var(--blue);
 }
 
 .timeline__label--ruler {
@@ -1922,6 +2233,12 @@
   pointer-events: none;
   white-space: nowrap;
   overflow: hidden;
+}
+
+/* 라이트 테마 — 밝은 틴트 바 위 흰 글씨가 안 보이던 것 */
+:root[data-theme='light'] .timeline__barlabel {
+  color: rgb(20 22 28 / 0.82);
+  text-shadow: none;
 }
 
 .topbar__saved {
@@ -2036,11 +2353,12 @@
 /* 멀티 레이어 타임라인 */
 .timeline__body--multi .timeline__tracks,
 .timeline__body--multi .timeline__labels {
-  max-height: 140px;
+  max-height: 190px;
 }
 
 .timeline__body--multi {
-  max-height: 160px;
+  /* 프로퍼티 행이 늘어난 만큼 여유 — 레이어 2개 + 트리 펼침이 잘리지 않게 */
+  max-height: 210px;
   overflow-y: auto;
   /* 플레이헤드(폭 9px, 좌마진 -4px)가 루프 끝에서 오른쪽으로 삐져나가며
      가로 스크롤바가 생겼다 사라져 UI가 흔들리던 것 방지 */
@@ -2237,7 +2555,7 @@
 }
 
 .timeline__label--on {
-  color: #fff;
+  color: var(--text);
   font-weight: 700;
 }
 

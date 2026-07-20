@@ -84,8 +84,9 @@ export const DEFAULT_SEL: CustomSel = {
 export function normSel(raw: Partial<CustomSel> | undefined, op = CUSTOM_OP): CustomSel {
   const r = raw ?? {}
   const inn = { ...DEFAULT_SEL.in, ...(r.in ?? {}) }
+  // 명시된 클립도 [0, op]로 클램프 — 범위 밖 클립이 xsel에 영구 저장되지 않게
   const clip: [number, number] = Array.isArray(r.clip)
-    ? [r.clip[0], r.clip[1]]
+    ? [Math.max(0, Math.min(op, r.clip[0])), Math.max(0, Math.min(op, r.clip[1]))]
     : [Math.max(0, Math.min(op - 8, inn.delay ?? 0)), op]
   return {
     ...DEFAULT_SEL,
@@ -298,6 +299,156 @@ export function buildAnimKs(
     r,
     p: prop(3, pk, [bx, by, 0]),
     s: prop(3, sk, [100, 100, 100]),
+  }
+}
+
+// ── 키프레임 모드 (AE 사용자용) ─────────────────────────────
+// 프리셋(3슬롯) 대신 레이어에 직접 키를 찍는다. 키 하나 = 시각 t에 채널 값 부분집합.
+// 로티 재생기는 xkf를 무시 — ks 채널은 편집 때마다 여기서 재생성된다.
+
+export const KF_EASES = ['선형', '이지', '천천히 시작', '천천히 끝']
+
+/** cubic-bezier(x1, y1, x2, y2) — CSS/Figma와 같은 표기. */
+export type Bezier4 = [number, number, number, number]
+
+export const EASE_PRESETS: { label: string; bez: Bezier4 }[] = [
+  { label: '선형', bez: [0, 0, 1, 1] },
+  { label: '이지', bez: [0.42, 0, 0.58, 1] },
+  { label: '천천히 시작', bez: [0.42, 0, 1, 1] },
+  { label: '천천히 끝', bez: [0, 0, 0.58, 1] },
+]
+
+/** 레이어 기본 이징 인덱스(KF_EASES) → 베지어. */
+export function easeIndexBez(i: number): Bezier4 {
+  return (EASE_PRESETS[i] ?? EASE_PRESETS[1]).bez
+}
+
+export interface KfKey {
+  t: number
+  /** 위치 (절대 캔버스 px). */
+  p?: [number, number]
+  /** 크기 % (100 = 현재 그래픽 크기). */
+  s?: number
+  /** 회전 °. */
+  r?: number
+  /** 불투명도 0~100. */
+  o?: number
+  /** 이 키에서 시작하는 구간의 채널별 이징 오버라이드 — 없으면 레이어 기본. */
+  e?: Partial<Record<'p' | 's' | 'r' | 'o', Bezier4>>
+}
+
+/** 키 k에서 시작하는 ch 구간의 이징 — 오버라이드 → 레이어 기본 순. */
+export function segEaseOf(xkf: CustomKf, k: KfKey, ch: 'p' | 's' | 'r' | 'o'): Bezier4 {
+  const o = k.e?.[ch]
+  if (Array.isArray(o) && o.length === 4 && o.every((n) => typeof n === 'number')) return o
+  return easeIndexBez(xkf.ease)
+}
+
+export interface CustomKf {
+  on: boolean
+  /** KF_EASES 인덱스 — 레이어 전체 세그먼트에 적용. */
+  ease: number
+  keys: KfKey[]
+}
+
+export const DEFAULT_KF: CustomKf = { on: false, ease: 1, keys: [] }
+
+/** 부분/없음 → 완전한 CustomKf. 키는 t 오름차순 정렬, 이징 오버라이드는 유효한 것만. */
+export function normKf(raw: Partial<CustomKf> | undefined): CustomKf {
+  const r = raw ?? {}
+  const keys = (Array.isArray(r.keys) ? r.keys : [])
+    .filter((k) => typeof k?.t === 'number')
+    .map((k) => {
+      const e: KfKey['e'] = {}
+      for (const ch of ['p', 's', 'r', 'o'] as const) {
+        const b = k.e?.[ch]
+        if (Array.isArray(b) && b.length === 4 && b.every((n) => typeof n === 'number'))
+          e[ch] = [b[0], b[1], b[2], b[3]]
+      }
+      const { e: _drop, ...rest } = k
+      void _drop
+      return { ...rest, t: Math.round(k.t * 10) / 10, ...(Object.keys(e).length ? { e } : {}) }
+    })
+    .sort((a, b) => a.t - b.t)
+  return { on: !!r.on, ease: typeof r.ease === 'number' ? r.ease : 1, keys }
+}
+
+export type KfChannel = 'p' | 's' | 'r' | 'o'
+
+/** 타임라인 키 선택 항목 — 레이어 인덱스 + 채널 + 시각. */
+export interface KfSelItem {
+  li: number
+  ch: KfChannel
+  t: number
+}
+
+/** 채널에 값이 있는 키만 t순으로. */
+export function kfChannelKeys(xkf: CustomKf, ch: KfChannel): KfKey[] {
+  return xkf.keys.filter((k) => k[ch] !== undefined)
+}
+
+/** 채널의 t 시점 보간값 — 키 없으면 fallback (캔버스 박스/값 캡처용, 선형 근사). */
+export function kfValueAt(
+  xkf: CustomKf,
+  ch: KfChannel,
+  t: number,
+  fallback: number | [number, number],
+): number | [number, number] {
+  const keys = kfChannelKeys(xkf, ch)
+  if (!keys.length) return fallback
+  const val = (k: KfKey) => k[ch] as number | [number, number]
+  if (t <= keys[0].t) return val(keys[0])
+  if (t >= keys[keys.length - 1].t) return val(keys[keys.length - 1])
+  for (let i = 0; i < keys.length - 1; i++) {
+    const a = keys[i]
+    const b = keys[i + 1]
+    if (t >= a.t && t <= b.t) {
+      const f = b.t === a.t ? 0 : (t - a.t) / (b.t - a.t)
+      const va = val(a)
+      const vb = val(b)
+      if (Array.isArray(va) && Array.isArray(vb))
+        return [va[0] + (vb[0] - va[0]) * f, va[1] + (vb[1] - va[1]) * f]
+      return (va as number) + ((vb as number) - (va as number)) * f
+    }
+  }
+  return fallback
+}
+
+/**
+ * 키프레임 모드 → ks 채널. 채널마다 키가 있으면 그 값으로, 없으면 정적
+ * (위치 = xbase, 크기 = 100%, 회전/불투명도 = xsel의 변형 값).
+ * 이징은 구간(키→다음 키)마다 — 키의 e 오버라이드, 없으면 레이어 기본.
+ */
+export function buildKfKs(
+  xkf: CustomKf,
+  sel: CustomSel,
+  base: [number, number],
+): { o: unknown; r: unknown; p: unknown; s: unknown } {
+  const maxO = Math.max(0, Math.min(100, sel.opacity))
+  const mk = (ch: KfChannel, dims: number, toArr: (v: never) => number[], staticVal: number[]) => {
+    const keys = kfChannelKeys(xkf, ch)
+    if (keys.length < 2) {
+      // 키 1개 = 그 값으로 정적 (AE와 동일)
+      const v = keys.length ? toArr(keys[0][ch] as never) : staticVal
+      return { a: 0, k: dims === 1 ? v[0] : v }
+    }
+    const k = keys.map((x, i) => {
+      if (i === keys.length - 1) return { t: x.t, s: toArr(x[ch] as never) }
+      const [x1, y1, x2, y2] = segEaseOf(xkf, x, ch)
+      return {
+        o: { x: Array(dims).fill(x1), y: Array(dims).fill(y1) },
+        i: { x: Array(dims).fill(x2), y: Array(dims).fill(y2) },
+        t: x.t,
+        s: toArr(x[ch] as never),
+      }
+    })
+    return { a: 1, k }
+  }
+  return {
+    p: mk('p', 3, (v: [number, number]) => [R(v[0]), R(v[1]), 0], [base[0], base[1], 0]),
+    s: mk('s', 3, (v: number) => [R(v), R(v), 100], [100, 100, 100]),
+    r: mk('r', 1, (v: number) => [R(v)], [sel.rotation ?? 0]),
+    o: mk('o', 1, (v: number) => [Math.max(0, Math.min(100, v))], [maxO]),
   }
 }
 

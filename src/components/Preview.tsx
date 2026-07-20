@@ -3,16 +3,28 @@ import { createPortal } from 'react-dom'
 import { useEditor } from '../store'
 import { durationSec, parseLottie, type LottieJson } from '../lib/lottieUtils'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
-import { layerHalfOf, layerCenterOffsetOf, layerColor, tint, type CustomPayload } from '../lib/customBuilder'
+import {
+  layerHalfOf, layerCenterOffsetOf, layerColor, tint, normKf, kfValueAt,
+  kfChannelKeys, normSel, animSpans,
+  type CustomPayload, type CustomKf, type CustomSel, type KfChannel,
+} from '../lib/customBuilder'
 import LottiePlayer from './LottiePlayer'
 import MockupView from './MockupView'
 import Timeline from './Timeline'
 import AnchorControls from './AnchorControls'
 
-/** 문서에서 레이어 i의 기준 위치 (첫 키프레임 또는 정적 값). */
-function layerBaseOf(doc: LottieJson, i: number): [number, number] | null {
+/** 문서에서 레이어 i의 기준 위치 (첫 키프레임 또는 정적 값). atFrame = 키프레임 모드 보간 시각. */
+function layerBaseOf(doc: LottieJson, i: number, atFrame?: number): [number, number] | null {
   const layer = doc.layers[i] as (Record<string, unknown> & { ks?: unknown }) | undefined
   if (!layer) return null
+  // 키프레임 모드 — 파킹 프레임의 보간 위치 (박스가 애니메이션 위치를 따라감)
+  const xkfRaw = layer.xkf as Partial<CustomKf> | undefined
+  if (xkfRaw?.on && typeof atFrame === 'number') {
+    const xb: [number, number] = Array.isArray(layer.xbase)
+      ? [(layer.xbase as number[])[0], (layer.xbase as number[])[1]]
+      : [256, 256]
+    return kfValueAt(normKf(xkfRaw), 'p', atFrame, xb) as [number, number]
+  }
   // 정착 위치 = xbase (슬라이드류는 첫 키프레임이 화면 밖 오프셋이라 쓰면 안 됨)
   if (Array.isArray(layer.xbase)) {
     return [(layer.xbase as number[])[0], (layer.xbase as number[])[1]]
@@ -65,6 +77,32 @@ export default function Preview() {
   useEffect(() => {
     setAnchorPop(false)
   }, [customIdx, templateId])
+  const setCurFrame = useEditor((s) => s.setCurFrame)
+  const jumpToken = useEditor((s) => s.jumpToken)
+  // 재생 중 실제 프레임 — 단축키가 파킹값 대신 눈에 보이는 프레임을 쓰도록
+  const frameRef = useRef(0)
+  // 진행 중인 점프 목표 — 낡은 시크 에코가 curFrame을 되감는 것 방지
+  const pendingJump = useRef<number | null>(null)
+  // 파킹 프레임 → 스토어 — 키프레임 모드 자동 키가 찍히는 시각 (재생 중엔 갱신 안 함)
+  useEffect(() => {
+    if (playing) return
+    const f = Math.round(frame)
+    if (pendingJump.current !== null) {
+      if (f !== pendingJump.current) return // 점프 도착 전의 낡은 프레임 에코 무시
+      pendingJump.current = null
+    }
+    setCurFrame(f)
+  }, [playing, frame, setCurFrame])
+  // 키 탐색(◀/▶)의 재생헤드 이동 요청 소비
+  useEffect(() => {
+    if (!jumpToken) return
+    pendingJump.current = jumpToken.f
+    setPlaying(false)
+    setSeek(jumpToken.f)
+    const id = setTimeout(() => setSeek(null), 60)
+    return () => clearTimeout(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpToken])
   const lastPick = useRef<{ x: number; y: number; pick: number } | null>(null)
   const resizeDrag = useRef<{
     f: number; bx: number; by: number; startSize: number; startDist: number
@@ -118,6 +156,7 @@ export default function Preview() {
       const s = useEditor.getState()
       if (e.key === 'Escape') {
         setAnchorPop(false)
+        if (s.kfSel.length) s.setKfSel([]) // 타임라인 키 선택 해제
         // 진행 중인 드래그/리사이즈 취소 — 시작 시점으로 복원 (PS Esc)
         if (dragStart.current || resizeDrag.current) {
           dragStart.current = null
@@ -140,9 +179,10 @@ export default function Preview() {
         setZoom(1)
         setPanState({ x: 0, y: 0 })
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        // 선택 레이어 전체 삭제
         e.preventDefault()
-        if (s.customIdxs.length) s.removeCustomLayers(s.customIdxs)
+        // 타임라인 키 선택이 있으면 키 삭제, 아니면 선택 레이어 삭제
+        if (s.kfSel.length) s.removeKfKeys(s.kfSel)
+        else if (s.customIdxs.length) s.removeCustomLayers(s.customIdxs)
       } else if (e.key.toLowerCase() === 'd' && (e.metaKey || e.ctrlKey)) {
         // 복제 — 선택이 있을 때만 (빈 곳 클릭으로 해제된 상태에서 보이지 않는 레이어 편집 방지)
         e.preventDefault()
@@ -161,6 +201,130 @@ export default function Preview() {
           ] as Record<string, unknown> | undefined
           const xb = layer?.xbase as number[] | undefined
           if (xb) s.setCustomBaseLive(xb[0] + dx, xb[1] + dy)
+        }
+      } else if (
+        !e.metaKey &&
+        !e.ctrlKey &&
+        s.sourceData &&
+        // 드래그/라이브 편집 세션 중엔 발동 금지 — 열린 editBaseline을 되감거나 오염시킴
+        !dragStart.current &&
+        !resizeDrag.current &&
+        !s.editBaseline
+      ) {
+        // ── AE식 타임라인 단축키 ─────────────────────────────
+        const op = s.sourceData.op
+        const hasSel = s.customIdxs.length > 0
+        const li = Math.min(s.customIdx, s.sourceData.layers.length - 1)
+        const layer = s.sourceData.layers[li] as Record<string, unknown> | undefined
+        const xkf = normKf(layer?.xkf as Partial<CustomKf> | undefined)
+        const xsel = normSel(layer?.xsel as Partial<CustomSel> | undefined, op)
+        const spans = animSpans(xsel, op)
+        const len = spans.clipB - spans.clipA
+        const key = e.key.toLowerCase()
+        // 유효 재생헤드 — 재생 중엔 눈에 보이는 프레임 (파킹값은 낡았음)
+        const cur = s.playing ? Math.round(frameRef.current) : s.curFrame
+
+        // 프레임 스텝 — PgUp/PgDn (Shift = 10f). AE와 동일
+        if (e.key === 'PageUp' || e.key === 'PageDown') {
+          e.preventDefault()
+          const d = (e.key === 'PageUp' ? -1 : 1) * (e.shiftKey ? 10 : 1)
+          s.jumpTo(Math.max(0, Math.min(op, cur + d)))
+        }
+        // 컴프 시작/끝 — Home/End
+        else if (e.key === 'Home' || e.key === 'End') {
+          e.preventDefault()
+          s.jumpTo(e.key === 'Home' ? 0 : op)
+        }
+        // J/K — 이전/다음 키프레임으로 (선택된 키프레임 레이어에 키가 있으면 그 레이어, 아니면 전체)
+        else if ((key === 'j' || key === 'k') && !e.altKey) {
+          e.preventDefault()
+          const pool: number[] = []
+          if (hasSel && xkf.on && xkf.keys.length) {
+            for (const k of xkf.keys) pool.push(k.t)
+          } else {
+            for (const l of s.sourceData.layers) {
+              const x = normKf((l as Record<string, unknown>).xkf as Partial<CustomKf> | undefined)
+              if (x.on) for (const k of x.keys) pool.push(k.t)
+            }
+          }
+          if (!pool.length) return
+          pool.sort((a, b) => a - b)
+          const t =
+            key === 'j'
+              ? [...pool].reverse().find((v) => v < cur - 0.5)
+              : pool.find((v) => v > cur + 0.5)
+          if (t !== undefined) s.jumpTo(t)
+        }
+        // I/O — 선택 레이어 인/아웃 포인트로
+        else if ((key === 'i' || key === 'o') && !e.altKey && layer && hasSel) {
+          e.preventDefault()
+          s.jumpTo(key === 'i' ? spans.clipA : spans.clipB)
+        }
+        // [ / ] — 클립을 재생헤드에 맞춰 이동 (AE: 인/아웃 포인트를 CTI로). 키프레임도 동반
+        else if (
+          (e.code === 'BracketLeft' || e.code === 'BracketRight') &&
+          !e.altKey &&
+          layer &&
+          hasSel
+        ) {
+          e.preventDefault()
+          if (e.repeat) return
+          const a =
+            e.code === 'BracketLeft'
+              ? Math.max(0, Math.min(op - len, cur))
+              : Math.max(0, Math.min(op - len, cur - len))
+          if (Math.abs(a - spans.clipA) < 0.01) return
+          s.jumpTo(cur) // 일시정지 + 파킹 — 편집 기준 프레임 고정
+          if (xkf.on) {
+            s.moveKfClipLive(a, a + len, a - spans.clipA)
+            s.commitEdit()
+          } else {
+            s.setCustomChannels({ ...xsel, clip: [a, a + len] })
+          }
+        }
+        // ⌥[ / ⌥] — 재생헤드까지 트림 (키는 제자리, AE와 동일)
+        else if (
+          (e.code === 'BracketLeft' || e.code === 'BracketRight') &&
+          e.altKey &&
+          layer &&
+          hasSel
+        ) {
+          e.preventDefault()
+          if (e.repeat) return
+          const clip: [number, number] =
+            e.code === 'BracketLeft'
+              ? [Math.max(0, Math.min(cur, spans.clipB - 8)), spans.clipB]
+              : [spans.clipA, Math.min(op, Math.max(cur, spans.clipA + 8))]
+          // 변화 없으면 히스토리 오염 방지
+          if (Math.abs(clip[0] - spans.clipA) < 0.01 && Math.abs(clip[1] - spans.clipB) < 0.01)
+            return
+          s.jumpTo(cur)
+          s.setCustomChannels({ ...xsel, clip })
+        }
+        // ⌥P/S/R/T — 재생헤드에 채널 키 토글 (AE: Option+P = 위치 키). 키프레임 모드 전용
+        else if (
+          e.altKey &&
+          (e.code === 'KeyP' || e.code === 'KeyS' || e.code === 'KeyR' || e.code === 'KeyT') &&
+          xkf.on &&
+          layer &&
+          hasSel
+        ) {
+          e.preventDefault()
+          if (e.repeat) return
+          const ch: KfChannel =
+            e.code === 'KeyP' ? 'p' : e.code === 'KeyS' ? 's' : e.code === 'KeyR' ? 'r' : 'o'
+          s.jumpTo(cur) // 키가 찍히는 프레임을 눈에 보이는 프레임으로 고정
+          const has = kfChannelKeys(xkf, ch).some((k) => Math.abs(k.t - cur) < 0.5)
+          if (has) {
+            s.removeKfChannel(ch, cur)
+          } else {
+            const xb: [number, number] = Array.isArray(layer.xbase)
+              ? [(layer.xbase as number[])[0], (layer.xbase as number[])[1]]
+              : [256, 256]
+            const fb: number | [number, number] =
+              ch === 'p' ? xb : ch === 's' ? 100 : ch === 'r' ? xsel.rotation : xsel.opacity
+            s.setKfChannel(ch, cur, kfValueAt(xkf, ch, cur, fb))
+          }
         }
       }
     }
@@ -214,7 +378,7 @@ export default function Preview() {
     previewing || !hasSelection ? null : dragBox
   if (!selBox && !previewing && hasSelection && templateId === '__custom' && sourceData?.layers.length) {
     const i = Math.min(customIdx, sourceData.layers.length - 1)
-    const b = layerBaseOf(sourceData, i)
+    const b = layerBaseOf(sourceData, i, Math.round(frame))
     if (b) {
       const [hw, hh] = layerHalfOf(sourceData, i)
       const [ox, oy] = layerCenterOffsetOf(sourceData, i)
@@ -237,7 +401,7 @@ export default function Preview() {
     sourceData?.layers[hoverIdx] &&
     hoverIdx !== Math.min(customIdx, sourceData.layers.length - 1)
   ) {
-    const b = layerBaseOf(sourceData, hoverIdx)
+    const b = layerBaseOf(sourceData, hoverIdx, Math.round(frame))
     if (b) {
       const [hw, hh] = layerHalfOf(sourceData, hoverIdx)
       const [ox, oy] = layerCenterOffsetOf(sourceData, hoverIdx)
@@ -249,7 +413,7 @@ export default function Preview() {
   const layerBase = (i: number): [number, number] | null => {
     const s = useEditor.getState()
     if (s.templateId !== '__custom' || !s.sourceData) return null
-    return layerBaseOf(s.sourceData, i)
+    return layerBaseOf(s.sourceData, i, s.curFrame)
   }
 
   const layerHalf = (i: number): [number, number] => {
@@ -318,6 +482,7 @@ export default function Preview() {
   }
 
   const onFrame = useCallback((f: number, total: number) => {
+    frameRef.current = f
     setFrame(f)
     setTotalFrames(total)
   }, [])
@@ -582,7 +747,7 @@ export default function Preview() {
                     customIdxs
                       .filter((i) => i !== idxClamped && sourceData?.layers[i])
                       .map((i) => {
-                        const b = layerBaseOf(sourceData!, i)
+                        const b = layerBaseOf(sourceData!, i, Math.round(frame))
                         if (!b) return null
                         const [hw2, hh2] = layerHalfOf(sourceData!, i)
                         const [ox2, oy2] = layerCenterOffsetOf(sourceData!, i)
@@ -697,7 +862,7 @@ export default function Preview() {
                   {showAllBoxes &&
                     !previewing &&
                     sourceData?.layers.map((_, i) => {
-                      const b = layerBaseOf(sourceData, i)
+                      const b = layerBaseOf(sourceData, i, Math.round(frame))
                       if (!b) return null
                       const [hw, hh] = layerHalfOf(sourceData, i)
                       const [cox, coy] = layerCenterOffsetOf(sourceData, i)
@@ -925,6 +1090,7 @@ export default function Preview() {
                 step={0.01}
                 value={frame}
                 onChange={(e) => {
+                  pendingJump.current = null // 수동 스크럽 — 점프 에코 억제 해제
                   setPlaying(false)
                   setSeek(Number(e.target.value))
                 }}
@@ -985,6 +1151,7 @@ export default function Preview() {
             if (done) {
               setSeek(null)
             } else {
+              pendingJump.current = null // 수동 스크럽 — 점프 에코 억제 해제
               setPlaying(false)
               // 문서 기준 프레임 수 — 플레이어가 아직 보고 전이어도 스크럽 동작
               const frames = Math.max(1, animationData.op - animationData.ip)

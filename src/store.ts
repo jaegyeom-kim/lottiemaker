@@ -5,8 +5,10 @@ import { toggleLayer as toggleLayerUtil, resize as resizeUtil } from './lib/lott
 import { applyKnobs, type TemplateKnob } from './lib/lottieKnobs'
 import {
   buildAnimKs, buildCustomDoc, buildCustomLayer, animSpans, normSel,
-  layerHalfOf, layerCenterOffsetOf,
-  CUSTOM_ASSET_PREFIX, DEFAULT_SEL, type CustomSel, type CustomPayload,
+  layerHalfOf, layerCenterOffsetOf, normKf, buildKfKs, kfValueAt,
+  CUSTOM_ASSET_PREFIX, DEFAULT_SEL,
+  type CustomSel, type CustomPayload, type CustomKf, type KfChannel, type Bezier4,
+  type KfSelItem,
 } from './lib/customBuilder'
 
 const HISTORY_CAP = 50
@@ -194,6 +196,42 @@ interface EditorState {
   setCustomAnchor: (fx: number, fy: number) => void
   /** 라이브 버전 — 드래그 패드용, commitEdit로 확정. */
   setCustomAnchorLive: (fx: number, fy: number) => void
+
+  // ── 키프레임 모드 (AE 사용자용) — 선택 레이어의 xkf 편집
+  /** 재생헤드 파킹 프레임 — 키프레임 모드 자동 키가 찍히는 시각. 히스토리 없음. */
+  curFrame: number
+  setCurFrame: (f: number) => void
+  /** 프리뷰에 재생헤드 이동 요청 — ◀/▶ 키 탐색용. */
+  jumpToken: { f: number; n: number } | null
+  jumpTo: (f: number) => void
+  /** 선택 레이어를 키프레임 모드로 전환/해제 (프리셋 xsel은 보존). */
+  setLayerKfMode: (on: boolean) => void
+  /** 레이어 전체 이징 (KF_EASES 인덱스). */
+  setKfEase: (ease: number) => void
+  /** 채널 키 업서트 — frame에 키 생성/갱신. */
+  setKfChannel: (ch: KfChannel, frame: number, value: number | [number, number]) => void
+  setKfChannelLive: (ch: KfChannel, frame: number, value: number | [number, number]) => void
+  /** frame의 채널 키 제거 — 키가 비면 키 자체 삭제. */
+  removeKfChannel: (ch: KfChannel, frame: number) => void
+  /** frame의 키(모든 채널) 제거 — 타임라인 다이아몬드 삭제. */
+  removeKfAt: (frame: number) => void
+  /** 타임라인 다이아몬드 드래그 — 키 시각 이동 (라이브, commitEdit로 확정). */
+  moveKfLive: (fromT: number, toT: number) => void
+  /** 타임라인 키 다중 선택 (마키/클릭) — Delete·그룹 드래그 대상. */
+  kfSel: KfSelItem[]
+  setKfSel: (items: KfSelItem[]) => void
+  /** 선택된 키(채널 단위) 일괄 삭제 — 빈 키 정리 포함. */
+  removeKfKeys: (items: KfSelItem[]) => void
+  /** 선택된 키 그룹을 dt프레임 이동 (라이브, 리지드 — 비선택 키와 겹치면 그 틱 무시). */
+  moveKfKeysLive: (items: KfSelItem[], dt: number) => void
+  /** 프로퍼티 행 다이아몬드 드래그 — 해당 채널만 시각 이동 (다른 채널은 제자리). */
+  moveKfChannelLive: (ch: KfChannel, fromT: number, toT: number) => void
+  /** 키프레임 레이어 클립 이동 — AE처럼 키 시각도 dt만큼 함께 이동 (라이브). */
+  moveKfClipLive: (clipA: number, clipB: number, dt: number) => void
+  /** fromT 키에서 시작하는 ch 구간의 이징 베지어 설정 (팝업 프리셋/입력 = 커밋). */
+  setKfSegEase: (ch: KfChannel, fromT: number, bez: Bezier4) => void
+  /** 커브 핸들 드래그용 라이브 버전 — commitEdit로 확정. */
+  setKfSegEaseLive: (ch: KfChannel, fromT: number, bez: Bezier4) => void
   undo: () => void
   redo: () => void
 
@@ -281,6 +319,16 @@ export const useEditor = create<EditorState>((set, get) => {
       ;(layer.xbase as number[])[0] += dx
       ;(layer.xbase as number[])[1] += dy
     }
+    // 키프레임 모드 레이어 — 원본(xkf) 위치 키도 함께 이동해야 재빌드 시 안 튄다
+    const xkf = layer.xkf as CustomKf | undefined
+    if (xkf?.keys) {
+      for (const k of xkf.keys) {
+        if (Array.isArray(k.p)) {
+          k.p[0] += dx
+          k.p[1] += dy
+        }
+      }
+    }
   }
 
   /** 선택 레이어의 애니메이션(등장/루프/퇴장 + 회전/불투명도)을 sel로 재구성. */
@@ -301,7 +349,11 @@ export const useEditor = create<EditorState>((set, get) => {
     layer.xbase = [...base]
     const compOp = src.op
     const full = normSel(sel, compOp)
-    const anim = buildAnimKs(full, base, compOp)
+    // 키프레임 모드 레이어는 xkf가 채널을 결정 — xsel은 변형(회전/불투명도 정적값)과 클립만
+    const xkfRaw = layer.xkf as Partial<CustomKf> | undefined
+    const anim = xkfRaw?.on
+      ? buildKfKs(normKf(xkfRaw), full, base)
+      : buildAnimKs(full, base, compOp)
     ks.p = anim.p
     ks.s = anim.s
     ks.o = anim.o
@@ -408,6 +460,16 @@ export const useEditor = create<EditorState>((set, get) => {
       ;(layer.xbase as number[])[0] += dx
       ;(layer.xbase as number[])[1] += dy
     }
+    // 키프레임 위치 값도 같은 보정 — 재빌드 시 그래픽이 제자리를 유지하도록
+    const xkfA = layer.xkf as CustomKf | undefined
+    if (xkfA?.keys) {
+      for (const k of xkfA.keys) {
+        if (Array.isArray(k.p)) {
+          k.p[0] += dx
+          k.p[1] += dy
+        }
+      }
+    }
     layer.xsel = { ...xsel, anchor: [fx, fy] }
     const applied = applyKnobs(src, templateKnobs, knobValues)
     return { animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) }
@@ -425,6 +487,66 @@ export const useEditor = create<EditorState>((set, get) => {
     src.op = Math.max(30, Math.min(600, Math.round(sec * 60)))
     const applied = applyKnobs(src, templateKnobs, knobValues)
     return { animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) }
+  }
+
+  /** 클론된 src의 레이어 li에 xkf 변형 적용 + 채널·클립 재생성. 성공 여부 반환. */
+  const editKfLayerIn = (
+    src: LottieJson,
+    li: number,
+    mutate: (xkf: CustomKf, layer: Record<string, unknown>) => void,
+  ): boolean => {
+    const layer = src.layers[li] as Record<string, unknown> | undefined
+    if (!layer) return false
+    const xkf = normKf(layer.xkf as Partial<CustomKf> | undefined)
+    mutate(xkf, layer)
+    xkf.keys.sort((a, b) => a.t - b.t)
+    layer.xkf = xkf
+    const full = normSel(layer.xsel as Partial<CustomSel> | undefined, src.op)
+    const base: [number, number] = Array.isArray(layer.xbase)
+      ? [(layer.xbase as number[])[0], (layer.xbase as number[])[1]]
+      : [256, 256]
+    const ks = layer.ks as Record<string, unknown>
+    const anim = xkf.on ? buildKfKs(xkf, full, base) : buildAnimKs(full, base, src.op)
+    ks.p = anim.p
+    ks.s = anim.s
+    ks.o = anim.o
+    ks.r = anim.r
+    const { clipA, clipB } = animSpans(full, src.op)
+    layer.ip = clipA
+    layer.op = clipB
+    return true
+  }
+
+  /** 선택 레이어의 xkf를 변형하고 채널·클립을 재생성 — 키프레임 모드 편집의 공통 경로. */
+  const withKfEdit = (
+    st: EditorState,
+    mutate: (xkf: CustomKf, layer: Record<string, unknown>) => void,
+  ): Pick<EditorState, 'animationData' | 'sourceData' | 'colorGroups'> | null => {
+    const { sourceData, templateKnobs, knobValues, customIdx } = st
+    if (!sourceData) return null
+    const src = structuredClone(sourceData)
+    ensureLayerColors(src)
+    if (!editKfLayerIn(src, Math.min(customIdx, src.layers.length - 1), mutate)) return null
+    const applied = applyKnobs(src, templateKnobs, knobValues)
+    return { animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) }
+  }
+
+  /** xkf.keys에서 frame(±0.5f)의 키에 채널 값 업서트. */
+  const upsertKey = (
+    xkf: CustomKf,
+    ch: KfChannel,
+    frame: number,
+    value: number | [number, number],
+  ) => {
+    const t = Math.max(0, Math.round(frame))
+    let k = xkf.keys.find((x) => Math.abs(x.t - t) < 0.5)
+    if (!k) {
+      k = { t }
+      xkf.keys.push(k)
+    }
+    ;(k as unknown as Record<string, unknown>)[ch] = Array.isArray(value)
+      ? [Math.round(value[0] * 10) / 10, Math.round(value[1] * 10) / 10]
+      : Math.round(value * 10) / 10
   }
 
   return {
@@ -445,6 +567,9 @@ export const useEditor = create<EditorState>((set, get) => {
 
     customIdx: 0,
     customIdxs: [0],
+
+    curFrame: 0,
+    jumpToken: null,
 
     playing: true,
     speed: 1,
@@ -981,25 +1106,8 @@ export const useEditor = create<EditorState>((set, get) => {
           copy.refId = dup.id
         }
       }
-      // 살짝 오프셋 — 겹쳐서 안 보이는 문제 방지
-      const p = (copy.ks as Record<string, unknown>).p as { a?: number; k: unknown }
-      if (p.a === 1 && Array.isArray(p.k)) {
-        const seen = new Set<number[]>()
-        for (const kf of p.k as { s?: number[] }[]) {
-          if (Array.isArray(kf.s) && !seen.has(kf.s)) {
-            seen.add(kf.s)
-            kf.s[0] += offset
-            kf.s[1] += offset
-          }
-        }
-      } else if (Array.isArray(p.k)) {
-        ;(p.k as number[])[0] += offset
-        ;(p.k as number[])[1] += offset
-      }
-      if (Array.isArray(copy.xbase)) {
-        ;(copy.xbase as number[])[0] += offset
-        ;(copy.xbase as number[])[1] += offset
-      }
+      // 살짝 오프셋 — 겹쳐서 안 보이는 문제 방지 (ks.p + xbase + xkf.p 전부 동반 이동)
+      shiftLayer(copy, offset, offset)
       copy.xci =
         Math.max(-1, ...src.layers.map((l) => Number((l as Record<string, unknown>).xci ?? -1))) + 1
       src.layers.splice(i, 0, copy as never)
@@ -1024,8 +1132,23 @@ export const useEditor = create<EditorState>((set, get) => {
     },
 
     nudgeCustomBase: (dx, dy) => {
-      const { sourceData, templateKnobs, knobValues, customIdxs } = get()
+      const { sourceData, templateKnobs, knobValues, customIdxs, customIdx, curFrame } = get()
       if (!sourceData) return
+      // 키프레임 모드 단독 선택 — 현재 프레임 위치에 자동 키
+      {
+        const pi = Math.min(customIdx, sourceData.layers.length - 1)
+        const lr = sourceData.layers[pi] as Record<string, unknown>
+        const sel1 = [...new Set(customIdxs)]
+        if ((lr?.xkf as CustomKf | undefined)?.on && sel1.length === 1 && sel1[0] === pi) {
+          const xkf = normKf(lr.xkf as Partial<CustomKf>)
+          const xb = Array.isArray(lr.xbase)
+            ? ([...(lr.xbase as number[])] as [number, number])
+            : ([256, 256] as [number, number])
+          const cur = kfValueAt(xkf, 'p', curFrame, xb) as [number, number]
+          get().setKfChannel('p', curFrame, [cur[0] + dx, cur[1] + dy])
+          return
+        }
+      }
       const src = structuredClone(sourceData)
       ensureLayerColors(src)
       // 다중 선택 전체 이동 — 선택이 없으면 아무것도 안 움직인다
@@ -1054,6 +1177,16 @@ export const useEditor = create<EditorState>((set, get) => {
       const st = get()
       const { sourceData, templateKnobs, knobValues, customIdx, customIdxs } = st
       if (!sourceData) return
+      // 키프레임 모드 단독 선택 — 이동은 통째 시프트가 아니라 현재 프레임 자동 키 (AE 방식)
+      {
+        const pi = Math.min(customIdx, sourceData.layers.length - 1)
+        const lr = sourceData.layers[pi] as Record<string, unknown>
+        const sel1 = [...new Set(customIdxs)]
+        if ((lr?.xkf as CustomKf | undefined)?.on && sel1.length === 1 && sel1[0] === pi) {
+          get().setKfChannelLive('p', st.curFrame, [x, y])
+          return
+        }
+      }
       const src = structuredClone(sourceData)
       const primary = Math.min(customIdx, src.layers.length - 1)
       const layer = src.layers[primary] as Record<string, unknown>
@@ -1177,6 +1310,239 @@ export const useEditor = create<EditorState>((set, get) => {
       const next = withCustomAnchor(st, fx, fy)
       if (!next) return
       set({ ...next, editBaseline: st.editBaseline ?? snap(), future: [] })
+    },
+
+    // ── 키프레임 모드 ─────────────────────────────────────
+    setCurFrame: (f) => {
+      const v = Math.max(0, Math.round(f))
+      if (get().curFrame !== v) set({ curFrame: v })
+    },
+
+    jumpTo: (f) => {
+      const op = get().sourceData?.op
+      const v = Math.max(0, Math.min(op ?? Number.MAX_SAFE_INTEGER, Math.round(f)))
+      set({ jumpToken: { f: v, n: (get().jumpToken?.n ?? 0) + 1 }, curFrame: v })
+    },
+
+    setLayerKfMode: (on) => {
+      const next = withKfEdit(get(), (xkf) => {
+        xkf.on = on
+      })
+      if (next) push(next)
+    },
+
+    setKfEase: (ease) => {
+      const next = withKfEdit(get(), (xkf) => {
+        xkf.ease = ease
+      })
+      if (next) push(next)
+    },
+
+    setKfChannel: (ch, frame, value) => {
+      const next = withKfEdit(get(), (xkf) => upsertKey(xkf, ch, frame, value))
+      if (next) push(next)
+    },
+
+    setKfChannelLive: (ch, frame, value) => {
+      const st = get()
+      const next = withKfEdit(st, (xkf) => upsertKey(xkf, ch, frame, value))
+      if (!next) return
+      set({ ...next, editBaseline: st.editBaseline ?? snap(), future: [] })
+    },
+
+    removeKfChannel: (ch, frame) => {
+      const next = withKfEdit(get(), (xkf) => {
+        const k = xkf.keys.find((x) => Math.abs(x.t - frame) < 0.5)
+        if (!k) return
+        delete k[ch]
+        if (k.p === undefined && k.s === undefined && k.r === undefined && k.o === undefined)
+          xkf.keys = xkf.keys.filter((x) => x !== k)
+      })
+      if (next) push(next)
+    },
+
+    removeKfAt: (frame) => {
+      const next = withKfEdit(get(), (xkf) => {
+        xkf.keys = xkf.keys.filter((x) => Math.abs(x.t - frame) >= 0.5)
+      })
+      if (next) push(next)
+    },
+
+    moveKfLive: (fromT, toT) => {
+      const st = get()
+      // 드래그 시작 시점(editBaseline) 기준으로 매번 재적용 — fromT가 드래그 내내 유효
+      const baseline = st.editBaseline ?? snap()
+      const baseSt = { ...st, sourceData: baseline.source ?? st.sourceData } as EditorState
+      const next = withKfEdit(baseSt, (xkf) => {
+        const k = xkf.keys.find((x) => Math.abs(x.t - fromT) < 0.5)
+        if (!k) return
+        const t = Math.max(0, Math.min(baseSt.sourceData?.op ?? 90, Math.round(toT)))
+        // 다른 키와 겹치면 그 자리 유지 — 넘어가는 건 허용
+        if (xkf.keys.some((x) => x !== k && Math.abs(x.t - t) < 0.5)) return
+        k.t = t
+      })
+      if (!next) return
+      set({ ...next, editBaseline: baseline, future: [] })
+    },
+
+    kfSel: [],
+    setKfSel: (items) => set({ kfSel: items }),
+
+    removeKfKeys: (items) => {
+      const { sourceData, templateKnobs, knobValues } = get()
+      if (!sourceData || !items.length) return
+      const src = structuredClone(sourceData)
+      ensureLayerColors(src)
+      const byLayer = new Map<number, KfSelItem[]>()
+      for (const it of items) {
+        const arr = byLayer.get(it.li) ?? []
+        arr.push(it)
+        byLayer.set(it.li, arr)
+      }
+      let removed = 0
+      for (const [li, its] of byLayer) {
+        editKfLayerIn(src, li, (xkf) => {
+          for (const it of its) {
+            const k = xkf.keys.find((x) => Math.abs(x.t - it.t) < 0.5 && x[it.ch] !== undefined)
+            if (!k) continue
+            removed++
+            delete k[it.ch]
+            if (k.p === undefined && k.s === undefined && k.r === undefined && k.o === undefined)
+              xkf.keys = xkf.keys.filter((x) => x !== k)
+          }
+        })
+      }
+      // 실제로 지운 게 없으면 히스토리 오염 금지 — 낡은 선택만 정리
+      if (!removed) {
+        set({ kfSel: [] })
+        return
+      }
+      const applied = applyKnobs(src, templateKnobs, knobValues)
+      push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
+      set({ kfSel: [] })
+    },
+
+    moveKfKeysLive: (items, dt) => {
+      const st = get()
+      if (!items.length) return
+      // 드래그 시작 시점 기준 재적용 — items의 t는 잡은 시점 그대로 유효
+      const baseline = st.editBaseline ?? snap()
+      const baseSrc = baseline.source ?? st.sourceData
+      if (!baseSrc) return
+      const src = structuredClone(baseSrc)
+      ensureLayerColors(src)
+      const op = src.op
+      // 그룹 클램프 — 전체가 [0, op] 안에 머무는 dt
+      const ts = items.map((i) => i.t)
+      const d = Math.max(-Math.min(...ts), Math.min(op - Math.max(...ts), Math.round(dt)))
+      if (d === 0 && st.editBaseline === null) return // 시작 전 무의미한 틱
+      // 리지드 충돌 검사 — 목적지에 비선택 키(같은 레이어·채널)가 있으면 이번 틱 무시
+      const byLayer = new Map<number, KfSelItem[]>()
+      for (const it of items) {
+        const arr = byLayer.get(it.li) ?? []
+        arr.push(it)
+        byLayer.set(it.li, arr)
+      }
+      for (const [li, its] of byLayer) {
+        const layer = src.layers[li] as Record<string, unknown> | undefined
+        if (!layer) return
+        const xkf = normKf(layer.xkf as Partial<CustomKf> | undefined)
+        for (const it of its) {
+          const others = xkf.keys.filter(
+            (k) =>
+              k[it.ch] !== undefined &&
+              !its.some((s) => s.ch === it.ch && Math.abs(s.t - k.t) < 0.5),
+          )
+          if (others.some((k) => Math.abs(k.t - (it.t + d)) < 0.5)) return
+        }
+      }
+      // 적용 — 채널값 분리 후 새 시각에 업서트 (선택 내부 순서 충돌 방지)
+      for (const [li, its] of byLayer) {
+        editKfLayerIn(src, li, (xkf) => {
+          const movedVals: { ch: KfChannel; t: number; v: number | [number, number] }[] = []
+          for (const it of its) {
+            const k = xkf.keys.find((x) => Math.abs(x.t - it.t) < 0.5 && x[it.ch] !== undefined)
+            if (!k) continue
+            movedVals.push({ ch: it.ch, t: it.t + d, v: k[it.ch] as number | [number, number] })
+            delete k[it.ch]
+            if (k.p === undefined && k.s === undefined && k.r === undefined && k.o === undefined)
+              xkf.keys = xkf.keys.filter((x) => x !== k)
+          }
+          for (const m of movedVals) upsertKey(xkf, m.ch, m.t, m.v)
+        })
+      }
+      const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
+      set({
+        animationData: applied,
+        sourceData: src,
+        colorGroups: extractColorGroups(applied),
+        editBaseline: baseline,
+        future: [],
+      })
+    },
+
+    moveKfClipLive: (clipA, clipB, dt) => {
+      const st = get()
+      // 드래그 시작 시점 기준 재적용 — dt는 잡은 시점 클립 대비 오프셋
+      const baseline = st.editBaseline ?? snap()
+      const baseSt = { ...st, sourceData: baseline.source ?? st.sourceData } as EditorState
+      const next = withKfEdit(baseSt, (xkf, layer) => {
+        const op = baseSt.sourceData?.op ?? 90
+        // 키 시각 클램프 — 컴프 밖(음수/op 초과)으로 밀려 영구히 지울 수 없는 키가 생기는 것 방지
+        const moved: typeof xkf.keys = []
+        for (const k of xkf.keys) {
+          const t = Math.max(0, Math.min(op, Math.round((k.t + dt) * 10) / 10))
+          // 클램프로 같은 시각에 겹치면 먼저 온 키만 유지
+          if (moved.some((m) => Math.abs(m.t - t) < 0.5)) continue
+          k.t = t
+          moved.push(k)
+        }
+        xkf.keys = moved
+        const full = normSel(layer.xsel as Partial<CustomSel> | undefined, op)
+        layer.xsel = { ...full, clip: [clipA, clipB] }
+      })
+      if (!next) return
+      set({ ...next, editBaseline: baseline, future: [] })
+    },
+
+    setKfSegEase: (ch, fromT, bez) => {
+      const next = withKfEdit(get(), (xkf) => {
+        const k = xkf.keys.find((x) => Math.abs(x.t - fromT) < 0.5 && x[ch] !== undefined)
+        if (!k) return
+        k.e = { ...(k.e ?? {}), [ch]: bez }
+      })
+      if (next) push(next)
+    },
+
+    setKfSegEaseLive: (ch, fromT, bez) => {
+      const st = get()
+      const next = withKfEdit(st, (xkf) => {
+        const k = xkf.keys.find((x) => Math.abs(x.t - fromT) < 0.5 && x[ch] !== undefined)
+        if (!k) return
+        k.e = { ...(k.e ?? {}), [ch]: bez }
+      })
+      if (!next) return
+      set({ ...next, editBaseline: st.editBaseline ?? snap(), future: [] })
+    },
+
+    moveKfChannelLive: (ch, fromT, toT) => {
+      const st = get()
+      // 드래그 시작 시점 기준 재적용 — fromT 고정
+      const baseline = st.editBaseline ?? snap()
+      const baseSt = { ...st, sourceData: baseline.source ?? st.sourceData } as EditorState
+      const next = withKfEdit(baseSt, (xkf) => {
+        const k = xkf.keys.find((x) => Math.abs(x.t - fromT) < 0.5 && x[ch] !== undefined)
+        if (!k) return
+        const t = Math.max(0, Math.min(baseSt.sourceData?.op ?? 90, Math.round(toT)))
+        const v = k[ch] as number | [number, number]
+        // 원래 키에서 채널 분리 → 새 시각에 업서트 (다른 채널은 원래 자리)
+        delete k[ch]
+        if (k.p === undefined && k.s === undefined && k.r === undefined && k.o === undefined)
+          xkf.keys = xkf.keys.filter((x) => x !== k)
+        upsertKey(xkf, ch, t, v)
+      })
+      if (!next) return
+      set({ ...next, editBaseline: baseline, future: [] })
     },
 
     undo: () => {

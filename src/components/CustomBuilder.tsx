@@ -5,8 +5,14 @@ import {
   IN_TYPES,
   LOOP_TYPES,
   OUT_TYPES,
+  KF_EASES,
   normSel,
+  normKf,
+  kfValueAt,
+  kfChannelKeys,
   type CustomSel,
+  type CustomKf,
+  type KfChannel,
   type CustomPayload,
 } from '../lib/customBuilder'
 
@@ -38,6 +44,15 @@ export default function CustomBuilder() {
   // 부분/구버전 xsel 방어 — normSel이 기본값 채움 + 구버전 이관
   const compOp = (active && sourceData?.op) || 90
   const xsel: CustomSel = normSel(selLayer?.xsel as Partial<CustomSel> | undefined, compOp)
+  // 키프레임 모드 상태 (AE 사용자용) — 프리셋과 레이어 단위로 전환
+  const xkf: CustomKf = normKf(selLayer?.xkf as Partial<CustomKf> | undefined)
+  const kfOn = xkf.on
+  const setLayerKfMode = useEditor((s) => s.setLayerKfMode)
+  const setKfChannelLive = useEditor((s) => s.setKfChannelLive)
+  const curFrame = useEditor((s) => s.curFrame)
+  // 키가 있는 채널은 변형 슬라이더가 재생헤드에 키를 찍는다 (AE 스톱워치 방식)
+  const rKeys = kfOn && kfChannelKeys(xkf, 'r').length > 0
+  const oKeys = kfOn && kfChannelKeys(xkf, 'o').length > 0
 
   // 선택 레이어 기준(정착) 위치 — xbase
   let base: [number, number] | null = null
@@ -140,6 +155,28 @@ export default function CustomBuilder() {
         <>
           <h4 className="grouphead">애니메이션</h4>
 
+          {/* 모드 — 프리셋(3슬롯) vs 키프레임(AE식 직접 키) */}
+          <div className="opttabs" style={{ marginBottom: 8 }}>
+            <button
+              className={`opttab ${!kfOn ? 'opttab--on' : ''}`}
+              title="등장/루프/퇴장 조합 — 간단하고 빠르게"
+              onClick={() => kfOn && setLayerKfMode(false)}
+            >
+              프리셋
+            </button>
+            <button
+              className={`opttab ${kfOn ? 'opttab--on' : ''}`}
+              title="채널별 키프레임 직접 편집 — AE 방식"
+              onClick={() => !kfOn && setLayerKfMode(true)}
+            >
+              키프레임
+            </button>
+          </div>
+
+          {kfOn && <KfPanel xkf={xkf} xsel={xsel} base={base} compOp={compOp} />}
+
+          {!kfOn && (
+          <>
           {/* 등장 (In) */}
           <div className="knob">
             <div className="knob__head">
@@ -312,6 +349,8 @@ export default function CustomBuilder() {
               </>
             )}
           </div>
+          </>
+          )}
 
           <h4 className="grouphead">변형</h4>
           <div className="knob">
@@ -329,55 +368,216 @@ export default function CustomBuilder() {
 
           <div className="knob">
             <SliderRow
-              label="회전"
+              label={rKeys ? `회전 (${curFrame}f 키)` : '회전'}
               min={-180}
               max={180}
               step={1}
               unit="°"
-              value={xsel.rotation}
-              onLive={(v) => setCustomChannelsLive({ ...xsel, rotation: v })}
+              value={
+                rKeys ? (kfValueAt(xkf, 'r', curFrame, xsel.rotation) as number) : xsel.rotation
+              }
+              onLive={(v) => {
+                if (rKeys) setKfChannelLive('r', curFrame, v)
+                else setCustomChannelsLive({ ...xsel, rotation: v })
+              }}
               onCommit={commitEdit}
             />
           </div>
 
           <div className="knob">
             <SliderRow
-              label="불투명도"
+              label={oKeys ? `불투명도 (${curFrame}f 키)` : '불투명도'}
               min={0}
               max={100}
               step={1}
               unit="%"
-              value={xsel.opacity}
-              onLive={(v) => setCustomChannelsLive({ ...xsel, opacity: v })}
+              value={
+                oKeys ? (kfValueAt(xkf, 'o', curFrame, xsel.opacity) as number) : xsel.opacity
+              }
+              onLive={(v) => {
+                if (oKeys) setKfChannelLive('o', curFrame, v)
+                else setCustomChannelsLive({ ...xsel, opacity: v })
+              }}
               onCommit={commitEdit}
             />
+            {kfOn && (rKeys || oKeys) && (
+              <p className="knob__note">
+                키가 있는 채널은 슬라이더가 재생헤드({curFrame}f)에 키를 찍습니다.
+              </p>
+            )}
           </div>
 
           {base && (
-            <div className="knob">
-              <div className="knob__head">
-                <span className="knob__name">위치</span>
-                <button
-                  className="linkbtn"
-                  onClick={() => nudgeCustomBase(256 - base![0], 256 - base![1])}
-                >
-                  캔버스 중앙
-                </button>
-              </div>
-              <div className="posrow">
-                <PosInput label="X" value={base[0]} onCommit={(v) => nudgeCustomBase(v - base![0], 0)} />
-                <PosInput label="Y" value={base[1]} onCommit={(v) => nudgeCustomBase(0, v - base![1])} />
-              </div>
-            </div>
+            <PositionRow
+              kfOn={kfOn}
+              xkf={xkf}
+              base={base}
+              nudge={nudgeCustomBase}
+            />
           )}
         </>
       )}
 
       <p className="panel__hint">
         {active
-          ? '등장·루프·퇴장을 조합하세요. 타이밍은 아래 타임라인에서 밀고 당기기.'
+          ? kfOn
+            ? '재생헤드를 옮기고 값을 바꾸면 키가 찍힙니다. 타임라인 다이아몬드 = 키 (드래그 이동 · 더블클릭 삭제).'
+            : '등장·루프·퇴장을 조합하세요. 타이밍은 아래 타임라인에서 밀고 당기기.'
           : '그래픽을 올리면 등장/루프/퇴장을 조합해 애니메이션을 만듭니다. 여러 장 올리면 레이어로 쌓입니다.'}
       </p>
+    </div>
+  )
+}
+
+/** 키프레임 모드 패널 — 채널별 키 토글/탐색/값 입력 + 이징 (AE 라이트). */
+function KfPanel({
+  xkf,
+  xsel,
+  base,
+  compOp,
+}: {
+  xkf: CustomKf
+  xsel: CustomSel
+  base: [number, number] | null
+  compOp: number
+}) {
+  const { setKfChannel, removeKfChannel, setKfEase, jumpTo, commitEdit } = useEditor()
+  const curFrame = useEditor((s) => s.curFrame)
+  const t = Math.max(0, Math.min(compOp, curFrame))
+
+  const channels: { ch: KfChannel; label: string; unit: string }[] = [
+    { ch: 'p', label: '위치', unit: 'px' },
+    { ch: 's', label: '크기', unit: '%' },
+    { ch: 'r', label: '회전', unit: '°' },
+    { ch: 'o', label: '불투명도', unit: '%' },
+  ]
+
+  // 채널의 현재 프레임 값 (보간) — ◆로 캡처되는 값이기도 하다
+  const valueOf = (ch: KfChannel): number | [number, number] => {
+    const fb: number | [number, number] =
+      ch === 'p'
+        ? (base ?? [256, 256])
+        : ch === 's'
+          ? 100
+          : ch === 'r'
+            ? xsel.rotation
+            : xsel.opacity
+    return kfValueAt(xkf, ch, t, fb)
+  }
+
+  return (
+    <div className="knob kfpanel">
+      <div className="knob__head">
+        <span className="knob__name">키프레임</span>
+        <span className="knob__unit">
+          재생헤드 {t}f · {(t / 60).toFixed(2)}s
+        </span>
+      </div>
+
+      {channels.map(({ ch, label, unit }) => {
+        const keys = kfChannelKeys(xkf, ch)
+        const hasAt = keys.some((k) => Math.abs(k.t - t) < 0.5)
+        const prev = [...keys].reverse().find((k) => k.t < t - 0.5)
+        const next = keys.find((k) => k.t > t + 0.5)
+        const v = valueOf(ch)
+        return (
+          <div key={ch} className="kfrow">
+            <button
+              className="kfrow__nav"
+              disabled={!prev}
+              title="이전 키로"
+              onClick={() => prev && jumpTo(prev.t)}
+            >
+              ◀
+            </button>
+            <button
+              className={`kfrow__key ${hasAt ? 'kfrow__key--on' : ''}`}
+              title={hasAt ? '이 프레임의 키 제거' : '이 프레임에 키 추가'}
+              onClick={() => {
+                if (hasAt) removeKfChannel(ch, t)
+                else setKfChannel(ch, t, v)
+              }}
+            >
+              ◆
+            </button>
+            <button
+              className="kfrow__nav"
+              disabled={!next}
+              title="다음 키로"
+              onClick={() => next && jumpTo(next.t)}
+            >
+              ▶
+            </button>
+            <span className="kfrow__label">
+              {label}
+              {keys.length > 0 && <em className="kfrow__count">{keys.length}</em>}
+            </span>
+            {/* 위치 값은 아래 '위치' 행(X/Y)이 담당 — 여기선 스칼라 채널만 직접 입력 */}
+            {ch !== 'p' && (
+              <span className="kfrow__vals">
+                <PosInput
+                  label={unit}
+                  value={v as number}
+                  onCommit={(nv) => setKfChannel(ch, t, nv)}
+                />
+              </span>
+            )}
+          </div>
+        )
+      })}
+
+      <div className="knob__head" style={{ marginTop: 10 }}>
+        <span className="knob__name">기본 이징</span>
+        <span className="knob__unit">구간별: 타임라인 커브 버튼</span>
+      </div>
+      <div className="knob__chips">
+        {KF_EASES.map((label, i) => (
+          <button
+            key={label}
+            className={`chip ${xkf.ease === i ? 'chip--on' : ''}`}
+            onClick={() => {
+              setKfEase(i)
+              commitEdit()
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <p className="knob__note">
+        캔버스 드래그·방향키·아래 위치 X/Y = 재생헤드에 위치 키. 키가 있는 채널은 변형 슬라이더도 키를
+        찍습니다.
+      </p>
+    </div>
+  )
+}
+
+/** 위치 행 — 키프레임 모드에선 현재 프레임의 보간 위치를 보여주고 키를 찍는다. */
+function PositionRow({
+  kfOn,
+  xkf,
+  base,
+  nudge,
+}: {
+  kfOn: boolean
+  xkf: CustomKf
+  base: [number, number]
+  nudge: (dx: number, dy: number) => void
+}) {
+  const curFrame = useEditor((s) => s.curFrame)
+  const pos = kfOn ? (kfValueAt(xkf, 'p', curFrame, base) as [number, number]) : base
+  return (
+    <div className="knob">
+      <div className="knob__head">
+        <span className="knob__name">위치{kfOn ? ` (${curFrame}f)` : ''}</span>
+        <button className="linkbtn" onClick={() => nudge(256 - pos[0], 256 - pos[1])}>
+          캔버스 중앙
+        </button>
+      </div>
+      <div className="posrow">
+        <PosInput label="X" value={pos[0]} onCommit={(v) => nudge(v - pos[0], 0)} />
+        <PosInput label="Y" value={pos[1]} onCommit={(v) => nudge(0, v - pos[1])} />
+      </div>
     </div>
   )
 }
