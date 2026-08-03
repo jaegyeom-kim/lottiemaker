@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { ReactElement } from 'react'
 import { useEditor } from '../store'
+import { evalNumExpr } from '../lib/num'
 
 const I = (d: string) => (
   <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
@@ -100,6 +101,80 @@ export default function AlignPanel() {
           {selCount >= 3 ? '선택한 레이어끼리 분배' : '전체 레이어 분배'}
         </span>
       </div>
+
+      <PatternDuplicate disabled={selCount === 0} />
     </div>
+  )
+}
+
+/** 패턴 복제 (Lottie Creator 2.0 Advanced Duplicator 벤치) — 간격·회전·시간차 누적 복제. */
+function PatternDuplicate({ disabled }: { disabled: boolean }) {
+  const duplicatePattern = useEditor((s) => s.duplicatePattern)
+  const [count, setCount] = useState(4)
+  const [dx, setDx] = useState(60)
+  const [dy, setDy] = useState(0)
+  const [drot, setDrot] = useState(0)
+  const [dt, setDt] = useState(6)
+
+  const Field = ({
+    label,
+    value,
+    onChange,
+  }: {
+    label: string
+    value: number
+    onChange: (v: number) => void
+  }) => (
+    <label className="patfield">
+      <span>{label}</span>
+      <NumField value={value} onCommit={onChange} />
+    </label>
+  )
+
+  return (
+    <>
+      <h3 className="panel__label">패턴 복제</h3>
+      <div className="patgrid">
+        <Field label="개수" value={count} onChange={(v) => setCount(Math.max(2, Math.min(12, Math.round(v))))} />
+        <Field label="X 간격" value={dx} onChange={setDx} />
+        <Field label="Y 간격" value={dy} onChange={setDy} />
+        <Field label="회전 +°" value={drot} onChange={setDrot} />
+        <Field label="시간차 f" value={dt} onChange={(v) => setDt(Math.round(v))} />
+        <button
+          className="btn btn--secondary"
+          disabled={disabled}
+          title={disabled ? '레이어를 먼저 선택하세요' : '선택 레이어를 누적 오프셋으로 복제'}
+          onClick={() => duplicatePattern(count, dx, dy, drot, dt)}
+        >
+          복제
+        </button>
+      </div>
+      <p className="panel__hint">
+        복제본마다 간격·회전·시간차가 누적됩니다 — 스태거 등장, 방사형 패턴에 유용.
+      </p>
+    </>
+  )
+}
+
+/** 소형 숫자 입력 — 산술 지원. */
+function NumField({ value, onCommit }: { value: number; onCommit: (v: number) => void }) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const commit = () => {
+    if (draft === null) return
+    const v = evalNumExpr(draft, value)
+    setDraft(null)
+    if (v !== null) onCommit(v)
+  }
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={draft ?? String(value)}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+      }}
+    />
   )
 }

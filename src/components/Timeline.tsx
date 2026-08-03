@@ -1,19 +1,31 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useEditor } from '../store'
+import { setDragCursor } from '../lib/cursor'
+import { loadEaseTokens, saveEaseTokens, type EaseToken } from '../lib/easeTokens'
 import {
   animSpans, normSel, normKf, kfValueAt, kfChannelKeys, segEaseOf, layerColor, tint,
-  EASE_PRESETS,
+  kfFallbackValue, EASE_PRESETS, KF_CHANNEL_DEFS, SPRING_PRESETS,
   type CustomSel, type CustomKf, type KfChannel, type Bezier4, type KfSelItem,
 } from '../lib/customBuilder'
 
+// 타임라인 바디 높이 — 드래그 리사이즈, 저장/복원
+const TL_H_KEY = 'lottiemaker.timeline.h'
+const TL_H_DEF = 210
+const TL_H_MIN = 120
+const TL_H_MAX = 480
+
+function loadTlHeight(): number {
+  try {
+    const v = Number(localStorage.getItem(TL_H_KEY))
+    return Number.isFinite(v) && v >= TL_H_MIN && v <= TL_H_MAX ? v : TL_H_DEF
+  } catch {
+    return TL_H_DEF
+  }
+}
+
 /** 키프레임 레이어 트리의 프로퍼티 행 (Figma Motion 방식). */
-const KF_CHANNELS: { ch: KfChannel; label: string }[] = [
-  { ch: 'p', label: '위치' },
-  { ch: 's', label: '크기' },
-  { ch: 'r', label: '회전' },
-  { ch: 'o', label: '불투명도' },
-]
+const KF_CHANNELS = KF_CHANNEL_DEFS
 
 type DragMode = 'move' | 'left' | 'right' | 'in-edge' | 'out-edge'
 
@@ -35,7 +47,7 @@ export default function Timeline({
   const {
     setCustomChannelsLive, commitEdit, setPlaying, setCustomIdx,
     moveKfClipLive, removeKfChannel, setKfChannel,
-    setKfSegEase, setKfSegEaseLive,
+    setKfSegEase, setKfSegEaseLive, bakeSpringSegEase,
     setKfSel, moveKfKeysLive,
   } = useEditor()
   const curFrame = useEditor((s) => s.curFrame)
@@ -70,6 +82,41 @@ export default function Timeline({
   )
   // 키프레임 레이어는 기본 펼침 — 접은 것만 기억
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
+  // 바디 높이 — 상단 핸들 드래그로 조절
+  const [bodyH, setBodyH] = useState(loadTlHeight)
+  const beginHResize = (e: React.PointerEvent) => {
+    e.preventDefault()
+    setDragCursor('row')
+    const startY = e.clientY
+    const h0 = bodyH
+    const move = (ev: PointerEvent) =>
+      setBodyH(Math.max(TL_H_MIN, Math.min(TL_H_MAX, h0 - (ev.clientY - startY))))
+    const up = () => {
+      setDragCursor(null)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+      setBodyH((h) => {
+        try {
+          localStorage.setItem(TL_H_KEY, String(h))
+        } catch {
+          // 저장 불가 환경 — 무시
+        }
+        return h
+      })
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+  }
+  const resetH = () => {
+    setBodyH(TL_H_DEF)
+    try {
+      localStorage.setItem(TL_H_KEY, String(TL_H_DEF))
+    } catch {
+      // 무시
+    }
+  }
   // 이징 팝업 — 구간(키 fromT → 다음 키)의 채널 이징 편집
   const [easePop, setEasePop] = useState<{
     li: number
@@ -123,6 +170,8 @@ export default function Timeline({
       outDur: spans.clipB - spans.outStart,
       pxPerF: rect.width / OP,
     }
+    // 드래그 중 커서 고정 — 클립이 포인터를 늦게 따라와도 깜빡이지 않게
+    setDragCursor(mode === 'move' ? 'grabbing' : 'ew')
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   }
 
@@ -206,6 +255,7 @@ export default function Timeline({
     if (!drag.current) return
     drag.current = null
     setDragInfo(null)
+    setDragCursor(null)
     ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
     commitEdit()
   }
@@ -214,6 +264,7 @@ export default function Timeline({
     if (!drag.current) return
     drag.current = null
     setDragInfo(null)
+    setDragCursor(null)
     commitEdit()
   }
 
@@ -247,24 +298,47 @@ export default function Timeline({
   const sameKf = (a: KfSelItem, li: number, ch: KfChannel, t: number) =>
     a.li === li && a.ch === ch && Math.abs(a.t - t) < 0.5
 
-  /** 마키 종료 — 박스와 교차하는 다이아몬드를 선택으로. */
-  const finishMarquee = (x0: number, y0: number, x1: number, y1: number) => {
+  /** 마키 종료 — 박스와 교차하는 다이아몬드를 선택으로 (⇧ = 기존 선택에 추가). */
+  const finishMarquee = (x0: number, y0: number, x1: number, y1: number, additive: boolean) => {
     const els = trackRef.current?.querySelectorAll('[data-kfd]')
-    const L = Math.min(x0, x1)
-    const R = Math.max(x0, x1)
-    const T = Math.min(y0, y1)
-    const B = Math.max(y0, y1)
-    const items: KfSelItem[] = []
+    let L = Math.min(x0, x1)
+    let R = Math.max(x0, x1)
+    let T = Math.min(y0, y1)
+    let B = Math.max(y0, y1)
+    // 스크롤로 화면 밖에 있는 다이아몬드는 제외 — 보이는 영역으로 클램프
+    const body = trackRef.current?.parentElement
+    const br = body?.getBoundingClientRect()
+    if (br) {
+      L = Math.max(L, br.left)
+      R = Math.min(R, br.right)
+      T = Math.max(T, br.top)
+      B = Math.min(B, br.bottom)
+    }
+    const items: KfSelItem[] = additive ? [...useEditor.getState().kfSel] : []
     els?.forEach((el) => {
       const r = el.getBoundingClientRect()
       const cx = r.left + r.width / 2
       const cy = r.top + r.height / 2
       if (cx >= L && cx <= R && cy >= T && cy <= B) {
         const [pli, pch, pt] = (el.getAttribute('data-kfd') ?? '').split('|')
-        items.push({ li: Number(pli), ch: pch as KfChannel, t: Number(pt) })
+        const it = { li: Number(pli), ch: pch as KfChannel, t: Number(pt) }
+        if (!items.some((a) => sameKf(a, it.li, it.ch, it.t))) items.push(it)
       }
     })
     setKfSel(items)
+  }
+
+  /** ⇧ 스냅과 같은 대상 — 드래그 중 키 스냅용 (선택 자신 제외). */
+  const kfDragSnapTargets = (items: KfSelItem[]): number[] => {
+    const ts: number[] = [Math.round(frameFrac * OP)] // 플레이헤드
+    for (let li = 0; li < layers.length; li++) {
+      const x = normKf((layers[li] as Record<string, unknown>).xkf as Partial<CustomKf> | undefined)
+      if (!x.on) continue
+      for (const k of x.keys) {
+        if (!items.some((it) => it.li === li && Math.abs(it.t - k.t) < 0.5)) ts.push(k.t)
+      }
+    }
+    return ts
   }
 
   /**
@@ -275,15 +349,28 @@ export default function Timeline({
     const rect = trackRef.current?.getBoundingClientRect()
     if (!rect) return
     kfDrag.current = { items, startX: e.clientX, pxPerF: rect.width / OP, lastDt: 0 }
+    setDragCursor('ew') // 다이아몬드가 리마운트돼도 커서 유지
+    const snapTs = kfDragSnapTargets(items)
+    const snapTol = (8 / rect.width) * OP // 화면 8px
     const move = (ev: PointerEvent) => {
       const d = kfDrag.current
       if (!d) return
-      d.lastDt = (ev.clientX - d.startX) / d.pxPerF
-      moveKfKeysLive(d.items, d.lastDt)
+      let dt = (ev.clientX - d.startX) / d.pxPerF
+      // 잡은 키를 플레이헤드·다른 키에 스냅 — ⌘로 해제
+      if (!ev.metaKey && !ev.ctrlKey) {
+        let best: { diff: number; t: number } | null = null
+        for (const t of snapTs) {
+          const diff = Math.abs(grabT + dt - t)
+          if (diff < snapTol && (!best || diff < best.diff)) best = { diff, t }
+        }
+        if (best) dt = best.t - grabT
+      }
+      const applied = moveKfKeysLive(d.items, dt)
+      if (applied !== null) d.lastDt = applied // 실제 적용된 오프셋만 신뢰
       setDragInfo(
         d.items.length > 1
           ? `키 ${d.items.length}개 이동`
-          : `${label} 키 ${sec(Math.max(0, Math.min(OP, grabT + d.lastDt)))}s`,
+          : `${label} 키 ${sec(Math.max(0, Math.min(OP, grabT + (applied ?? d.lastDt))))}s`,
       )
     }
     const up = () => {
@@ -297,15 +384,16 @@ export default function Timeline({
     window.addEventListener('pointercancel', up)
   }
 
-  /** 키 그룹 드래그 종료 — 커밋 후 선택을 이동된 시각으로 갱신(실재 검증). */
+  /** 키 그룹 드래그 종료 — 커밋 후 선택을 실제 적용된 오프셋으로 갱신. */
   const endKfDrag = () => {
     const d0 = kfDrag.current
     kfDrag.current = null
     setDragInfo(null)
+    setDragCursor(null)
     commitEdit()
     if (!d0) return
-    const ts = d0.items.map((i) => i.t)
-    const d = Math.max(-Math.min(...ts), Math.min(OP - Math.max(...ts), Math.round(d0.lastDt)))
+    // lastDt는 moveKfKeysLive가 실제로 적용한 값만 담는다 (거부된 틱 제외)
+    const d = d0.lastDt
     const s = useEditor.getState()
     const moved = d0.items
       .map((it) => ({ ...it, t: it.t + d }))
@@ -318,11 +406,12 @@ export default function Timeline({
     setKfSel(moved)
   }
 
+  // 스크럽 — 눈금자·플레이헤드 전용 (트랙 빈 곳은 마키 선택)
   const scrubHandlers = {
     onPointerDown: (e: React.PointerEvent) => {
-      // 빈 곳 클릭 = 키 선택 해제 (AE 방식)
       if (useEditor.getState().kfSel.length) setKfSel([])
       scrubbing.current = true
+      setDragCursor('ew') // 플레이헤드가 늦게 따라와도 커서 유지
       ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
       scrubTo(e.clientX, e.shiftKey)
     },
@@ -332,29 +421,86 @@ export default function Timeline({
     onPointerUp: (e: React.PointerEvent) => {
       if (!scrubbing.current) return
       scrubbing.current = false
+      setDragCursor(null)
       ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
       onScrub(0, true)
     },
     onPointerCancel: () => {
       if (!scrubbing.current) return
       scrubbing.current = false
+      setDragCursor(null)
       onScrub(0, true)
+    },
+  }
+
+  // 마키 — 트랙 영역 빈 곳(행 배경·아래 여백) 어디서든 드래그로 키 선택 (AE 방식)
+  const marqueeHandlers = {
+    onPointerDown: (e: React.PointerEvent) => {
+      const t = e.target as HTMLElement
+      const empty =
+        t === e.currentTarget ||
+        t.classList.contains('timeline__track') ||
+        t.classList.contains('timeline__trackgroup')
+      if (!empty) return
+      // ⇧ 마키 = 기존 선택에 추가 — 시작할 때 지우지 않는다
+      if (!e.shiftKey && useEditor.getState().kfSel.length) setKfSel([])
+      setPlaying(false)
+      marquee.current = { sx: e.clientX, sy: e.clientY }
+      setDragCursor('cross')
+      ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      const m = marquee.current
+      if (!m) return
+      const rect = trackRef.current?.getBoundingClientRect()
+      if (!rect) return
+      setMarqueeBox({
+        x: Math.min(m.sx, e.clientX) - rect.left,
+        y: Math.min(m.sy, e.clientY) - rect.top,
+        w: Math.abs(e.clientX - m.sx),
+        h: Math.abs(e.clientY - m.sy),
+      })
+    },
+    onPointerUp: (e: React.PointerEvent) => {
+      const m = marquee.current
+      if (!m) return
+      marquee.current = null
+      setMarqueeBox(null)
+      setDragCursor(null)
+      ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+      finishMarquee(m.sx, m.sy, e.clientX, e.clientY, e.shiftKey)
+    },
+    onPointerCancel: () => {
+      marquee.current = null
+      setMarqueeBox(null)
+      setDragCursor(null)
     },
   }
 
   return (
     <div className="timeline">
+      {/* 높이 조절 핸들 — 위로 끌면 타임라인이 커진다 */}
+      <div
+        className="timeline__hresize"
+        title="드래그: 타임라인 높이 · 더블클릭: 초기화"
+        onPointerDown={beginHResize}
+        onDoubleClick={resetH}
+      />
       <div className="timeline__head">
         <span className="timeline__title">타임라인</span>
         <span className="timeline__time">
           {String(Math.round(frameFrac * totalMs)).padStart(4, '0')} /{' '}
           {Math.round(totalMs)} ms
         </span>
+        {kfSel.length > 0 && (
+          <span className="timeline__selbadge">키 {kfSel.length}개 선택 — 드래그 이동 · Delete 삭제</span>
+        )}
         <span className="timeline__hint">
-          {dragInfo ?? '클립: 드래그 이동 · 모서리 트림 | ◇ 드래그 이동 · 더블클릭 삭제 | ⇧ 스크럽: 키 스냅'}
+          {dragInfo ??
+            '빈 곳 드래그: 키 선택 · 눈금자: 스크럽 (⇧ 스냅) · 클립: 이동/트림 · ◇ 더블클릭: 삭제'}
         </span>
       </div>
-      <div className="timeline__body timeline__body--multi">
+      <div className="timeline__body timeline__body--multi" style={{ height: bodyH }}>
         <div className="timeline__labels">
           <div className="timeline__label timeline__label--ruler" />
           {layers.map((l, li) => {
@@ -398,7 +544,8 @@ export default function Timeline({
                   {l.nm ?? `레이어 ${li + 1}`}
                 </div>
                 {open &&
-                  KF_CHANNELS.map(({ ch, label }) => {
+                  KF_CHANNELS.filter(({ ch }) => kfChannelKeys(xkfL, ch).length > 0).map(
+                    ({ ch, label }) => {
                     const keys = kfChannelKeys(xkfL, ch)
                     const hasAt = keys.some((k) => Math.abs(k.t - curFrame) < 0.5)
                     return (
@@ -412,12 +559,10 @@ export default function Timeline({
                             if (hasAt) {
                               removeKfChannel(ch, curFrame)
                             } else {
-                              const xsel = selOf(li)
                               const xb: [number, number] = Array.isArray(lr.xbase)
                                 ? [(lr.xbase as number[])[0], (lr.xbase as number[])[1]]
                                 : [256, 256]
-                              const fb: number | [number, number] =
-                                ch === 'p' ? xb : ch === 's' ? 100 : ch === 'r' ? xsel.rotation : xsel.opacity
+                              const fb = kfFallbackValue(ch, selOf(li), xb)
                               setKfChannel(ch, curFrame, kfValueAt(xkfL, ch, curFrame, fb))
                             }
                           }}
@@ -433,9 +578,9 @@ export default function Timeline({
             )
           })}
         </div>
-        <div className="timeline__tracks" ref={trackRef} {...scrubHandlers}>
+        <div className="timeline__tracks" ref={trackRef} {...marqueeHandlers}>
           {/* 눈금자 줄 — 스크럽 전용, ms 눈금 (Figma Motion 방식) */}
-          <div className="timeline__ruler">
+          <div className="timeline__ruler" {...scrubHandlers}>
             {ticks.map((m) => (
               <span key={m} className="timeline__ticklabel" style={{ left: `${(m / totalMs) * 100}%` }}>
                 {m}
@@ -449,26 +594,14 @@ export default function Timeline({
           <div
             className="timeline__playhead"
             style={{ left: `${frameFrac * 100}%` }}
+            // 스크럽 로직은 눈금자와 공유 — stopPropagation만 추가 (마키로 안 새게)
             onPointerDown={(e) => {
               e.stopPropagation()
-              scrubbing.current = true
-              ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-              scrubTo(e.clientX, e.shiftKey)
+              scrubHandlers.onPointerDown(e)
             }}
-            onPointerMove={(e) => {
-              if (scrubbing.current) scrubTo(e.clientX, e.shiftKey)
-            }}
-            onPointerUp={(e) => {
-              if (!scrubbing.current) return
-              scrubbing.current = false
-              ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
-              onScrub(0, true)
-            }}
-            onPointerCancel={() => {
-              if (!scrubbing.current) return
-              scrubbing.current = false
-              onScrub(0, true)
-            }}
+            onPointerMove={scrubHandlers.onPointerMove}
+            onPointerUp={scrubHandlers.onPointerUp}
+            onPointerCancel={scrubHandlers.onPointerCancel}
           >
             <div className="timeline__playhead-head" />
           </div>
@@ -589,49 +722,15 @@ export default function Timeline({
                   />
                 </div>
               </div>
-              {/* 프로퍼티 레인 — 채널별 다이아몬드 + 연결선 + 구간 이징 버튼 (Figma Motion 방식) */}
+              {/* 프로퍼티 레인 — 키가 있는 채널만 (AE 'U' 방식). 라벨 쪽과 같은 필터로 행 정렬 유지 */}
               {open &&
-                KF_CHANNELS.map(({ ch, label }) => {
+                KF_CHANNELS.filter(({ ch }) => kfChannelKeys(xkf, ch).length > 0).map(
+                  ({ ch, label }) => {
                   const keys = kfChannelKeys(xkf, ch)
                   const first = keys[0]
                   const last = keys[keys.length - 1]
                   return (
-                    <div
-                      key={ch}
-                      className="timeline__track timeline__track--prop"
-                      // 빈 곳 드래그 = 마키 선택 (다이아몬드/이징 버튼 제외)
-                      onPointerDown={(e) => {
-                        if (e.target !== e.currentTarget) return
-                        e.stopPropagation()
-                        setPlaying(false)
-                        marquee.current = { sx: e.clientX, sy: e.clientY }
-                        ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-                      }}
-                      onPointerMove={(e) => {
-                        const m = marquee.current
-                        if (!m) return
-                        const rect = trackRef.current?.getBoundingClientRect()
-                        if (!rect) return
-                        setMarqueeBox({
-                          x: Math.min(m.sx, e.clientX) - rect.left,
-                          y: Math.min(m.sy, e.clientY) - rect.top,
-                          w: Math.abs(e.clientX - m.sx),
-                          h: Math.abs(e.clientY - m.sy),
-                        })
-                      }}
-                      onPointerUp={(e) => {
-                        const m = marquee.current
-                        if (!m) return
-                        marquee.current = null
-                        setMarqueeBox(null)
-                        ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
-                        finishMarquee(m.sx, m.sy, e.clientX, e.clientY)
-                      }}
-                      onPointerCancel={() => {
-                        marquee.current = null
-                        setMarqueeBox(null)
-                      }}
-                    >
+                    <div key={ch} className="timeline__track timeline__track--prop">
                       {keys.length >= 2 && (
                         <div
                           className="timeline__proplink"
@@ -732,6 +831,10 @@ export default function Timeline({
               onLive={(b) => setKfSegEaseLive(easePop.ch, easePop.fromT, b)}
               onDragEnd={commitEdit}
               onPreset={(b) => setKfSegEase(easePop.ch, easePop.fromT, b)}
+              onSpring={(i) => {
+                bakeSpringSegEase(easePop.ch, easePop.fromT, i)
+                setEasePop(null) // 구간이 여러 키로 쪼개짐 — 팝업 대상이 사라진다
+              }}
               onClose={() => setEasePop(null)}
             />,
             document.body,
@@ -750,6 +853,7 @@ function EasingPopover({
   onLive,
   onDragEnd,
   onPreset,
+  onSpring,
   onClose,
 }: {
   bez: Bezier4
@@ -759,10 +863,11 @@ function EasingPopover({
   onLive: (b: Bezier4) => void
   onDragEnd: () => void
   onPreset: (b: Bezier4) => void
+  onSpring: (presetIdx: number) => void
   onClose: () => void
 }) {
   const W = 248
-  const H = 318
+  const H = 470 // 토큰·스프링 섹션 포함 실측 높이 근사 — 뷰포트 클램프용
   // 뷰포트 클램프 — 버튼 위쪽 우선, 안 되면 아래
   const left = Math.max(8, Math.min(window.innerWidth - W - 8, x - W / 2))
   const top = y - H - 10 > 8 ? y - H - 10 : Math.min(window.innerHeight - H - 8, y + 18)
@@ -782,6 +887,31 @@ function EasingPopover({
   const svgRef = useRef<SVGSVGElement>(null)
   const dragging = useRef<0 | 1 | null>(null)
   const [draft, setDraft] = useState<string | null>(null)
+
+  // Escape = 팝업 닫기 (입력 중이면 각 인풋이 stopPropagation으로 입력 취소만)
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [onClose])
+
+  // 이징 토큰 — 현재 커브를 이름 붙여 저장, 클릭으로 재적용 (Creator 2.0 Motion Tokens 벤치)
+  const [tokens, setTokens] = useState<EaseToken[]>(loadEaseTokens)
+  const [naming, setNaming] = useState<string | null>(null)
+  const commitToken = (raw: string) => {
+    const name = raw.trim() || `토큰 ${tokens.length + 1}`
+    const next = [...tokens.filter((t) => t.name !== name), { name, bez: [...bez] as Bezier4 }]
+    setTokens(next)
+    saveEaseTokens(next)
+    setNaming(null)
+  }
+  const removeToken = (name: string) => {
+    const next = tokens.filter((t) => t.name !== name)
+    setTokens(next)
+    saveEaseTokens(next)
+  }
 
   const isPreset = (p: Bezier4) => p.every((v, i) => Math.abs(v - bez[i]) < 0.005)
 
@@ -891,11 +1021,74 @@ function EasingPopover({
           }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-            if (e.key === 'Escape') setDraft(null)
+            if (e.key === 'Escape') {
+              if (draft !== null) e.stopPropagation()
+              setDraft(null)
+            }
           }}
           spellCheck={false}
         />
         <p className="knob__note">핸들을 끌거나 cubic-bezier 값 직접 입력. 이 구간에만 적용.</p>
+        {/* 이징 토큰 — 내 커브 저장·재사용, 프로젝트를 넘어 유지 */}
+        <div className="knob__head" style={{ marginTop: 8 }}>
+          <span className="knob__name">내 토큰</span>
+        </div>
+        <div className="knob__chips">
+          {tokens.map((t) => (
+            <button
+              key={t.name}
+              className={`chip easetoken ${isPreset(t.bez) ? 'chip--on' : ''}`}
+              title={t.bez.map((v) => Math.round(v * 100) / 100).join(', ')}
+              onClick={() => onPreset(t.bez)}
+            >
+              {t.name}
+              <span
+                className="easetoken__x"
+                title="토큰 삭제"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  removeToken(t.name)
+                }}
+              >
+                ×
+              </span>
+            </button>
+          ))}
+          {naming === null ? (
+            <button className="chip" onClick={() => setNaming('')}>
+              ＋ 저장
+            </button>
+          ) : (
+            <input
+              className="easetoken__name"
+              autoFocus
+              value={naming}
+              placeholder={`토큰 ${tokens.length + 1}`}
+              onChange={(e) => setNaming(e.target.value)}
+              onBlur={() => setNaming(null)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitToken(naming)
+                if (e.key === 'Escape') {
+                  e.stopPropagation()
+                  setNaming(null)
+                }
+              }}
+              spellCheck={false}
+            />
+          )}
+        </div>
+        {/* 스프링 — 단일 베지어로 불가능한 감쇠 진동을 구간 키로 굽는다 (Creator 2.0 벤치) */}
+        <div className="knob__head" style={{ marginTop: 8 }}>
+          <span className="knob__name">스프링으로 굽기</span>
+        </div>
+        <div className="knob__chips">
+          {SPRING_PRESETS.map((p, i) => (
+            <button key={p.label} className="chip" onClick={() => onSpring(i)}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <p className="knob__note">이 구간을 스프링 모션 키들로 대체합니다 — 되돌리기는 ⌘Z.</p>
       </div>
     </>
   )

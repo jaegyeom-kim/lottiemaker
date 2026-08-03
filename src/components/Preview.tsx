@@ -5,7 +5,7 @@ import { durationSec, parseLottie, type LottieJson } from '../lib/lottieUtils'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
 import {
   layerHalfOf, layerCenterOffsetOf, layerColor, tint, normKf, kfValueAt,
-  kfChannelKeys, normSel, animSpans,
+  kfChannelKeys, normSel, animSpans, kfFallbackValue,
   type CustomPayload, type CustomKf, type CustomSel, type KfChannel,
 } from '../lib/customBuilder'
 import LottiePlayer from './LottiePlayer'
@@ -58,7 +58,6 @@ export default function Preview() {
   // 커스텀 빌더 위치 드래그 — 드래그 중엔 CSS 이동(재로드 없음), 놓을 때 1회 커밋.
   // 스냅: 캔버스 중앙(256)/가장자리(0,512)에 8px 흡착, Alt 누르면 해제.
   const wrapRef = useRef<HTMLDivElement>(null)
-  const innerRef = useRef<HTMLDivElement>(null)
   const dragStart = useRef<{
     x: number; y: number; bx: number; by: number; f: number; hw: number; hh: number
     ox: number; oy: number
@@ -93,6 +92,44 @@ export default function Preview() {
     }
     setCurFrame(f)
   }, [playing, frame, setCurFrame])
+  // ⌘V 통합 처리 — 클립보드에 이미지가 있으면 레이어로 붙여넣기(Creator 2.0 벤치),
+  // 아니면 내부 키프레임 클립보드를 재생헤드에 붙여넣기
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      const s = useEditor.getState()
+      if (s.mode !== 'custom') return
+      let imgFile: File | null = null
+      for (const it of e.clipboardData?.items ?? []) {
+        if (it.type.startsWith('image/')) {
+          imgFile = it.getAsFile()
+          break
+        }
+      }
+      if (imgFile) {
+        e.preventDefault()
+        const name = imgFile.name?.replace(/\.[^.]+$/, '') || '붙여넣은 이미지'
+        const done = (payload: CustomPayload) => useEditor.getState().addCustomLayer(payload, name)
+        if (imgFile.type === 'image/svg+xml') {
+          imgFile
+            .text()
+            .then((txt) => done({ kind: 'svg', graphic: svgToLottie(txt) }))
+            .catch((err) => alert((err as Error).message))
+        } else {
+          readImageFile(imgFile)
+            .then((image) => done({ kind: 'image', image }))
+            .catch((err) => alert((err as Error).message))
+        }
+        return
+      }
+      // 이미지 없음 → 내부 키프레임 붙여넣기 (클립보드 비어 있으면 no-op)
+      s.pasteKfAt(s.curFrame)
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [])
+
   // 키 탐색(◀/▶)의 재생헤드 이동 요청 소비
   useEffect(() => {
     if (!jumpToken) return
@@ -119,6 +156,27 @@ export default function Preview() {
       useEditor.getState().setCustomBaseLive(b[0], b[1])
     }
   }
+
+  // 어니언 스킨 토글 — 전후 프레임 고스트 (일시정지·비편집 중에만 렌더)
+  const [onion, setOnion] = useState(() => {
+    try {
+      return localStorage.getItem('lottiemaker.onion') === '1'
+    } catch {
+      return false
+    }
+  })
+  const toggleOnion = () => {
+    setOnion((v) => {
+      try {
+        localStorage.setItem('lottiemaker.onion', v ? '0' : '1')
+      } catch {
+        // 저장 불가 환경 — 무시
+      }
+      return !v
+    })
+  }
+  // 라이브 편집 중엔 고스트 숨김 — 매 틱 로티 인스턴스 재생성 방지
+  const liveEditing = useEditor((s) => s.editBaseline !== null)
 
   // 툴 + 뷰포트 (팬/줌)
   const [tool, setTool] = useState<'move' | 'hand'>('move')
@@ -188,9 +246,19 @@ export default function Preview() {
         e.preventDefault()
         const n = s.sourceData?.layers.length ?? 0
         if (n && s.customIdxs.length) s.duplicateCustomLayer(Math.min(s.customIdx, n - 1))
-      } else if (e.key.startsWith('Arrow')) {
-        // 방향키 넛지 — 1px, Shift = 10px. 리핏 동안 라이브, 키 떼면 히스토리 1회
+      } else if (e.key.toLowerCase() === 'c' && (e.metaKey || e.ctrlKey) && s.kfSel.length) {
+        // 선택 키프레임 복사 (AE ⌘C) — 붙여넣기는 window paste 이벤트에서 처리
         e.preventDefault()
+        s.copyKfSel()
+      } else if (e.key.startsWith('Arrow')) {
+        e.preventDefault()
+        // 타임라인 키 선택이 있으면 ←/→ = 키 시간 넛지 (AE 방식, 1f / ⇧10f)
+        if (s.kfSel.length && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+          const df = (e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 10 : 1)
+          s.nudgeKfSel(df)
+          return
+        }
+        // 방향키 넛지 — 1px, Shift = 10px. 리핏 동안 라이브, 키 떼면 히스토리 1회
         if (!s.customIdxs.length) return
         const step = e.shiftKey ? 10 : 1
         const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0
@@ -321,9 +389,7 @@ export default function Preview() {
             const xb: [number, number] = Array.isArray(layer.xbase)
               ? [(layer.xbase as number[])[0], (layer.xbase as number[])[1]]
               : [256, 256]
-            const fb: number | [number, number] =
-              ch === 'p' ? xb : ch === 's' ? 100 : ch === 'r' ? xsel.rotation : xsel.opacity
-            s.setKfChannel(ch, cur, kfValueAt(xkf, ch, cur, fb))
+            s.setKfChannel(ch, cur, kfValueAt(xkf, ch, cur, kfFallbackValue(ch, xsel, xb)))
           }
         }
       }
@@ -385,6 +451,38 @@ export default function Preview() {
       selBox = { x: b[0] + ox, y: b[1] + oy, hw, hh }
     }
   }
+  // 모션 패스 (기본 내장) — 주 선택 키프레임 레이어의 위치 키 경로 (AE 스타일)
+  const motionPath = (() => {
+    if (templateId !== '__custom' || previewing || !sourceData?.layers.length) return null
+    const lr = sourceData.layers[idxClamped] as Record<string, unknown> | undefined
+    const xkf = normKf(lr?.xkf as Partial<CustomKf> | undefined)
+    if (!xkf.on) return null
+    const pk = kfChannelKeys(xkf, 'p')
+    if (pk.length < 2) return null
+    const fb = pk[0].p as [number, number]
+    // 프레임 점 — 2f 간격 샘플, 이징에 따라 점 간격이 속도를 보여준다
+    const dots: [number, number][] = []
+    const t0 = pk[0].t
+    const t1 = pk[pk.length - 1].t
+    for (let f = t0; f <= t1; f += 2) dots.push(kfValueAt(xkf, 'p', f, fb) as [number, number])
+    return {
+      keys: pk.map((k) => k.p as [number, number]),
+      dots,
+      cur: kfValueAt(xkf, 'p', Math.round(frame), fb) as [number, number],
+    }
+  })()
+
+  // 어니언 스킨 고스트 프레임 — 현재 기준 전후 (±6, ±12f)
+  const onionFrames = (() => {
+    if (!onion || templateId !== '__custom' || playing || liveEditing || !animationData) return []
+    const op = animationData.op
+    const cur = Math.round(frame)
+    return [-12, -6, 6, 12]
+      .map((d) => cur + d)
+      .filter((f, i, arr) => f >= 0 && f <= op - 1 && f !== cur && arr.indexOf(f) === i)
+      .map((f) => ({ f, past: f < cur }))
+  })()
+
   // 주/보조 선택 박스 스트로크 = 레이어 라벨 컬러
   const primaryColor =
     sourceData?.layers[idxClamped] !== undefined
@@ -641,6 +739,13 @@ export default function Preview() {
             >
               ⊡
             </button>
+            <button
+              className={`canvastools__btn ${onion ? 'canvastools__btn--on' : ''}`}
+              title="어니언 스킨 — 전후 프레임 겹쳐 보기 (과거 흑백 / 미래 컬러)"
+              onClick={toggleOnion}
+            >
+              ◎
+            </button>
           </div>
         )}
         {animationData ? (
@@ -656,8 +761,19 @@ export default function Preview() {
                   : undefined
               }
             >
+              {/* 어니언 스킨 — 전후 프레임 고스트 (과거 흑백 / 미래 컬러) */}
+              {onionFrames.map((g) => (
+                <div key={g.f} className={`onionghost ${g.past ? 'onionghost--past' : ''}`}>
+                  <LottiePlayer
+                    data={animationData}
+                    playing={false}
+                    seekFrame={g.f}
+                    className="preview__lottiefill"
+                  />
+                </div>
+              ))}
               {/* 드래그 이동은 내부 래퍼에만 — 가이드/오버레이는 고정 좌표 유지 */}
-              <div ref={innerRef} className="preview__lottiefill">
+              <div className="preview__lottiefill">
                 <LottiePlayer
                   data={animationData}
                   playing={playing}
@@ -670,6 +786,34 @@ export default function Preview() {
                   className="preview__lottiefill"
                 />
               </div>
+              {/* 모션 패스 — 위치 키 경로 (점선) + 프레임 점 + 키 마커 + 현재 위치 */}
+              {motionPath && (
+                <svg className="motionpath" viewBox="0 0 512 512">
+                  <polyline
+                    className="motionpath__line"
+                    points={motionPath.keys.map(([x, y]) => `${x},${y}`).join(' ')}
+                  />
+                  {motionPath.dots.map(([x, y], i) => (
+                    <circle key={i} className="motionpath__dot" cx={x} cy={y} r={1.4} />
+                  ))}
+                  {motionPath.keys.map(([x, y], i) => (
+                    <rect
+                      key={`k${i}`}
+                      className="motionpath__key"
+                      x={x - 3}
+                      y={y - 3}
+                      width={6}
+                      height={6}
+                    />
+                  ))}
+                  <circle
+                    className="motionpath__cur"
+                    cx={motionPath.cur[0]}
+                    cy={motionPath.cur[1]}
+                    r={5}
+                  />
+                </svg>
+              )}
               <span className="canvasbadge">
                 {animationData.w} × {animationData.h}
               </span>
@@ -1013,27 +1157,30 @@ export default function Preview() {
             </div>
           )
         ) : (
-          appMode === 'custom' ? (
-            <div className="preview__empty">
-              <p className="preview__empty-title">그래픽을 끌어다 놓아 커스텀을 시작하세요</p>
-              <p className="preview__empty-sub">
-                SVG/PNG/JPG/WebP · 왼쪽 커스텀 패널에서도 업로드 가능 · 프로젝트 파일(.lmproj.json) 드롭 시 복원
-              </p>
-              <button className="btn btn--secondary" onClick={() => fileInputRef.current?.click()}>
-                파일 열기
-              </button>
-            </div>
-          ) : (
-            <div className="preview__empty">
-              <p className="preview__empty-title">왼쪽에서 템플릿을 선택하세요</p>
-              <p className="preview__empty-sub">
-                로티 JSON · 프로젝트 파일(.lmproj.json)을 끌어다 놓아도 열립니다
-              </p>
-              <button className="btn btn--secondary" onClick={() => fileInputRef.current?.click()}>
-                JSON 파일 열기
-              </button>
-            </div>
-          )
+          // 빈 캔버스 — 문구만 모드별로 다르고 구조는 동일
+          (() => {
+            const empty =
+              appMode === 'custom'
+                ? {
+                    title: '그래픽을 끌어다 놓아 커스텀을 시작하세요',
+                    sub: 'SVG/PNG/JPG/WebP · 왼쪽 커스텀 패널에서도 업로드 가능 · 프로젝트 파일(.lmproj.json) 드롭 시 복원',
+                    btn: '파일 열기',
+                  }
+                : {
+                    title: '왼쪽에서 템플릿을 선택하세요',
+                    sub: '로티 JSON · 프로젝트 파일(.lmproj.json)을 끌어다 놓아도 열립니다',
+                    btn: 'JSON 파일 열기',
+                  }
+            return (
+              <div className="preview__empty">
+                <p className="preview__empty-title">{empty.title}</p>
+                <p className="preview__empty-sub">{empty.sub}</p>
+                <button className="btn btn--secondary" onClick={() => fileInputRef.current?.click()}>
+                  {empty.btn}
+                </button>
+              </div>
+            )
+          })()
         )}
         <input
           ref={fileInputRef}

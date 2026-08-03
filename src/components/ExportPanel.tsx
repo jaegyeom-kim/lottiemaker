@@ -1,32 +1,22 @@
 import { useState } from 'react'
-import { useEditor, type SavedSession } from '../store'
+import { useEditor, sessionPayload } from '../store'
 import { bakeSpeed, download, durationSec } from '../lib/lottieUtils'
 
 export default function ExportPanel() {
   const { animationData, fileName, setFileName, speed } = useEditor()
   const sourceData = useEditor((s) => s.sourceData)
 
-  // 프로젝트 세이브 파일 — 세션 전체(레이어/슬롯/노브/원본)를 담는다.
-  // app 마커로 로티 JSON과 구분, 드래그 드롭으로 다시 불러온다.
+  // 프로젝트 세이브 파일 — 자동 저장과 같은 페이로드에 app 마커만 얹는다 (드롭으로 복원).
   const saveProject = () => {
-    const s = useEditor.getState()
-    if (!s.sourceData) return
-    const payload: SavedSession & { app: string } = {
-      app: 'lottiemaker',
-      v: 1,
-      sourceData: s.sourceData,
-      pristineData: s.pristineData,
-      templateId: s.templateId,
-      templateKnobs: s.templateKnobs,
-      knobValues: s.knobValues,
-      fileName: s.fileName,
-      customIdx: s.customIdx,
-    }
-    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' })
+    const payload = sessionPayload()
+    if (!payload) return
+    const blob = new Blob([JSON.stringify({ app: 'lottiemaker', ...payload })], {
+      type: 'application/json',
+    })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${s.fileName}.lmproj.json`
+    a.download = `${payload.fileName}.lmproj.json`
     a.click()
     URL.revokeObjectURL(url)
   }

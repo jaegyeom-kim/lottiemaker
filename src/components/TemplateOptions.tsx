@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { evalNumExpr } from '../lib/num'
 import { useEditor } from '../store'
 import { FONT_PRESETS, type TemplateKnob } from '../lib/lottieKnobs'
 
@@ -246,8 +247,9 @@ function KnobValueInput({
   const decimals = step < 1 ? (String(step).split('.')[1]?.length ?? 1) : 0
 
   const commit = () => {
-    const v = Number(draft)
-    if (Number.isFinite(v)) {
+    // 산술 입력 지원 — "100+50", "*2", "/4"
+    const v = evalNumExpr(draft, value)
+    if (v !== null) {
       const clamped = Number(Math.min(max, Math.max(min, v)).toFixed(decimals))
       if (clamped !== value) {
         onCommit(clamped)
@@ -260,10 +262,9 @@ function KnobValueInput({
   return (
     <span className="knob__valinput">
       <input
-        type="number"
-        min={min}
-        max={max}
-        step={step}
+        type="text"
+        inputMode="decimal"
+        title="산술 입력 가능 — 100+50, *2, /4"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}

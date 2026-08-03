@@ -1,4 +1,6 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { evalNumExpr } from '../lib/num'
+import { getAiKey, setAiKey, summarizeDoc, generateMotion } from '../lib/ai'
 import { useEditor } from '../store'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
 import {
@@ -6,10 +8,12 @@ import {
   LOOP_TYPES,
   OUT_TYPES,
   KF_EASES,
+  KF_CHANNEL_DEFS,
   normSel,
   normKf,
   kfValueAt,
   kfChannelKeys,
+  kfFallbackValue,
   type CustomSel,
   type CustomKf,
   type KfChannel,
@@ -418,12 +422,170 @@ export default function CustomBuilder() {
         </>
       )}
 
+      {active && layers.length > 0 && (
+        <>
+          <h4 className="grouphead">AI 모션 (베타)</h4>
+          <AiMotionPanel />
+        </>
+      )}
+
       <p className="panel__hint">
         {active
           ? kfOn
             ? '재생헤드를 옮기고 값을 바꾸면 키가 찍힙니다. 타임라인 다이아몬드 = 키 (드래그 이동 · 더블클릭 삭제).'
             : '등장·루프·퇴장을 조합하세요. 타이밍은 아래 타임라인에서 밀고 당기기.'
           : '그래픽을 올리면 등장/루프/퇴장을 조합해 애니메이션을 만듭니다. 여러 장 올리면 레이어로 쌓입니다.'}
+      </p>
+    </div>
+  )
+}
+
+const AI_EXAMPLES = [
+  '통통 튀며 등장했다가 붕 떠다니게',
+  '왼쪽에서 순서대로 슬라이드 인',
+  '두근거리는 하트비트 루프',
+]
+
+/** AI 모션 — 자연어 → 키프레임 (Motion Copilot 벤치, BYOK). */
+function AiMotionPanel() {
+  const applyAiMotion = useEditor((s) => s.applyAiMotion)
+  const [apiKey, setApiKeyState] = useState(getAiKey)
+  const [editKey, setEditKey] = useState(false)
+  const [keyDraft, setKeyDraft] = useState('')
+  const [prompt, setPrompt] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  // 언마운트 시 진행 중 요청 정리
+  useEffect(() => () => abortRef.current?.abort(), [])
+
+  const saveKey = () => {
+    // 콘솔에서 복사 시 줄바꿈/공백 섞임 방지 — 키에 공백은 없다
+    const k = keyDraft.replace(/\s+/g, '')
+    setAiKey(k)
+    setApiKeyState(k)
+    setKeyDraft('')
+    setEditKey(false)
+    setMsg(null)
+  }
+
+  const run = async () => {
+    const req = prompt.trim()
+    if (!req || busy) return
+    const { sourceData, customIdxs, curFrame } = useEditor.getState()
+    if (!sourceData) return
+    setBusy(true)
+    setMsg(null)
+    const ac = new AbortController()
+    abortRef.current = ac
+    try {
+      const doc = summarizeDoc(sourceData, customIdxs, curFrame)
+      const plan = await generateMotion({ apiKey, prompt: req, doc, signal: ac.signal })
+      applyAiMotion(plan)
+      setMsg({ kind: 'ok', text: `${plan.note ?? '모션 적용됨'} — ⌘Z로 되돌릴 수 있어요` })
+    } catch (e) {
+      if ((e as Error).name !== 'AbortError') setMsg({ kind: 'err', text: (e as Error).message })
+    } finally {
+      setBusy(false)
+      abortRef.current = null
+    }
+  }
+
+  if (!apiKey || editKey) {
+    return (
+      <div className="knob aipanel">
+        <p className="knob__note">
+          문장으로 모션을 만들려면 Anthropic API 키가 필요합니다. 키는 이 브라우저에만 저장되고
+          Anthropic API 호출에만 쓰입니다 — 프로젝트 파일이나 내보내기에 포함되지 않습니다.
+        </p>
+        <div className="aipanel__keyrow">
+          <input
+            className="input"
+            type="password"
+            placeholder="sk-ant-…"
+            value={keyDraft}
+            onChange={(e) => setKeyDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && keyDraft.trim()) saveKey()
+            }}
+            spellCheck={false}
+          />
+          <button className="btn" disabled={!keyDraft.trim()} onClick={saveKey}>
+            저장
+          </button>
+          {editKey && (
+            <button className="btn" onClick={() => { setEditKey(false); setKeyDraft('') }}>
+              취소
+            </button>
+          )}
+        </div>
+        {editKey && apiKey && (
+          <button
+            className="aipanel__keybtn"
+            onClick={() => {
+              setAiKey('')
+              setApiKeyState('')
+              setEditKey(false)
+              setKeyDraft('')
+            }}
+          >
+            저장된 키 삭제
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="knob aipanel">
+      <textarea
+        className="input aipanel__prompt"
+        rows={2}
+        placeholder="원하는 모션을 문장으로 — 예: 로고가 통통 튀며 들어오고 살짝 흔들리는 루프"
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault()
+            run()
+          }
+        }}
+        disabled={busy}
+        spellCheck={false}
+      />
+      <div className="knob__chips">
+        {AI_EXAMPLES.map((ex) => (
+          <button key={ex} className="chip" disabled={busy} onClick={() => setPrompt(ex)}>
+            {ex}
+          </button>
+        ))}
+      </div>
+      <div className="aipanel__actions">
+        {busy ? (
+          <>
+            <button className="btn" disabled>
+              생성 중…
+            </button>
+            <button className="btn" onClick={() => abortRef.current?.abort()}>
+              취소
+            </button>
+          </>
+        ) : (
+          <button className="btn btn--primary" disabled={!prompt.trim()} onClick={run}>
+            모션 생성
+          </button>
+        )}
+        <button className="aipanel__keybtn" onClick={() => setEditKey(true)} title="API 키 변경/삭제">
+          키 관리
+        </button>
+      </div>
+      {msg && (
+        <p className={msg.kind === 'err' ? 'panel__error' : 'aipanel__ok'}>{msg.text}</p>
+      )}
+      <p className="knob__note">
+        선택한 레이어가 있으면 그 레이어 위주로, 없으면 요청에 맞는 레이어에 적용합니다. 결과는
+        일반 키프레임이라 그대로 수정할 수 있습니다 (⌘Enter = 생성).
       </p>
     </div>
   )
@@ -445,25 +607,11 @@ function KfPanel({
   const curFrame = useEditor((s) => s.curFrame)
   const t = Math.max(0, Math.min(compOp, curFrame))
 
-  const channels: { ch: KfChannel; label: string; unit: string }[] = [
-    { ch: 'p', label: '위치', unit: 'px' },
-    { ch: 's', label: '크기', unit: '%' },
-    { ch: 'r', label: '회전', unit: '°' },
-    { ch: 'o', label: '불투명도', unit: '%' },
-  ]
+  const channels = KF_CHANNEL_DEFS
 
   // 채널의 현재 프레임 값 (보간) — ◆로 캡처되는 값이기도 하다
-  const valueOf = (ch: KfChannel): number | [number, number] => {
-    const fb: number | [number, number] =
-      ch === 'p'
-        ? (base ?? [256, 256])
-        : ch === 's'
-          ? 100
-          : ch === 'r'
-            ? xsel.rotation
-            : xsel.opacity
-    return kfValueAt(xkf, ch, t, fb)
-  }
+  const valueOf = (ch: KfChannel): number | [number, number] =>
+    kfValueAt(xkf, ch, t, kfFallbackValue(ch, xsel, base ?? [256, 256]))
 
   return (
     <div className="knob kfpanel">
@@ -599,16 +747,17 @@ function PosInput({
 
   const commit = () => {
     setFocused(false)
-    const v = Number(draft)
-    if (Number.isFinite(v) && Math.abs(v - rounded) > 1e-9) onCommit(v)
+    const v = evalNumExpr(draft, rounded)
+    if (v !== null && Math.abs(v - rounded) > 1e-9) onCommit(v)
   }
 
   return (
     <label className="posinput">
       <span className="posinput__label">{label}</span>
       <input
-        type="number"
-        step={1}
+        type="text"
+        inputMode="decimal"
+        title="산술 입력 가능 — 100+50, *2, /4"
         value={shown}
         onFocus={(e) => {
           setFocused(true)
@@ -650,9 +799,10 @@ function SliderRow({
 
   const commitDraft = () => {
     if (draft === null) return
-    const v = Number(draft)
+    // 산술 입력 지원 — "100+50", "*2", "/4" (Creator 2.0 벤치)
+    const v = evalNumExpr(draft, shownValue)
     setDraft(null)
-    if (Number.isFinite(v)) {
+    if (v !== null) {
       const clamped = Number(Math.min(max, Math.max(min, v)).toFixed(decimals))
       if (clamped !== shownValue) {
         onLive(clamped)
@@ -667,10 +817,9 @@ function SliderRow({
         <span className="knob__name">{label}</span>
         <span className="knob__valinput">
           <input
-            type="number"
-            min={min}
-            max={max}
-            step={step}
+            type="text"
+            inputMode="decimal"
+            title="산술 입력 가능 — 100+50, *2, /4"
             value={draft ?? String(shownValue)}
             onChange={(e) => setDraft(e.target.value)}
             onBlur={commitDraft}

@@ -306,8 +306,6 @@ export function buildAnimKs(
 // 프리셋(3슬롯) 대신 레이어에 직접 키를 찍는다. 키 하나 = 시각 t에 채널 값 부분집합.
 // 로티 재생기는 xkf를 무시 — ks 채널은 편집 때마다 여기서 재생성된다.
 
-export const KF_EASES = ['선형', '이지', '천천히 시작', '천천히 끝']
-
 /** cubic-bezier(x1, y1, x2, y2) — CSS/Figma와 같은 표기. */
 export type Bezier4 = [number, number, number, number]
 
@@ -317,6 +315,27 @@ export const EASE_PRESETS: { label: string; bez: Bezier4 }[] = [
   { label: '천천히 시작', bez: [0.42, 0, 1, 1] },
   { label: '천천히 끝', bez: [0, 0, 0.58, 1] },
 ]
+
+/** 레이어 기본 이징 칩 라벨 — 프리셋에서 파생 (인덱스가 xkf.ease와 일치해야 함). */
+export const KF_EASES = EASE_PRESETS.map((p) => p.label)
+
+// ── 스프링 이징 (Lottie Creator 2.0 Spring Curve 벤치) ──────
+// 스프링은 단일 베지어로 표현 불가 — 구간을 감쇠 진동 샘플 키로 굽는다.
+export const SPRING_PRESETS: { label: string; zeta: number; cycles: number }[] = [
+  { label: '바운시', zeta: 0.26, cycles: 3 },
+  { label: '스내피', zeta: 0.55, cycles: 1.5 },
+  { label: '엘라스틱', zeta: 0.15, cycles: 4 },
+]
+
+/** 정규화 스프링 곡선 — u∈[0,1] → 0→1 진행값 (오버슛 포함, u=1에서 정착). */
+export function springValue(u: number, zeta: number, cycles: number): number {
+  if (u <= 0) return 0
+  if (u >= 1) return 1
+  const w = cycles * Math.PI * 2
+  const wd = w * Math.sqrt(Math.max(0.0001, 1 - zeta * zeta))
+  const decay = Math.exp(-zeta * w * u)
+  return 1 - decay * (Math.cos(wd * u) + ((zeta * w) / wd) * Math.sin(wd * u))
+}
 
 /** 레이어 기본 이징 인덱스(KF_EASES) → 베지어. */
 export function easeIndexBez(i: number): Bezier4 {
@@ -351,8 +370,6 @@ export interface CustomKf {
   keys: KfKey[]
 }
 
-export const DEFAULT_KF: CustomKf = { on: false, ease: 1, keys: [] }
-
 /** 부분/없음 → 완전한 CustomKf. 키는 t 오름차순 정렬, 이징 오버라이드는 유효한 것만. */
 export function normKf(raw: Partial<CustomKf> | undefined): CustomKf {
   const r = raw ?? {}
@@ -380,6 +397,23 @@ export interface KfSelItem {
   li: number
   ch: KfChannel
   t: number
+}
+
+/** 채널 표시 정의 — 타임라인 프로퍼티 행·패널·단축키가 공유. */
+export const KF_CHANNEL_DEFS: { ch: KfChannel; label: string; unit: string }[] = [
+  { ch: 'p', label: '위치', unit: 'px' },
+  { ch: 's', label: '크기', unit: '%' },
+  { ch: 'r', label: '회전', unit: '°' },
+  { ch: 'o', label: '불투명도', unit: '%' },
+]
+
+/** 채널의 키 없는 구간 기본값 — ◆ 캡처/단축키/패널이 공유. */
+export function kfFallbackValue(
+  ch: KfChannel,
+  xsel: CustomSel,
+  base: [number, number],
+): number | [number, number] {
+  return ch === 'p' ? base : ch === 's' ? 100 : ch === 'r' ? xsel.rotation : xsel.opacity
 }
 
 /** 채널에 값이 있는 키만 t순으로. */

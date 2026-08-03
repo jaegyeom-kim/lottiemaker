@@ -7,10 +7,11 @@ import LottiePlayer from './LottiePlayer'
 import CustomBuilder from './CustomBuilder'
 
 const RECENT_KEY = 'lottiemaker.recent.templates'
+const FAV_KEY = 'lottiemaker.fav.templates'
 
-function loadRecents(): string[] {
+function loadIds(key: string): string[] {
   try {
-    const arr = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]')
+    const arr = JSON.parse(localStorage.getItem(key) ?? '[]')
     return Array.isArray(arr) ? arr.filter((id) => templates.some((t) => t.id === id)) : []
   } catch {
     return []
@@ -25,14 +26,27 @@ export default function TemplateGallery() {
   const mode = useEditor((s) => s.mode)
   const [category, setCategory] = useState<string>('all')
   const [query, setQuery] = useState('')
-  const [recents, setRecents] = useState<string[]>(loadRecents)
+  const [recents, setRecents] = useState<string[]>(() => loadIds(RECENT_KEY))
+  const [favs, setFavs] = useState<string[]>(() => loadIds(FAV_KEY))
+
+  const toggleFav = (id: string) => {
+    const next = favs.includes(id) ? favs.filter((f) => f !== id) : [...favs, id]
+    setFavs(next)
+    try {
+      localStorage.setItem(FAV_KEY, JSON.stringify(next))
+    } catch {
+      // 저장 불가 환경 — 무시
+    }
+  }
 
   const byCategory =
     category === 'recent'
       ? recents.map((id) => templates.find((t) => t.id === id)).filter(Boolean) as TemplateDef[]
-      : category === 'all'
-        ? templates
-        : templates.filter((t) => t.category === category)
+      : category === 'fav'
+        ? templates.filter((t) => favs.includes(t.id))
+        : category === 'all'
+          ? templates
+          : templates.filter((t) => t.category === category)
   const q = query.trim().toLowerCase()
   const list = q
     ? byCategory.filter((t) => t.label.toLowerCase().includes(q) || t.id.includes(q))
@@ -95,6 +109,14 @@ export default function TemplateGallery() {
           >
             전체
           </button>
+          {favs.length > 0 && (
+            <button
+              className={`chip ${category === 'fav' ? 'chip--on' : ''}`}
+              onClick={() => setCategory('fav')}
+            >
+              ★ 즐겨찾기
+            </button>
+          )}
           {recents.length > 0 && (
             <button
               className={`chip ${category === 'recent' ? 'chip--on' : ''}`}
@@ -116,7 +138,14 @@ export default function TemplateGallery() {
       </div>
       <div className="gallery__grid">
         {list.map((t) => (
-          <Tile key={t.id} template={t} onPick={pick} current={t.id === currentId} />
+          <Tile
+            key={t.id}
+            template={t}
+            onPick={pick}
+            current={t.id === currentId}
+            fav={favs.includes(t.id)}
+            onToggleFav={toggleFav}
+          />
         ))}
         {list.length === 0 && (
           <p className="gallery__none">"{query}"에 맞는 템플릿이 없어요.</p>
@@ -153,10 +182,14 @@ function Tile({
   template,
   onPick,
   current,
+  fav,
+  onToggleFav,
 }: {
   template: TemplateDef
   onPick: (t: TemplateDef) => void
   current?: boolean
+  fav?: boolean
+  onToggleFav?: (id: string) => void
 }) {
   const [hover, setHover] = useState(false)
   const poster = Math.floor(((template.data as LottieJson).op ?? 60) / 2)
@@ -176,6 +209,19 @@ function Tile({
         className="tile__anim"
       />
       <span className="tile__label">{template.label}</span>
+      {/* 즐겨찾기 별 — 호버 또는 이미 즐겨찾기일 때만 표시 */}
+      {(hover || fav) && onToggleFav && (
+        <span
+          className={`tile__fav ${fav ? 'tile__fav--on' : ''}`}
+          title={fav ? '즐겨찾기 해제' : '즐겨찾기'}
+          onClick={(e) => {
+            e.stopPropagation()
+            onToggleFav(template.id)
+          }}
+        >
+          {fav ? '★' : '☆'}
+        </span>
+      )}
     </button>
   )
 }
