@@ -27,6 +27,42 @@ export function setAiKey(key: string) {
   }
 }
 
+/**
+ * 저장 시점 키 검증 — GET /v1/models (무과금)로 인증 + 모델 접근을 즉시 확인.
+ * 프롬프트를 쓰고 나서야 401을 발견하는 상황을 막는다.
+ */
+export async function verifyAiKey(key: string): Promise<{ ok: boolean; msg?: string }> {
+  // 형식 사전 체크 — 콘솔 API 키는 sk-ant-api…, 앱 OAuth 토큰은 sk-ant-oat…
+  if (key.startsWith('sk-ant-oat'))
+    return {
+      ok: false,
+      msg: t('클로드 앱 로그인 토큰입니다 — console.anthropic.com › API Keys에서 발급한 API 키(sk-ant-api…)가 필요합니다'),
+    }
+  if (!key.startsWith('sk-ant-'))
+    return { ok: false, msg: t('키 형식이 아닙니다 — sk-ant-로 시작하는 API 키를 넣어주세요') }
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/models?limit=100', {
+      headers: {
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+    })
+    if (res.status === 401)
+      return {
+        ok: false,
+        msg: t('API 키가 유효하지 않습니다 — console.anthropic.com › API Keys에서 발급한 키인지(클로드 앱 구독과 별개), 전체가 빠짐없이 복사됐는지 확인하세요'),
+      }
+    if (!res.ok) return { ok: true } // 기타 오류는 저장은 허용 — 실행 시 상세 에러로 안내
+    const j = (await res.json()) as { data?: { id: string }[] }
+    if (Array.isArray(j.data) && !j.data.some((m) => m.id.startsWith(MODEL)))
+      return { ok: false, msg: t('이 키로는 {model} 모델을 사용할 수 없습니다 — 워크스페이스 모델 설정을 확인하세요').replace('{model}', MODEL) }
+    return { ok: true }
+  } catch {
+    return { ok: true } // 오프라인 등 — 저장은 허용
+  }
+}
+
 /** AI가 반환하는 레이어별 모션 — keys는 해당 레이어의 기존 키를 통째로 대체. */
 export interface AiLayerPlan {
   index: number

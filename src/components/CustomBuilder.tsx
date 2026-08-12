@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { evalNumExpr } from '../lib/num'
-import { getAiKey, setAiKey, summarizeDoc, generateMotion } from '../lib/ai'
+import { getAiKey, setAiKey, verifyAiKey, summarizeDoc, generateMotion } from '../lib/ai'
 import { useEditor } from '../store'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
 import { parseLottie } from '../lib/lottieUtils'
@@ -424,9 +424,17 @@ function AiMotionPanel() {
   // 언마운트 시 진행 중 요청 정리
   useEffect(() => () => abortRef.current?.abort(), [])
 
-  const saveKey = () => {
+  const [keyChecking, setKeyChecking] = useState(false)
+  const saveKey = async () => {
     // 콘솔에서 복사 시 줄바꿈/공백 섞임 방지 — 키에 공백은 없다
     const k = keyDraft.replace(/\s+/g, '')
+    setKeyChecking(true)
+    const v = await verifyAiKey(k)
+    setKeyChecking(false)
+    if (!v.ok) {
+      setMsg({ kind: 'err', text: v.msg ?? t('키 확인 실패') })
+      return
+    }
     setAiKey(k)
     setApiKeyState(k)
     setKeyDraft('')
@@ -477,8 +485,8 @@ function AiMotionPanel() {
             }}
             spellCheck={false}
           />
-          <button className="btn" disabled={!keyDraft.trim()} onClick={saveKey}>
-            {t('저장')}
+          <button className="btn" disabled={!keyDraft.trim() || keyChecking} onClick={saveKey}>
+            {keyChecking ? t('확인 중…') : t('저장')}
           </button>
           {editKey && (
             <button className="btn" onClick={() => { setEditKey(false); setKeyDraft('') }}>
@@ -486,6 +494,7 @@ function AiMotionPanel() {
             </button>
           )}
         </div>
+        {msg && <p className={msg.kind === 'err' ? 'panel__error' : 'aipanel__ok'}>{msg.text}</p>}
         {editKey && apiKey && (
           <button
             className="aipanel__keybtn"
