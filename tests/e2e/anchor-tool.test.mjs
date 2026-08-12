@@ -20,7 +20,6 @@ ok((await page.locator('.preview__canvas--anchor').count()) === 1, '캔버스 �
 const before = await sessionSource(page)
 const l0 = before.layers[0]
 const base0 = [...l0.xbase]
-const off0 = [0, 0] // centerOffset 비교는 화면 좌표로
 const wrap = await page.$eval('.preview__lottiewrap', (e) => {
   const r = e.getBoundingClientRect()
   return { x: r.x, y: r.y, w: r.width }
