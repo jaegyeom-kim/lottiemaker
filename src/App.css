@@ -3928,3 +3928,50 @@ body.drag-cross * { cursor: crosshair !important; }
 .customdrag {
   inset: -100%;
 }
+
+/* 앵커 포인트 마커 (⊕) — 선택 박스와 동일 가이드 언어 (흰 채움 + 파랑 링) */
+.anchorpoint {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--blue);
+  border-radius: 50%;
+  background: #fff;
+  pointer-events: none;
+  z-index: 7;
+}
+
+.anchorpoint::before,
+.anchorpoint::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  background: var(--blue);
+  transform: translate(-50%, -50%);
+}
+
+.anchorpoint::before {
+  width: 1.5px;
+  height: 15px;
+}
+
+.anchorpoint::after {
+  width: 15px;
+  height: 1.5px;
+}
+
+.anchorpoint--active {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px var(--guide-fill);
+}
+
+/* 앵커 툴 — 픽/핸들 무력화 (스테이지가 드래그 처리) + 크로스헤어 */
+.preview__canvas--anchor {
+  cursor: crosshair;
+}
+
+.preview__canvas--anchor .customdrag,
+.preview__canvas--anchor .selhandle {
+  pointer-events: none !important;
+}

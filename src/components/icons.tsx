@@ -190,6 +190,14 @@ export function LineIcon(p: SVGProps<SVGSVGElement>) {
 }
 
 /** edit — 펜 툴. */
+export function AnchorTargetIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm0 5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3ZM11 2h2v4h-2V2Zm0 16h2v4h-2v-4ZM2 11h4v2H2v-2Zm16 0h4v2h-4v-2Z" />
+    </Icon>
+  )
+}
+
 export function PenIcon(p: SVGProps<SVGSVGElement>) {
   return (
     <Icon {...p}>

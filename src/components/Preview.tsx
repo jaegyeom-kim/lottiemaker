@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useEditor } from '../store'
 import { t } from '../lib/i18n'
 import {
-  CursorIcon, HandIcon, SquareIcon, CircleIcon, TriangleIcon, StarIcon, LineIcon, PenIcon,
+  CursorIcon, HandIcon, SquareIcon, CircleIcon, TriangleIcon, StarIcon, LineIcon, PenIcon, AnchorTargetIcon,
   PlayIcon, PauseIcon, ReplayIcon, FitIcon, LayersIcon, SceneIcon,
 } from './icons'
 import { durationSec, parseLottie, type LottieJson } from '../lib/lottieUtils'
@@ -246,7 +246,7 @@ export default function Preview() {
   const liveEditing = useEditor((s) => s.editBaseline !== null)
 
   // 툴 + 뷰포트 (팬/줌) — 드로잉 툴은 Figma 단축키 (R/E/L/P)
-  const [tool, setTool] = useState<'move' | 'hand' | DrawTool>('move')
+  const [tool, setTool] = useState<'move' | 'hand' | 'anchor' | DrawTool>('move')
   const toolRef = useRef(tool)
   toolRef.current = tool
   const [zoom, setZoom] = useState(1)
@@ -256,7 +256,8 @@ export default function Preview() {
   const panDrag = useRef<{ x: number; y: number; px: number; py: number } | null>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
   const handActive = tool === 'hand'
-  const drawTool: DrawTool | null = tool !== 'move' && tool !== 'hand' ? tool : null
+  const drawTool: DrawTool | null =
+    tool !== 'move' && tool !== 'hand' && tool !== 'anchor' ? tool : null
 
   // ── 드로잉 상태 — 박스 드래그(도형) + 펜 포인트 ──
   const [drawDrag, setDrawDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
@@ -391,7 +392,7 @@ export default function Preview() {
 
   const commitDrawnShape = (dd: { x0: number; y0: number; x1: number; y1: number }) => {
     const dt = toolRef.current
-    if (dt === 'move' || dt === 'hand' || dt === 'pen') return
+    if (dt === 'move' || dt === 'hand' || dt === 'anchor' || dt === 'pen') return
     const w = Math.abs(dd.x1 - dd.x0)
     const h = Math.abs(dd.y1 - dd.y0)
     if (w < 3 && h < 3) return // 클릭만 한 것 — 무시
@@ -552,6 +553,7 @@ export default function Preview() {
       }
       else if (e.key.toLowerCase() === 'v' && !e.metaKey && !e.ctrlKey) switchTool('move')
       else if (e.key.toLowerCase() === 'h' && !e.metaKey && !e.ctrlKey) switchTool('hand')
+      else if (e.key.toLowerCase() === 'y' && !e.metaKey && !e.ctrlKey) switchTool('anchor')
       // 드로잉 툴 — AE 배치: G = 펜, Q = 도형 순환 (P/S/R/T는 AE 채널 공개)
       else if (e.key.toLowerCase() === 'g' && !e.metaKey && !e.ctrlKey && !e.altKey) switchTool('pen')
       else if (e.key.toLowerCase() === 'q' && !e.metaKey && !e.ctrlKey && !e.altKey) {
@@ -824,6 +826,29 @@ export default function Preview() {
   // 선택 박스 — 드래그 중엔 커서 따라, 평소엔 선택 레이어 위치 (sourceData 구독으로 반응)
   // 프리뷰(재생) 중·선택 해제 상태에는 표시하지 않는다
   const hasSelection = customIdxs.length > 0
+  // 앵커 포인트 툴 — 드래그로 xsel.anchor 이동 (그래픽 제자리, withCustomAnchor가 보정)
+  const anchorDrag = useRef(false)
+  const applyAnchorDrag = (pt: [number, number]) => {
+    const st = useEditor.getState()
+    if (!st.sourceData?.layers.length) return
+    const li = Math.min(st.customIdx, st.sourceData.layers.length - 1)
+    const layer = st.sourceData.layers[li] as Record<string, unknown>
+    if (layer.xlock === true) return
+    const xsel = normSel(layer.xsel as Partial<CustomSel> | undefined, st.sourceData.op)
+    const base = layerBaseOf(st.sourceData, li, Math.round(frameRef.current))
+    const [hw, hh] = layerHalfOf(st.sourceData, li)
+    if (!base || hw < 0.5 || hh < 0.5) return
+    // 앵커 월드 = base — 커서와의 차를 무회전 로컬로 돌려 분율 증분
+    const rot = ((xsel.rotation ?? 0) * Math.PI) / 180
+    const dx = pt[0] - base[0]
+    const dy = pt[1] - base[1]
+    const lx = dx * Math.cos(-rot) - dy * Math.sin(-rot)
+    const ly = dx * Math.sin(-rot) + dy * Math.cos(-rot)
+    const [ax, ay] = xsel.anchor ?? [0.5, 0.5]
+    st.setCustomAnchorLive(ax + lx / (hw * 2), ay + ly / (hh * 2))
+  }
+
+  let anchorPt: [number, number] | null = null
   let selBox: { x: number; y: number; hw: number; hh: number } | null =
     previewing || !hasSelection ? null : dragBox
   if (!selBox && !previewing && hasSelection && templateId === '__custom' && sourceData?.layers.length) {
@@ -833,6 +858,7 @@ export default function Preview() {
       const [hw, hh] = layerHalfOf(sourceData, i)
       const [ox, oy] = layerCenterOffsetOf(sourceData, i)
       selBox = { x: b[0] + ox, y: b[1] + oy, hw, hh }
+      anchorPt = b // 앵커 월드 좌표 = 레이어 포지션
     }
   }
   // 모션 패스 (기본 내장) — 주 선택 키프레임 레이어의 위치 키 경로 (AE 스타일)
@@ -1114,7 +1140,9 @@ export default function Preview() {
         // 배경 옵션(체커 등)은 아트보드 내부에만 — 바깥은 항상 페이스트보드
         className={`preview__canvas ${mode === 'mockup' ? 'preview__canvas--dark' : 'preview__canvas--board'} ${
           handActive && templateId === '__custom' && mode === 'canvas' ? 'preview__canvas--hand' : ''
-        } ${drawTool && templateId === '__custom' && mode === 'canvas' ? 'preview__canvas--draw' : ''}`}
+        } ${drawTool && templateId === '__custom' && mode === 'canvas' ? 'preview__canvas--draw' : ''} ${
+          tool === 'anchor' && templateId === '__custom' && mode === 'canvas' ? 'preview__canvas--anchor' : ''
+        }`}
         onPointerDown={(e) => {
           if (templateId !== '__custom' || mode !== 'canvas') return
           // 휠(가운데) 버튼 드래그 = 임시 핸드 툴 — 어떤 툴이든 팬
@@ -1125,6 +1153,24 @@ export default function Preview() {
             return
           }
           if (e.button !== 0) return // 우클릭 등은 드로잉/마키에 안 섞이게
+          // 앵커 포인트 툴 — 클릭 지점으로 피벗 이동 후 드래그 추적
+          if (tool === 'anchor') {
+            if ((e.target as HTMLElement).closest('.canvastools, .drawbar')) return
+            const pt = toCanvasPt(e)
+            if (!pt) return
+            e.preventDefault()
+            const st = useEditor.getState()
+            // 선택 없으면 클릭 위치 레이어 먼저 픽
+            if (!st.customIdxs.length) {
+              const hit = pickLayer(pt[0], pt[1])
+              if (hit === null) return
+              setCustomIdx(hit)
+            }
+            anchorDrag.current = true
+            applyAnchorDrag(pt)
+            ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+            return
+          }
           // 드로잉 툴 — 캔버스 좌표로 도형 드래그 / 펜 포인트
           if (drawTool) {
             if ((e.target as HTMLElement).closest('.canvastools, .drawbar')) return
@@ -1173,6 +1219,11 @@ export default function Preview() {
           }
         }}
         onPointerMove={(e) => {
+          if (anchorDrag.current) {
+            const pt = toCanvasPt(e)
+            if (pt) applyAnchorDrag(pt)
+            return
+          }
           if (drawTool) {
             const pt = toCanvasPt(e)
             if (!pt) return
@@ -1296,6 +1347,11 @@ export default function Preview() {
           setPanState({ x: d.px + (e.clientX - d.x), y: d.py + (e.clientY - d.y) })
         }}
         onPointerUp={() => {
+          if (anchorDrag.current) {
+            anchorDrag.current = false
+            useEditor.getState().commitEdit()
+            return
+          }
           if (drawTool === 'pen') {
             const ed = editDrag.current
             if (ed) {
@@ -1346,6 +1402,10 @@ export default function Preview() {
           panDrag.current = null
         }}
         onPointerCancel={() => {
+          if (anchorDrag.current) {
+            anchorDrag.current = false
+            useEditor.getState().commitEdit()
+          }
           setDrawDrag(null)
           penHandleIdx.current = null
           ghostDrag.current = null
@@ -1388,6 +1448,7 @@ export default function Preview() {
               [
                 { id: 'move', glyph: <CursorIcon />, tip: '이동 툴 (V)' },
                 { id: 'hand', glyph: <HandIcon />, tip: '핸드 툴 (H)' },
+                { id: 'anchor', glyph: <AnchorTargetIcon />, tip: '앵커 포인트 툴 (Y) — 드래그로 회전·스케일 피벗 이동 (그래픽은 제자리)' },
                 { id: 'sep1', glyph: null, tip: '' },
                 { id: 'rect', glyph: <SquareIcon />, tip: '사각형 (Q 순환) — 드래그로 그리기 · ⇧ 정사각형' },
                 { id: 'ellipse', glyph: <CircleIcon />, tip: '원 (Q 순환) — 드래그로 그리기 · ⇧ 정원' },
@@ -1710,6 +1771,17 @@ export default function Preview() {
                           />
                         )
                       })}
+                  {/* 앵커 포인트 마커 (⊕) — 바운딩박스와 함께, 앵커 툴에서 드래그 대상 표시 */}
+                  {anchorPt && !dragBox && (
+                    <div
+                      className={`anchorpoint ${tool === 'anchor' ? 'anchorpoint--active' : ''}`}
+                      style={{
+                        left: `${(anchorPt[0] / cw) * 100}%`,
+                        top: `${(anchorPt[1] / ch) * 100}%`,
+                        transform: `translate(-50%, -50%) scale(${1 / zoom})`,
+                      }}
+                    />
+                  )}
                   {selBox && (
                     <div
                       className="selbox"
