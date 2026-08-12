@@ -446,6 +446,19 @@ export default function Preview() {
         setPanState({ x: 0, y: 0 })
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
+        // 펜 진행 중 — 마지막 앵커 삭제 (일러 방식). 레이어 삭제로 새면 그리던 패스가 날아간다
+        if (toolRef.current === 'pen' && penPtsRef.current.length) {
+          const rest = penPtsRef.current.slice(0, -1)
+          setPenPts(rest)
+          if (rest.length >= 2) syncPenLayer(rest)
+          else if (penCreated.current && s.customIdxs.length) {
+            // 점 1개 이하 — 생성했던 라이브 레이어 제거
+            s.cancelEdit()
+            s.removeCustomLayers([Math.min(s.customIdx, (s.sourceData?.layers.length ?? 1) - 1)])
+            penCreated.current = false
+          }
+          return
+        }
         // 타임라인 키 선택이 있으면 키 삭제, 아니면 선택 레이어 삭제
         if (s.kfSel.length) s.removeKfKeys(s.kfSel)
         else if (s.customIdxs.length) s.removeCustomLayers(s.customIdxs)

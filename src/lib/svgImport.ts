@@ -2,6 +2,7 @@
 // 지원: path(M/L/H/V/C/S/Q/T/A/Z), rect/circle/ellipse/polygon/polyline/line, g,
 //       transform(translate/scale/rotate/matrix), 단색 fill/stroke, opacity.
 // 미지원: 그라디언트(첫 스톱 색으로 대체), 텍스트(아웃라인 필요), 이미지/필터/마스크.
+import { growCubicBbox } from './drawTools'
 import { t } from './i18n'
 
 export interface ImportedGraphic {
@@ -358,6 +359,25 @@ export function svgToLottie(svgText: string): ImportedGraphic {
       const v = b.v.map(([px2, py2]) => { const t = apply(m, px2, py2); grow(t); return t })
       const i = b.i.map(([px2, py2]) => applyV(m, px2, py2))
       const o = b.o.map(([px2, py2]) => applyV(m, px2, py2))
+      // 곡선 극값도 bbox에 — 앵커만 넣으면 볼록한 커브가 박스 밖으로 나가
+      // 프리뷰 고스트/선택 박스와 렌더가 어긋난다
+      const acc = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
+      const segN = b.c ? v.length : v.length - 1
+      for (let j = 0; j < segN; j++) {
+        const k2 = (j + 1) % v.length
+        if (!o[j][0] && !o[j][1] && !i[k2][0] && !i[k2][1]) continue // 직선
+        growCubicBbox(
+          acc,
+          v[j],
+          [v[j][0] + o[j][0], v[j][1] + o[j][1]],
+          [v[k2][0] + i[k2][0], v[k2][1] + i[k2][1]],
+          v[k2],
+        )
+      }
+      if (Number.isFinite(acc.minX)) {
+        grow([acc.minX, acc.minY])
+        grow([acc.maxX, acc.maxY])
+      }
       return { ty: 'sh', ks: { a: 0, k: { i, o, v, c: b.c } } }
     })
     const fillStr = styleOf(el, 'fill') ?? inheritFill ?? '#333'

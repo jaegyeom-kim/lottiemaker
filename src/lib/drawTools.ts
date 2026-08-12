@@ -103,23 +103,87 @@ export function penPathD(pts: PenPt[], closed: boolean, hover?: [number, number]
   return d
 }
 
+/** 1축 3차 베지어 극값 — 시작/끝 + 도함수 근(0..1)의 값. */
+function cubicAxisExtremes(p0: number, c1: number, c2: number, p3: number): number[] {
+  const out = [p0, p3]
+  const a = 3 * (-p0 + 3 * c1 - 3 * c2 + p3)
+  const b = 6 * (p0 - 2 * c1 + c2)
+  const c = 3 * (c1 - p0)
+  const roots: number[] = []
+  if (Math.abs(a) < 1e-9) {
+    if (Math.abs(b) > 1e-9) roots.push(-c / b)
+  } else {
+    const disc = b * b - 4 * a * c
+    if (disc >= 0) {
+      const sq = Math.sqrt(disc)
+      roots.push((-b + sq) / (2 * a), (-b - sq) / (2 * a))
+    }
+  }
+  for (const t of roots) {
+    if (t <= 0 || t >= 1) continue
+    const u = 1 - t
+    out.push(u * u * u * p0 + 3 * u * u * t * c1 + 3 * u * t * t * c2 + t * t * t * p3)
+  }
+  return out
+}
+
+/**
+ * 세그먼트(3차 베지어) bbox를 acc에 누적 — 컨트롤 포인트 헐이 아니라 곡선 극값.
+ * svgImport의 앵커 bbox와 좌표계가 일치해야 프리뷰 고스트와 렌더가 안 어긋난다.
+ */
+export function growCubicBbox(
+  acc: { minX: number; minY: number; maxX: number; maxY: number },
+  p0: [number, number],
+  c1: [number, number],
+  c2: [number, number],
+  p3: [number, number],
+) {
+  for (const x of cubicAxisExtremes(p0[0], c1[0], c2[0], p3[0])) {
+    acc.minX = Math.min(acc.minX, x)
+    acc.maxX = Math.max(acc.maxX, x)
+  }
+  for (const y of cubicAxisExtremes(p0[1], c1[1], c2[1], p3[1])) {
+    acc.minY = Math.min(acc.minY, y)
+    acc.maxY = Math.max(acc.maxY, y)
+  }
+}
+
+/** 펜 경로의 실제 곡선 bbox (핸들 끝점이 아니라 커브 극값 기준). */
+function penBbox(pts: PenPt[], closed: boolean) {
+  const acc = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
+  const seg = (a: PenPt, b: PenPt) =>
+    growCubicBbox(
+      acc,
+      a.p,
+      a.ho ? [a.p[0] + a.ho[0], a.p[1] + a.ho[1]] : a.p,
+      b.hi ? [b.p[0] + b.hi[0], b.p[1] + b.hi[1]] : b.p,
+      b.p,
+    )
+  for (let i = 1; i < pts.length; i++) seg(pts[i - 1], pts[i])
+  if (closed && pts.length >= 3) seg(pts[pts.length - 1], pts[0])
+  if (!Number.isFinite(acc.minX)) {
+    acc.minX = pts[0]?.p[0] ?? 0
+    acc.maxX = acc.minX
+    acc.minY = pts[0]?.p[1] ?? 0
+    acc.maxY = acc.minY
+  }
+  return acc
+}
+
 /** 펜 경로 → SVG (로컬 좌표로 이동). closed = fill, open = stroke. 중심·크기 동봉. */
 export function buildPenSvg(
   pts: PenPt[],
   closed: boolean,
 ): { svg: string; center: [number, number]; size: number } | null {
   if (pts.length < 2) return null
-  const xs = pts.flatMap((pt) => [
-    pt.p[0], pt.p[0] + (pt.ho?.[0] ?? 0), pt.p[0] + (pt.hi?.[0] ?? 0),
-  ])
-  const ys = pts.flatMap((pt) => [
-    pt.p[1], pt.p[1] + (pt.ho?.[1] ?? 0), pt.p[1] + (pt.hi?.[1] ?? 0),
-  ])
+  // 곡선 극값 bbox — 핸들 끝점 기준이면 svgToLottie(앵커/극값)와 어긋나
+  // 배치 중심·크기가 틀어진다 (핸들 당길수록 고스트와 렌더가 벌어지는 버그)
+  const bb = penBbox(pts, closed)
   const pad = closed ? 2 : STROKE_W / 2 + 1
-  const minX = Math.min(...xs) - pad
-  const minY = Math.min(...ys) - pad
-  const w = Math.max(4, Math.max(...xs) + pad - minX)
-  const h = Math.max(4, Math.max(...ys) + pad - minY)
+  const minX = bb.minX - pad
+  const minY = bb.minY - pad
+  const w = Math.max(4, bb.maxX + pad - minX)
+  const h = Math.max(4, bb.maxY + pad - minY)
   const local = pts.map((pt) => ({
     p: [pt.p[0] - minX, pt.p[1] - minY] as [number, number],
     ho: pt.ho,
@@ -131,7 +195,9 @@ export function buildPenSvg(
     : `fill="none" stroke="${DRAW_FILL}" stroke-width="${STROKE_W}" stroke-linecap="round" stroke-linejoin="round"`
   return {
     svg: `${HEAD(Math.round(w), Math.round(h))}<path d="${d}" ${paint}/></svg>`,
-    center: [minX + w / 2, minY + h / 2],
-    size: Math.max(w, h),
+    // 중심·크기는 무패딩 곡선 bbox 기준 — svgToLottie가 보는 bbox와 동일해야
+    // 배치 스케일이 100%가 되어 고스트와 렌더가 픽셀 단위로 정합한다
+    center: [(bb.minX + bb.maxX) / 2, (bb.minY + bb.maxY) / 2],
+    size: Math.max(4, bb.maxX - bb.minX, bb.maxY - bb.minY),
   }
 }
