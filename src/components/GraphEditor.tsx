@@ -229,8 +229,14 @@ export default function GraphEditor({ onClose }: { onClose: () => void }) {
   frameAllRef.current = frameAll
   const frameSelectedRef = useRef(frameSelected)
   frameSelectedRef.current = frameSelected
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onCloseRef.current()
+        return
+      }
       const el = e.target as HTMLElement | null
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
       if (e.metaKey || e.ctrlKey || e.altKey) return
