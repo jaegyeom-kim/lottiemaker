@@ -4,7 +4,7 @@ import {
   normSel, normKf, kfValueAt, kfChannelKeys,
   type CustomKf, type CustomSel,
 } from '../lib/customBuilder'
-import { SliderRow, PosInput } from './CustomBuilder'
+import { PosInput } from './CustomBuilder'
 import AnchorControls from './AnchorControls'
 
 /** 로티 블렌드 모드 (bm) — 순서 = 로티 스펙 인덱스. */
@@ -22,7 +22,7 @@ export default function TransformPanel() {
   const customIdx = useEditor((s) => s.customIdx)
   const curFrame = useEditor((s) => s.curFrame)
   const {
-    setCustomChannelsLive, setCustomSizeLive, setKfChannelLive, commitEdit,
+    setCustomChannelsLive, setKfChannelLive, commitEdit,
     nudgeCustomBase, setLayerBlend,
   } = useEditor()
 
@@ -67,75 +67,43 @@ export default function TransformPanel() {
         </div>
       </div>
 
+      {/* 변형 — AE식 숫자 입력 (스케일/회전/불투명도). 키 있는 채널만 재생헤드에 키 */}
       <div className="knob">
-        <SliderRow
-          label={t('그래픽 크기')}
-          min={40}
-          max={480}
-          step={4}
-          unit="px"
-          value={xsel.size}
-          onLive={setCustomSizeLive}
-          onCommit={commitEdit}
-        />
-      </div>
-
-      {/* 스케일 (%) — 키프레임 모드 전용 s 채널. 프리셋 모드는 위 '그래픽 크기(px)'가 담당 */}
-      {kfOn && (
-        <div className="knob">
-          <SliderRow
-            label={sKeys ? t('스케일 ({f}f 키)').replace('{f}', String(curFrame)) : t('스케일')}
-            min={0}
-            max={400}
-            step={1}
-            unit="%"
+        <div className="posrow">
+          <PosInput
+            label={`${t('스케일')}${sKeys ? ' ◆' : ''} %`}
             value={sKeys ? (kfValueAt(xkf, 's', curFrame, xsel.scale) as number) : xsel.scale}
-            onLive={(v) => {
-              // 키가 이미 있는 채널만 재생헤드에 키 — 없으면 정적 값 (AE 스톱워치 꺼짐)
+            onCommit={(v) => {
               if (sKeys) setKfChannelLive('s', curFrame, v)
               else setCustomChannelsLive({ ...xsel, scale: v })
+              commitEdit()
             }}
-            onCommit={commitEdit}
+          />
+          <PosInput
+            label={`${t('회전')}${rKeys ? ' ◆' : ''} °`}
+            value={rKeys ? (kfValueAt(xkf, 'r', curFrame, xsel.rotation) as number) : xsel.rotation}
+            onCommit={(v) => {
+              if (rKeys) setKfChannelLive('r', curFrame, v)
+              else setCustomChannelsLive({ ...xsel, rotation: v })
+              commitEdit()
+            }}
           />
         </div>
-      )}
-
-      <div className="knob">
-        <SliderRow
-          label={rKeys ? t('회전 ({f}f 키)').replace('{f}', String(curFrame)) : t('회전')}
-          min={-180}
-          max={180}
-          step={1}
-          unit="°"
-          value={rKeys ? (kfValueAt(xkf, 'r', curFrame, xsel.rotation) as number) : xsel.rotation}
-          onLive={(v) => {
-            if (rKeys) setKfChannelLive('r', curFrame, v)
-            else setCustomChannelsLive({ ...xsel, rotation: v })
-          }}
-          onCommit={commitEdit}
-        />
-      </div>
-
-      <div className="knob">
-        <SliderRow
-          label={oKeys ? t('불투명도 ({f}f 키)').replace('{f}', String(curFrame)) : t('불투명도')}
-          min={0}
-          max={100}
-          step={1}
-          unit="%"
-          value={oKeys ? (kfValueAt(xkf, 'o', curFrame, xsel.opacity) as number) : xsel.opacity}
-          onLive={(v) => {
-            if (oKeys) setKfChannelLive('o', curFrame, v)
-            else setCustomChannelsLive({ ...xsel, opacity: v })
-          }}
-          onCommit={commitEdit}
-        />
-        {kfOn && (rKeys || oKeys) && (
+        <div className="posrow">
+          <PosInput
+            label={`${t('불투명도')}${oKeys ? ' ◆' : ''} %`}
+            value={oKeys ? (kfValueAt(xkf, 'o', curFrame, xsel.opacity) as number) : xsel.opacity}
+            onCommit={(v) => {
+              const c = Math.max(0, Math.min(100, v))
+              if (oKeys) setKfChannelLive('o', curFrame, c)
+              else setCustomChannelsLive({ ...xsel, opacity: c })
+              commitEdit()
+            }}
+          />
+        </div>
+        {kfOn && (sKeys || rKeys || oKeys) && (
           <p className="knob__note">
-            {t('키가 있는 채널은 슬라이더가 재생헤드({f}f)에 키를 찍습니다.').replace(
-              '{f}',
-              String(curFrame),
-            )}
+            {t('◆ 채널은 값 변경 시 재생헤드({f}f)에 키를 찍습니다.').replace('{f}', String(curFrame))}
           </p>
         )}
       </div>
@@ -165,26 +133,24 @@ export default function TransformPanel() {
             <span className="knob__name">{t('트림 패스')}</span>
             <span className="knob__unit">{t('값 변경 = 재생헤드에 키')}</span>
           </div>
-          <SliderRow
-            label={t('트림 시작')}
-            min={0}
-            max={100}
-            step={1}
-            unit="%"
-            value={kfValueAt(xkf, 'ts', curFrame, 0) as number}
-            onLive={(v) => setKfChannelLive('ts', curFrame, v)}
-            onCommit={commitEdit}
-          />
-          <SliderRow
-            label={t('트림 끝')}
-            min={0}
-            max={100}
-            step={1}
-            unit="%"
-            value={kfValueAt(xkf, 'te', curFrame, 100) as number}
-            onLive={(v) => setKfChannelLive('te', curFrame, v)}
-            onCommit={commitEdit}
-          />
+          <div className="posrow">
+            <PosInput
+              label={`${t('시작')} %`}
+              value={kfValueAt(xkf, 'ts', curFrame, 0) as number}
+              onCommit={(v) => {
+                setKfChannelLive('ts', curFrame, Math.max(0, Math.min(100, v)))
+                commitEdit()
+              }}
+            />
+            <PosInput
+              label={`${t('끝')} %`}
+              value={kfValueAt(xkf, 'te', curFrame, 100) as number}
+              onCommit={(v) => {
+                setKfChannelLive('te', curFrame, Math.max(0, Math.min(100, v)))
+                commitEdit()
+              }}
+            />
+          </div>
         </div>
       )}
 

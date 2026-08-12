@@ -238,7 +238,9 @@ export function buildAnimKs(
 
   // ---- 스케일 채널 (팝 등장 / 펄스 루프 / 축소 퇴장)
   const sk: Kf[] = []
-  const S = (v: number): number[] => [R(v), R(v), 100]
+  // 정착 스케일(xsel.scale) — 프리셋 등장/루프/퇴장 스케일 애니메이션에 곱해진다
+  const sc = (sel.scale ?? 100) / 100
+  const S = (v: number): number[] => [R(v * sc), R(v * sc), 100]
   if (inT === 6) {
     sk.push(kf(3, inStart, S(0)))
     if (sel.in.bounce) sk.push(kf(3, inStart + (inEnd - inStart) * 0.7, S(112)))
@@ -300,7 +302,7 @@ export function buildAnimKs(
     o: prop(1, ok, [maxO]),
     r,
     p: prop(3, pk, [bx, by, 0]),
-    s: prop(3, sk, [100, 100, 100]),
+    s: prop(3, sk, S(100)),
   }
 }
 

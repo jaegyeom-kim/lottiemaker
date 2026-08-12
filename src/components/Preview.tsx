@@ -268,7 +268,16 @@ export default function Preview() {
   // 펜 = 그리는 즉시 실제 레이어 (일러스트레이터 방식) — 2점부터 생성, 이후 라이브 갱신
   const penCreated = useRef(false)
   // 고스트 앵커/핸들 드래그 — kind: 앵커 이동 | 나가는 핸들 | 들어오는 핸들
-  const ghostDrag = useRef<{ kind: 'anchor' | 'ho' | 'hi'; idx: number } | null>(null)
+  // pull = ⌥드래그로 코너 앵커에서 핸들 뽑기 (AE 포인트 변환 툴)
+  const ghostDrag = useRef<{
+    kind: 'anchor' | 'ho' | 'hi' | 'pull'
+    idx: number
+    moved: boolean
+    alt: boolean
+  } | null>(null)
+  const [penSel, setPenSel] = useState<number | null>(null)
+  const penSelRef = useRef(penSel)
+  penSelRef.current = penSel
 
   /** 화면 좌표 → 캔버스 좌표 (512 기준, 줌은 rect가 이미 반영). */
   const toCanvasPt = (e: { clientX: number; clientY: number }): [number, number] | null => {
@@ -321,6 +330,7 @@ export default function Preview() {
     const pts = ptsOverride ?? penPtsRef.current
     setPenPts([])
     setPenHover(null)
+    setPenSel(null)
     penHandleIdx.current = null
     ghostDrag.current = null
     const created = penCreated.current
@@ -448,7 +458,13 @@ export default function Preview() {
         e.preventDefault()
         // 펜 진행 중 — 마지막 앵커 삭제 (일러 방식). 레이어 삭제로 새면 그리던 패스가 날아간다
         if (toolRef.current === 'pen' && penPtsRef.current.length) {
-          const rest = penPtsRef.current.slice(0, -1)
+          // 선택 앵커가 있으면 그 점, 없으면 마지막 점
+          const selIdx = penSelRef.current
+          const rest =
+            selIdx !== null && selIdx < penPtsRef.current.length
+              ? penPtsRef.current.filter((_, i) => i !== selIdx)
+              : penPtsRef.current.slice(0, -1)
+          setPenSel(null)
           setPenPts(rest)
           if (rest.length >= 2) syncPenLayer(rest)
           else if (penCreated.current && s.customIdxs.length) {
@@ -967,6 +983,14 @@ export default function Preview() {
         } ${drawTool && templateId === '__custom' && mode === 'canvas' ? 'preview__canvas--draw' : ''}`}
         onPointerDown={(e) => {
           if (templateId !== '__custom' || mode !== 'canvas') return
+          // 휠(가운데) 버튼 드래그 = 임시 핸드 툴 — 어떤 툴이든 팬
+          if (e.button === 1) {
+            e.preventDefault() // 브라우저 오토스크롤 차단
+            panDrag.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y }
+            ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+            return
+          }
+          if (e.button !== 0) return // 우클릭 등은 드로잉/마키에 안 섞이게
           // 드로잉 툴 — 캔버스 좌표로 도형 드래그 / 펜 포인트
           if (drawTool) {
             if ((e.target as HTMLElement).closest('.canvastools, .drawbar')) return
@@ -981,6 +1005,7 @@ export default function Preview() {
                 return
               }
               penHandleIdx.current = pts.length
+              setPenSel(null)
               const next = [...pts, { p: pt, ho: null, hi: null } as PenPt]
               setPenPts(next)
               syncPenLayer(next) // 2점부터 실제 레이어 (일러 방식)
@@ -1021,11 +1046,19 @@ export default function Preview() {
               // 고스트 앵커/핸들 드래그 편집 (일러 방식 — ⌥ = 한쪽 핸들만)
               const gd = ghostDrag.current
               if (gd) {
+                gd.moved = true
                 const next = penPtsRef.current.map((pp, i) => {
                   if (i !== gd.idx) return pp
                   if (gd.kind === 'anchor') return { ...pp, p: pt }
                   const v: [number, number] = [pt[0] - pp.p[0], pt[1] - pp.p[1]]
                   const dead = Math.hypot(v[0], v[1]) < 2
+                  // ⌥드래그 핸들 뽑기 — 대칭 스무스 핸들 (AE 포인트 변환)
+                  if (gd.kind === 'pull')
+                    return {
+                      ...pp,
+                      ho: dead ? null : v,
+                      hi: dead ? null : ([-v[0], -v[1]] as [number, number]),
+                    }
                   if (gd.kind === 'ho')
                     return {
                       ...pp,
@@ -1097,6 +1130,21 @@ export default function Preview() {
         }}
         onPointerUp={() => {
           if (drawTool === 'pen') {
+            const gd = ghostDrag.current
+            if (gd && !gd.moved) {
+              if (gd.kind === 'anchor') {
+                // 클릭(무이동) = 앵커 선택
+                setPenSel(gd.idx)
+              } else if (gd.kind === 'pull') {
+                // ⌥클릭(무이동) = 핸들 제거 (스무스 → 코너, AE 포인트 변환 클릭)
+                const next = penPtsRef.current.map((pp, i) =>
+                  i === gd.idx ? { ...pp, ho: null, hi: null } : pp,
+                )
+                setPenPts(next)
+                setPenSel(gd.idx)
+                syncPenLayer(next)
+              }
+            }
             penHandleIdx.current = null
             ghostDrag.current = null
           } else if (drawDrag) {
@@ -1292,14 +1340,17 @@ export default function Preview() {
                       {penPts.map((pp, i) => {
                         const grabKnob =
                           (kind: 'anchor' | 'ho' | 'hi') => (e: React.PointerEvent) => {
+                            if (e.button !== 0) return
                             e.stopPropagation()
                             e.preventDefault()
-                            // 첫 앵커 클릭 = 닫힌 패스로 완성 (일러/피그마)
-                            if (kind === 'anchor' && i === 0 && penPtsRef.current.length >= 3) {
+                            // 첫 앵커 클릭 = 닫힌 패스로 완성 (⌥는 편집이므로 제외)
+                            if (kind === 'anchor' && i === 0 && penPtsRef.current.length >= 3 && !e.altKey) {
                               finishPen(true)
                               return
                             }
-                            ghostDrag.current = { kind, idx: i }
+                            // ⌥앵커 = 포인트 변환 (클릭: 핸들 제거 / 드래그: 핸들 뽑기)
+                            const k2 = kind === 'anchor' && e.altKey ? 'pull' : kind
+                            ghostDrag.current = { kind: k2, idx: i, moved: false, alt: e.altKey }
                             canvasRef.current?.setPointerCapture(e.pointerId)
                           }
                         return (
@@ -1341,10 +1392,10 @@ export default function Preview() {
                               </>
                             )}
                             <circle
-                              className={`drawghost__anchor ${i === 0 && penPts.length >= 3 ? 'drawghost__anchor--first' : ''}`}
+                              className={`drawghost__anchor ${i === 0 && penPts.length >= 3 ? 'drawghost__anchor--first' : ''} ${penSel === i ? 'drawghost__anchor--sel' : ''}`}
                               cx={pp.p[0]}
                               cy={pp.p[1]}
-                              r={i === 0 && penPts.length >= 3 ? 5 : 3.6}
+                              r={penSel === i ? 5 : i === 0 && penPts.length >= 3 ? 5 : 3.6}
                               onPointerDown={grabKnob('anchor')}
                             />
                           </g>

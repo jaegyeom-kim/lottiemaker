@@ -1401,6 +1401,8 @@ body.drag-cross * { cursor: crosshair !important; }
 .posinput__label {
   font-size: 11px;
   color: var(--text-dim);
+  white-space: nowrap; /* '스케일 %' 등 두 줄로 꺾이지 않게 */
+  flex-shrink: 0;
 }
 
 .posinput input {
@@ -3905,4 +3907,11 @@ body.drag-cross * { cursor: crosshair !important; }
   background: color-mix(in srgb, var(--bg-raise) 60%, transparent);
   outline: 1px dashed var(--line);
   outline-offset: -1px;
+}
+
+/* 펜 — 선택된 앵커 */
+.drawghost__anchor--sel {
+  fill: var(--blue);
+  stroke: #fff;
+  stroke-width: 1.5;
 }
