@@ -23,7 +23,7 @@ export default function TransformPanel() {
   const curFrame = useEditor((s) => s.curFrame)
   const {
     setCustomChannelsLive, setKfChannelLive, commitEdit,
-    nudgeCustomBase, setLayerBlend,
+    nudgeCustomBase, setLayerBlend, setLayerStroke,
   } = useEditor()
 
   const layers = sourceData?.layers ?? []
@@ -107,6 +107,46 @@ export default function TransformPanel() {
           </p>
         )}
       </div>
+
+      {/* 선(스트로크) — 패스/선 레이어일 때만: 두께·라인캡 */}
+      {(() => {
+        const strokes: Record<string, unknown>[] = []
+        const walk = (items?: Record<string, unknown>[]) => {
+          for (const it of items ?? []) {
+            if (it.ty === 'st') strokes.push(it)
+            else if (it.ty === 'gr') walk(it.it as Record<string, unknown>[])
+          }
+        }
+        walk(((selLayer.shapes as Record<string, unknown>[] | undefined)?.[0] as Record<string, unknown> | undefined)?.it as Record<string, unknown>[])
+        if (!strokes.length) return null
+        const st0 = strokes[0]
+        const w = Number((st0.w as { k?: number } | undefined)?.k ?? 1)
+        const lc = Number(st0.lc ?? 2)
+        return (
+          <div className="knob">
+            <div className="knob__head">
+              <span className="knob__name">{t('선')}</span>
+            </div>
+            <div className="posrow posrow--stroke">
+              <PosInput
+                label={`${t('두께')} px`}
+                value={w}
+                onCommit={(v) => setLayerStroke(idx, { w: Math.max(0.5, v) })}
+              />
+              <select
+                className="input"
+                value={lc}
+                title={t('라인 캡')}
+                onChange={(e) => setLayerStroke(idx, { lc: Number(e.target.value) })}
+              >
+                <option value={1}>{t('버트')}</option>
+                <option value={2}>{t('라운드')}</option>
+                <option value={3}>{t('스퀘어')}</option>
+              </select>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* 블렌드 모드 — Lottie bm, 내보낸 JSON에도 그대로 실림 */}
       <div className="knob">

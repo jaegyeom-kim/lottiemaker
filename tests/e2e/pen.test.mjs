@@ -132,6 +132,84 @@ ok(rest.length === 2 && !rest.some((x) => Math.abs(x - 250) < 5), `선택 앵커
 await page.keyboard.press('Escape')
 await page.waitForTimeout(300)
 
+// ── 완성 패스 재편집 (일러 직접 선택) — 펜 툴에서 포인트 표시·드래그·선 옵션 ──
+await page.locator('.drawbar button[title*="펜"]').click()
+await page.mouse.click(...toClient(140, 240))
+await page.mouse.move(...toClient(260, 200))
+await page.mouse.down()
+await page.mouse.move(...toClient(260, 280), { steps: 4 })
+await page.mouse.up()
+await page.mouse.click(...toClient(390, 260))
+await page.keyboard.press('Enter') // 완성 → 이동 툴
+await page.waitForTimeout(1300)
+ok((await page.locator('.drawghost__anchor').count()) === 0, '완성 후 고스트 없음')
+// 펜 툴 재선택 → 선택 레이어의 포인트 표시 (편집 모드)
+await page.locator('.drawbar button[title*="펜"]').click()
+await page.waitForTimeout(400)
+ok((await page.locator('.drawghost__anchor').count()) === 3, `펜 툴 재진입 → 포인트 표시 (${await page.locator('.drawghost__anchor').count()})`)
+// 가운데 앵커 드래그 → 셰이프 데이터 반영
+const src = () => page.evaluate(() => JSON.parse(localStorage.getItem('lottiemaker.session.custom.v1') ?? 'null')?.sourceData)
+const shOf = (d2) => {
+  const g = d2.layers[0].shapes[0]
+  const stack = [...(g.it ?? [])]
+  while (stack.length) {
+    const it = stack.shift()
+    if (it.ty === 'sh') return it.ks.k
+    if (it.ty === 'gr') stack.unshift(...(it.it ?? []))
+  }
+  return null
+}
+let k0 = shOf(await src())
+const midBefore = [...k0.v[1]]
+let ab = await (await page.$$('.drawghost__anchor'))[1].boundingBox()
+await page.mouse.move(ab.x + ab.width / 2, ab.y + ab.height / 2)
+await page.mouse.down()
+await page.mouse.move(ab.x + ab.width / 2, ab.y + ab.height / 2 + 50, { steps: 5 })
+await page.mouse.up()
+await page.waitForTimeout(1300)
+let k1 = shOf(await src())
+ok(Math.abs(k1.v[1][1] - midBefore[1]) > 10, `편집 드래그 → 셰이프 v 반영 (${midBefore[1].toFixed(1)} → ${k1.v[1][1].toFixed(1)})`)
+// ⌥클릭 = 핸들 제거 (스무스 앵커 → 코너)
+ab = await (await page.$$('.drawghost__anchor'))[1].boundingBox()
+await page.keyboard.down('Alt')
+await page.mouse.click(ab.x + ab.width / 2, ab.y + ab.height / 2)
+await page.keyboard.up('Alt')
+await page.waitForTimeout(1300)
+k1 = shOf(await src())
+ok(k1.o[1][0] === 0 && k1.o[1][1] === 0 && k1.i[1][0] === 0 && k1.i[1][1] === 0, '편집 ⌥클릭 → 핸들 제거')
+// 앵커 선택 + Backspace = 그 점 삭제
+ab = await (await page.$$('.drawghost__anchor'))[1].boundingBox()
+await page.mouse.click(ab.x + ab.width / 2, ab.y + ab.height / 2)
+await page.waitForTimeout(150)
+ok((await page.locator('.drawghost__anchor--sel').count()) === 1, '편집 앵커 선택')
+await page.keyboard.press('Backspace')
+await page.waitForTimeout(1300)
+k1 = shOf(await src())
+ok(k1.v.length === 2, `편집 Backspace → 점 삭제 (${k1.v.length})`)
+// 선 옵션 — 두께 입력 반영
+const strokeKnob = page
+  .locator('.knob')
+  .filter({ has: page.locator('.knob__name', { hasText: /^선$/ }) })
+  .first()
+ok((await strokeKnob.count()) === 1, "'선' 섹션 표시")
+await strokeKnob.locator('.posinput input').first().fill('20')
+await strokeKnob.locator('.posinput input').press('Enter')
+await page.waitForTimeout(1300)
+const d3 = await src()
+const findSt = (items) => {
+  for (const it of items ?? []) {
+    if (it.ty === 'st') return it
+    if (it.ty === 'gr') { const r = findSt(it.it); if (r) return r }
+  }
+  return null
+}
+const st0 = findSt(d3.layers[0].shapes[0].it)
+ok(st0?.w?.k === 20, `선 두께 반영 (${st0?.w?.k})`)
+// 이동 툴로 나가면 오버레이 정리
+await page.keyboard.press('v')
+await page.waitForTimeout(200)
+ok((await page.locator('.drawghost__anchor').count()) === 0, 'V → 편집 오버레이 정리')
+
 // ── 휠(가운데) 버튼 드래그 = 팬 ──
 const panOf = () => page.$eval('.preview__lottiewrap', (e) => e.style.transform)
 const t0 = await panOf()

@@ -6,6 +6,7 @@ import { applyKnobs, type TemplateKnob } from './lib/lottieKnobs'
 import type { AiMotionPlan } from './lib/ai'
 import { convertLottieToCustom, convertLottieToScenes, hasPrecomps } from './lib/lottieImport'
 import { t } from './lib/i18n'
+import { growCubicBbox } from './lib/drawTools'
 import {
   buildAnimKs, buildCustomDoc, buildCustomLayer, animSpans, normSel,
   layerHalfOf, layerCenterOffsetOf, normKf, buildKfKs, kfValueAt,
@@ -31,6 +32,14 @@ interface Snapshot {
   customIdx: number
   customIdxs?: number[]
   templateId: string | null
+}
+
+/** 펜 경로 로컬 좌표 — 로티 sh.ks.k 형태. */
+export interface PenPathK {
+  v: [number, number][]
+  i: [number, number][]
+  o: [number, number][]
+  c: boolean
 }
 
 /** localStorage 자동 저장 페이로드. */
@@ -190,6 +199,10 @@ interface EditorState {
   addCustomLayer: (payload: CustomPayload, name: string, at?: [number, number], size?: number) => void
   /** 선택 레이어의 그래픽을 통째 교체 (라이브) — 펜 드로잉 진행 중 갱신. 모션·이름·라벨 유지, commitEdit로 확정. */
   replaceCustomGraphicLive: (payload: CustomPayload, at: [number, number], size: number) => void
+  /** 펜 패스 포인트 편집 (라이브) — 단일 sh 레이어의 로컬 경로 k 교체. */
+  setPenPathLive: (li: number, k: PenPathK) => void
+  /** 선(스트로크) 옵션 — 두께/라인캡. */
+  setLayerStroke: (li: number, opts: { w?: number; lc?: number }) => void
   /** 로티 문서를 커스텀 레이어로 가져오기 — 트랜스폼 키프레임을 xkf로 변환. */
   importLottieLayers: (
     doc: LottieJson,
@@ -614,6 +627,33 @@ export const useEditor = create<EditorState>((set, get) => {
 
   /** xkf.keys에서 frame(±0.5f)의 키에 채널 값(+구간 이징) 업서트. */
   /** ind를 1..n으로 재할당하면서 tp(매트)·parent 참조를 함께 리매핑. */
+  /** 그룹 안의 유일한 sh — 펜 편집 가능 조건 (path 1개짜리 레이어). */
+  const findSinglePath = (group: Record<string, unknown> | undefined) => {
+    if (!group) return null
+    const found: Record<string, unknown>[] = []
+    const walk = (items: Record<string, unknown>[] | undefined) => {
+      for (const it of items ?? []) {
+        if (it.ty === 'sh') found.push(it)
+        else if (it.ty === 'gr') walk(it.it as Record<string, unknown>[])
+      }
+    }
+    walk(group.it as Record<string, unknown>[])
+    return found.length === 1 ? found[0] : null
+  }
+
+  /** 그룹 안의 모든 st(스트로크) 페인터. */
+  const findStrokes = (group: Record<string, unknown> | undefined) => {
+    const found: Record<string, unknown>[] = []
+    const walk = (items: Record<string, unknown>[] | undefined) => {
+      for (const it of items ?? []) {
+        if (it.ty === 'st') found.push(it)
+        else if (it.ty === 'gr') walk(it.it as Record<string, unknown>[])
+      }
+    }
+    if (group) walk(group.it as Record<string, unknown>[])
+    return found
+  }
+
   /**
    * ind 공간이 겹치는 여러 그룹(임포트 병합·패턴 복제)용 재색인.
    * 전체 배열 순서대로 ind를 재부여하되, tp/parent는 각 그룹의 옛 ind 맵으로만
@@ -1203,6 +1243,62 @@ export const useEditor = create<EditorState>((set, get) => {
         customIdx: 0,
         customIdxs: [0],
       })
+    },
+
+    setPenPathLive: (li, k) => {
+      const st = get()
+      const baseline = st.editBaseline ?? snap()
+      const baseSrc = baseline.source ?? st.sourceData
+      if (!baseSrc?.layers[li] || lockedAt(baseSrc, li)) return
+      const src = cloneForLive(baseSrc)
+      ensureLayerColors(src)
+      const layer = src.layers[li] as Record<string, unknown>
+      const group = (layer.shapes as Record<string, unknown>[] | undefined)?.[0]
+      const sh = findSinglePath(group)
+      if (!sh) return
+      ;(sh.ks as Record<string, unknown>).k = structuredClone(k)
+      // bbox 메타 갱신 — 선택 박스·크기 조절이 새 곡선 범위를 따라가게 (곡선 극값 기준)
+      const acc = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
+      const n = k.c ? k.v.length : k.v.length - 1
+      for (let j = 0; j < n; j++) {
+        const j2 = (j + 1) % k.v.length
+        growCubicBbox(
+          acc,
+          k.v[j] as [number, number],
+          [k.v[j][0] + k.o[j][0], k.v[j][1] + k.o[j][1]],
+          [k.v[j2][0] + k.i[j2][0], k.v[j2][1] + k.i[j2][1]],
+          k.v[j2] as [number, number],
+        )
+      }
+      if (Number.isFinite(acc.minX) && group) {
+        group.bboxW = acc.maxX - acc.minX
+        group.bboxH = acc.maxY - acc.minY
+        group.bboxMax = Math.max(acc.maxX - acc.minX, acc.maxY - acc.minY)
+      }
+      const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
+      set({
+        animationData: applied,
+        sourceData: src,
+        colorGroups: st.colorGroups,
+        editBaseline: baseline,
+        future: [],
+      })
+    },
+
+    setLayerStroke: (li, opts) => {
+      const { sourceData, templateKnobs, knobValues } = get()
+      if (!sourceData?.layers[li] || lockedAt(sourceData, li)) return
+      const src = structuredClone(sourceData)
+      ensureLayerColors(src)
+      const layer = src.layers[li] as Record<string, unknown>
+      const sts = findStrokes((layer.shapes as Record<string, unknown>[] | undefined)?.[0])
+      if (!sts.length) return
+      for (const st2 of sts) {
+        if (opts.w !== undefined) (st2.w as { k: number }) = { a: 0, k: Math.max(0.5, opts.w) } as never
+        if (opts.lc !== undefined) st2.lc = opts.lc
+      }
+      const applied = applyKnobs(src, templateKnobs, knobValues)
+      push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
     },
 
     replaceCustomGraphicLive: (payload, at, size) => {

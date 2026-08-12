@@ -278,6 +278,103 @@ export default function Preview() {
   const [penSel, setPenSel] = useState<number | null>(null)
   const penSelRef = useRef(penSel)
   penSelRef.current = penSel
+  // 완성된 패스 재편집 (일러 직접 선택) — 포인트는 셰이프 로컬 좌표, 표시용 로컬→캔버스 행렬
+  const [pathEdit, setPathEdit] = useState<{ li: number; pts: PenPt[]; closed: boolean } | null>(null)
+  const pathEditRef = useRef(pathEdit)
+  pathEditRef.current = pathEdit
+  const [editM, setEditM] = useState<DOMMatrix | null>(null)
+  const editMRef = useRef(editM)
+  editMRef.current = editM
+  const editDrag = useRef<{ kind: 'anchor' | 'ho' | 'hi' | 'pull'; idx: number; moved: boolean } | null>(null)
+
+  /** 레이어가 펜 편집 가능(단일 sh)한지 — 로컬 포인트 추출. */
+  const penEditTarget = (li: number): { pts: PenPt[]; closed: boolean } | null => {
+    const st = useEditor.getState()
+    const layer = st.sourceData?.layers[li] as Record<string, unknown> | undefined
+    if (!layer || Number(layer.ty) !== 4 || layer.xlock === true) return null
+    const shapes = layer.shapes as Record<string, unknown>[] | undefined
+    if (!shapes || shapes.length !== 1) return null
+    const found: Record<string, unknown>[] = []
+    const walk = (items?: Record<string, unknown>[]) => {
+      for (const it of items ?? []) {
+        if (it.ty === 'sh') found.push(it)
+        else if (it.ty === 'gr') walk(it.it as Record<string, unknown>[])
+      }
+    }
+    walk((shapes[0] as Record<string, unknown>).it as Record<string, unknown>[])
+    if (found.length !== 1) return null
+    const k = (found[0].ks as Record<string, unknown> | undefined)?.k as
+      | { v: [number, number][]; i: [number, number][]; o: [number, number][]; c?: boolean }
+      | undefined
+    if (!Array.isArray(k?.v) || k.v.length < 2) return null
+    const z = (pt?: [number, number]) => !pt || (Math.abs(pt[0]) < 1e-6 && Math.abs(pt[1]) < 1e-6)
+    return {
+      closed: !!k.c,
+      pts: k.v.map((pv, j) => ({
+        p: [pv[0], pv[1]] as [number, number],
+        ho: z(k.o[j]) ? null : ([k.o[j][0], k.o[j][1]] as [number, number]),
+        hi: z(k.i[j]) ? null : ([k.i[j][0], k.i[j][1]] as [number, number]),
+      })),
+    }
+  }
+
+  const penPtsToK = (pts: PenPt[], closed: boolean) => ({
+    v: pts.map((pp) => [Math.round(pp.p[0] * 100) / 100, Math.round(pp.p[1] * 100) / 100] as [number, number]),
+    o: pts.map((pp) => (pp.ho ? ([pp.ho[0], pp.ho[1]] as [number, number]) : ([0, 0] as [number, number]))),
+    i: pts.map((pp) => (pp.hi ? ([pp.hi[0], pp.hi[1]] as [number, number]) : ([0, 0] as [number, number]))),
+    c: closed,
+  })
+
+  // 펜 툴 + 새 드로잉 없음 + 선택 레이어가 단일 패스 → 편집 모드 진입/갱신
+  useEffect(() => {
+    if (templateId !== '__custom' || tool !== 'pen' || penPts.length) {
+      if (pathEditRef.current) setPathEdit(null)
+      return
+    }
+    if (editDrag.current) return // 드래그 중 데이터 에코로 리로드 금지
+    const n = sourceData?.layers.length ?? 0
+    if (!n) {
+      setPathEdit(null)
+      return
+    }
+    const li = Math.min(customIdx, n - 1)
+    const target = penEditTarget(li)
+    setPathEdit(target ? { li, ...target } : null)
+    setPenSel(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templateId, tool, customIdx, sourceData, penPts.length])
+
+  // 로컬→캔버스 행렬 — 렌더된 path의 CTM에서 (레이어/그룹 트랜스폼 전부 흡수)
+  useEffect(() => {
+    if (!pathEdit) {
+      if (editMRef.current) setEditM(null)
+      return
+    }
+    const raf = requestAnimationFrame(() => {
+      const wrap = wrapRef.current
+      const svg = wrap?.querySelector('svg')
+      const v0 = pathEdit.pts[0]?.p
+      if (!wrap || !svg || !v0) return
+      let el: SVGPathElement | null = null
+      for (const cand of Array.from(svg.querySelectorAll('path'))) {
+        const m = (cand.getAttribute('d') ?? '').match(/M\s*(-?[\d.]+)[ ,](-?[\d.]+)/)
+        if (m && Math.abs(Number(m[1]) - v0[0]) < 0.6 && Math.abs(Number(m[2]) - v0[1]) < 0.6) {
+          el = cand as SVGPathElement
+          break
+        }
+      }
+      const ctm = el?.getScreenCTM()
+      if (!ctm) {
+        setEditM(null)
+        return
+      }
+      const rect = wrap.getBoundingClientRect()
+      const f = cw / rect.width
+      setEditM(new DOMMatrix().scale(f).translate(-rect.left, -rect.top).multiply(DOMMatrix.fromMatrix(ctm)))
+    })
+    return () => cancelAnimationFrame(raf)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathEdit, zoom, pan, animationData])
 
   /** 화면 좌표 → 캔버스 좌표 (512 기준, 줌은 rect가 이미 반영). */
   const toCanvasPt = (e: { clientX: number; clientY: number }): [number, number] | null => {
@@ -457,6 +554,19 @@ export default function Preview() {
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
         // 펜 진행 중 — 마지막 앵커 삭제 (일러 방식). 레이어 삭제로 새면 그리던 패스가 날아간다
+        // 완성 패스 편집 중 — 선택 앵커 삭제 (최소 2점 유지)
+        if (toolRef.current === 'pen' && !penPtsRef.current.length && pathEditRef.current) {
+          const pe = pathEditRef.current
+          const selIdx = penSelRef.current
+          if (selIdx !== null && selIdx < pe.pts.length && pe.pts.length > 2) {
+            const pts = pe.pts.filter((_, i) => i !== selIdx)
+            setPathEdit({ ...pe, pts })
+            setPenSel(null)
+            s.setPenPathLive(pe.li, penPtsToK(pts, pe.closed))
+            s.commitEdit()
+          }
+          return
+        }
         if (toolRef.current === 'pen' && penPtsRef.current.length) {
           // 선택 앵커가 있으면 그 점, 없으면 마지막 점
           const selIdx = penSelRef.current
@@ -1043,6 +1153,39 @@ export default function Preview() {
             const pt = toCanvasPt(e)
             if (!pt) return
             if (drawTool === 'pen') {
+              // 완성 패스 편집 드래그 — 캔버스 → 로컬 역변환 후 셰이프에 라이브 반영
+              const ed = editDrag.current
+              const pe = pathEditRef.current
+              const M = editMRef.current
+              if (ed && pe && M) {
+                ed.moved = true
+                const inv = M.inverse()
+                const lq = inv.transformPoint(new DOMPoint(pt[0], pt[1]))
+                const local: [number, number] = [lq.x, lq.y]
+                const next = pe.pts.map((pp, i) => {
+                  if (i !== ed.idx) return pp
+                  if (ed.kind === 'anchor') return { ...pp, p: local }
+                  const v: [number, number] = [local[0] - pp.p[0], local[1] - pp.p[1]]
+                  const hq = M.transformPoint(new DOMPoint(pp.p[0], pp.p[1]))
+                  const dead = Math.hypot(pt[0] - hq.x, pt[1] - hq.y) < 2
+                  if (ed.kind === 'pull')
+                    return { ...pp, ho: dead ? null : v, hi: dead ? null : ([-v[0], -v[1]] as [number, number]) }
+                  if (ed.kind === 'ho')
+                    return {
+                      ...pp,
+                      ho: dead ? null : v,
+                      hi: e.altKey ? pp.hi : dead ? null : ([-v[0], -v[1]] as [number, number]),
+                    }
+                  return {
+                    ...pp,
+                    hi: dead ? null : v,
+                    ho: e.altKey ? pp.ho : dead ? null : ([-v[0], -v[1]] as [number, number]),
+                  }
+                })
+                setPathEdit({ ...pe, pts: next })
+                useEditor.getState().setPenPathLive(pe.li, penPtsToK(next, pe.closed))
+                return
+              }
               // 고스트 앵커/핸들 드래그 편집 (일러 방식 — ⌥ = 한쪽 핸들만)
               const gd = ghostDrag.current
               if (gd) {
@@ -1130,6 +1273,27 @@ export default function Preview() {
         }}
         onPointerUp={() => {
           if (drawTool === 'pen') {
+            const ed = editDrag.current
+            if (ed) {
+              const pe = pathEditRef.current
+              if (pe && !ed.moved) {
+                if (ed.kind === 'anchor') setPenSel(ed.idx)
+                else if (ed.kind === 'pull') {
+                  // ⌥클릭 = 핸들 제거 (스무스 → 코너)
+                  const next = pe.pts.map((pp, i) => (i === ed.idx ? { ...pp, ho: null, hi: null } : pp))
+                  setPathEdit({ ...pe, pts: next })
+                  setPenSel(ed.idx)
+                  useEditor.getState().setPenPathLive(pe.li, penPtsToK(next, pe.closed))
+                  useEditor.getState().commitEdit()
+                }
+              } else if (ed.moved) {
+                useEditor.getState().commitEdit()
+              }
+              editDrag.current = null
+              penHandleIdx.current = null
+              ghostDrag.current = null
+              return
+            }
             const gd = ghostDrag.current
             if (gd && !gd.moved) {
               if (gd.kind === 'anchor') {
@@ -1161,6 +1325,7 @@ export default function Preview() {
           setDrawDrag(null)
           penHandleIdx.current = null
           ghostDrag.current = null
+          editDrag.current = null
           panDrag.current = null
         }}
         onDoubleClick={() => {
@@ -1293,7 +1458,7 @@ export default function Preview() {
                 </svg>
               )}
               {/* 드로잉 고스트 — 그리는 중인 도형/펜 경로 미리보기 */}
-              {drawTool && (drawDrag || penPts.length > 0) && (
+              {drawTool && (drawDrag || penPts.length > 0 || (pathEdit && editM)) && (
                 <svg className="drawghost" viewBox={`0 0 ${cw} ${ch}`}>
                   {drawDrag && drawTool === 'rect' && (
                     <rect
@@ -1334,6 +1499,58 @@ export default function Preview() {
                       y2={drawDrag.y1}
                     />
                   )}
+                  {/* 완성 패스 편집 오버레이 — 로컬 포인트를 행렬로 캔버스 좌표에 */}
+                  {drawTool === 'pen' && !penPts.length && pathEdit && editM && (() => {
+                    const mp = (pt: [number, number]): [number, number] => {
+                      const q = editM.transformPoint(new DOMPoint(pt[0], pt[1]))
+                      return [q.x, q.y]
+                    }
+                    // 아핀 변환은 베지어를 정확히 보존 — 절대점 매핑 후 상대 핸들 복원
+                    const mpts = pathEdit.pts.map((pp) => {
+                      const P = mp(pp.p)
+                      const abs = (h: [number, number] | null) =>
+                        h ? ((): [number, number] => { const A = mp([pp.p[0] + h[0], pp.p[1] + h[1]]); return [A[0] - P[0], A[1] - P[1]] })() : null
+                      return { p: P, ho: abs(pp.ho), hi: abs(pp.hi) }
+                    })
+                    const grabEditKnob =
+                      (kind: 'anchor' | 'ho' | 'hi') => (e: React.PointerEvent) => {
+                        if (e.button !== 0) return
+                        e.stopPropagation()
+                        e.preventDefault()
+                        const k2 = kind === 'anchor' && e.altKey ? 'pull' : kind
+                        editDrag.current = { kind: k2, idx: Number((e.currentTarget as Element).getAttribute('data-i')), moved: false }
+                        canvasRef.current?.setPointerCapture(e.pointerId)
+                      }
+                    return (
+                      <>
+                        <path className="drawghost__path" d={penPathD(mpts as PenPt[], pathEdit.closed)} />
+                        {mpts.map((pp, i) => (
+                          <g key={i}>
+                            {pp.ho && (
+                              <>
+                                <line className="drawghost__handle" x1={pp.p[0]} y1={pp.p[1]} x2={pp.p[0] + pp.ho[0]} y2={pp.p[1] + pp.ho[1]} />
+                                <circle className="drawghost__hdot" cx={pp.p[0] + pp.ho[0]} cy={pp.p[1] + pp.ho[1]} r={3} data-i={i} onPointerDown={grabEditKnob('ho')} />
+                              </>
+                            )}
+                            {pp.hi && (
+                              <>
+                                <line className="drawghost__handle" x1={pp.p[0]} y1={pp.p[1]} x2={pp.p[0] + pp.hi[0]} y2={pp.p[1] + pp.hi[1]} />
+                                <circle className="drawghost__hdot" cx={pp.p[0] + pp.hi[0]} cy={pp.p[1] + pp.hi[1]} r={3} data-i={i} onPointerDown={grabEditKnob('hi')} />
+                              </>
+                            )}
+                            <circle
+                              className={`drawghost__anchor ${penSel === i ? 'drawghost__anchor--sel' : ''}`}
+                              cx={pp.p[0]}
+                              cy={pp.p[1]}
+                              r={penSel === i ? 5 : 3.6}
+                              data-i={i}
+                              onPointerDown={grabEditKnob('anchor')}
+                            />
+                          </g>
+                        ))}
+                      </>
+                    )
+                  })()}
                   {drawTool === 'pen' && penPts.length > 0 && (
                     <>
                       <path className="drawghost__path" d={penPathD(penPts, false, penHover)} />

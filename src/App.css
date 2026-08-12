@@ -3915,3 +3915,10 @@ body.drag-cross * { cursor: crosshair !important; }
   stroke: #fff;
   stroke-width: 1.5;
 }
+
+/* 선 옵션 행 — 셀렉트가 인풋을 밀어내지 않게 */
+.posrow--stroke select.input {
+  width: auto;
+  flex: 1;
+  min-width: 0;
+}
