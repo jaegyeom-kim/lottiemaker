@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
-import lottie, { type AnimationItem } from 'lottie-web'
+// svg 전용 빌드 — 캔버스/HTML 렌더러 제외 (표현식은 포함, 임포트 문서 호환 유지)
+import lottie, { type AnimationItem } from 'lottie-web/build/player/lottie_svg'
 
 interface Props {
   data: unknown

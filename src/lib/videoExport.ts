@@ -1,6 +1,6 @@
 // WebM 영상 내보내기 — lottie-web 캔버스 렌더 → captureStream → MediaRecorder.
 // 실시간 1패스 녹화 (컴포지션 길이만큼). 알파는 WebM 녹화에서 미지원이라 배경색을 깐다.
-import lottie from 'lottie-web'
+// 캔버스 렌더러 빌드는 내보낼 때만 지연 로드 — 초기 번들에서 제외.
 import type { LottieJson } from './lottieUtils'
 import { t } from './i18n'
 
@@ -17,10 +17,11 @@ export function webmSupported(): boolean {
  * anim을 재생하며 WebM으로 녹화한다. scale로 해상도 배율 (기본 2x — 512→1024).
  * onProgress는 0~1 진행률.
  */
-export function exportWebM(
+export async function exportWebM(
   anim: LottieJson,
   opts: { bg: string; scale?: number; onProgress?: (f: number) => void },
 ): Promise<Blob> {
+  const lottie = (await import('lottie-web/build/player/lottie_canvas')).default
   return new Promise((resolve, reject) => {
     if (!webmSupported()) {
       reject(new Error(t('이 브라우저는 WebM 녹화를 지원하지 않습니다 (Chrome/Edge 권장)')))
