@@ -9,12 +9,12 @@ import { t } from './lib/i18n'
 import { growCubicBbox } from './lib/drawTools'
 import {
   buildAnimKs, buildCustomDoc, buildCustomLayer, animSpans, normSel,
-  layerHalfOf, layerCenterOffsetOf, normKf, buildKfKs, kfValueAt,
+  normKf, buildKfKs, kfValueAt,
   springValue, SPRING_PRESETS, bounceValue,
   CUSTOM_ASSET_PREFIX, DEFAULT_SEL,
   type CustomSel, type CustomPayload, type CustomKf, type KfChannel, type Bezier4,
   type KfSelItem,
-  kfChannelKeys, applyTrimChannels, extractTrimToKf, layerScaleOf,
+  kfChannelKeys, applyTrimChannels, extractTrimToKf, layerScaleOf, layerAabbOf,
 } from './lib/customBuilder'
 
 const HISTORY_CAP = 50
@@ -493,8 +493,11 @@ export const useEditor = create<EditorState>((set, get) => {
       const bboxMax = group?.bboxMax as number | undefined
       if (group && bboxMax) {
         const tr = (group.it as Record<string, unknown>[]).find((i) => i.ty === 'tr')
-        const oldSc = ((tr?.s as { k: number[] } | undefined)?.k?.[0] ?? 100) / 100
-        if (tr) (tr.s as { k: number[] }).k = [(px / bboxMax) * 100, (px / bboxMax) * 100]
+        const trK = (tr?.s as { k: number[] } | undefined)?.k
+        const oldSc = ((trK?.[0] as number | undefined) ?? 100) / 100
+        // 비균등 스케일(가져온 벡터)이면 축 비율 보존 — 균등 덮어쓰기는 종횡비를 깨뜨린다
+        const axisRatio = trK && trK[0] ? (trK[1] ?? trK[0]) / trK[0] : 1
+        if (tr) (tr.s as { k: number[] }).k = [(px / bboxMax) * 100, (px / bboxMax) * 100 * axisRatio]
         const newSc = px / bboxMax
         // 앵커 오프셋도 비례 스케일 — 비율 유지
         const prev = ((layer.xsel as CustomSel | undefined)?.size ?? 240)
@@ -1299,6 +1302,9 @@ export const useEditor = create<EditorState>((set, get) => {
         const gsc = ((tr?.s?.k?.[0] as number | undefined) ?? 100) / 100
         group.bboxCx = ((acc.minX + acc.maxX) / 2 - ta[0]) * gsc
         group.bboxCy = ((acc.minY + acc.maxY) / 2 - ta[1]) * gsc
+        // xsel.size(긴 변 px)도 동기 — 리사이즈/패턴 복제가 이 값을 비율 기준으로 쓴다
+        const xsel2 = normSel(layer.xsel as Partial<CustomSel> | undefined, src.op)
+        layer.xsel = { ...xsel2, size: Math.max(4, (group.bboxMax as number) * gsc) }
       }
       const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
       set({
@@ -1804,9 +1810,9 @@ export const useEditor = create<EditorState>((set, get) => {
       const boxes = targets.map((i) => {
         const layer = src.layers[i] as Record<string, unknown>
         const xb = (layer.xbase as number[]) ?? [256, 256]
-        const [hw, hh] = layerHalfOf(src, i)
-        const [ox, oy] = layerCenterOffsetOf(src, i)
-        return { i, layer, cx: xb[0] + ox, cy: xb[1] + oy, hw, hh }
+        // 회전·스케일 반영 화면 박스 — 시각적 가장자리에 정렬돼야 한다
+        const { half, offset } = layerAabbOf(src, i)
+        return { i, layer, cx: xb[0] + offset[0], cy: xb[1] + offset[1], hw: half[0], hh: half[1] }
       })
       // 정렬 기준 경계: 캔버스 또는 선택 합집합 바운드 (2개 미만이면 캔버스로 폴백)
       let L = 0, R = 512, T = 0, B = 512
@@ -1849,8 +1855,8 @@ export const useEditor = create<EditorState>((set, get) => {
       const items = pool.map((i) => {
         const l = src.layers[i]
         const xb = ((l as Record<string, unknown>).xbase as number[]) ?? [256, 256]
-        const [ox, oy] = layerCenterOffsetOf(src, i)
-        return { i, c: axis === 'h' ? xb[0] + ox : xb[1] + oy }
+        const { offset } = layerAabbOf(src, i) // 회전·스케일 반영 시각 중심
+        return { i, c: axis === 'h' ? xb[0] + offset[0] : xb[1] + offset[1] }
       })
       if (items.length < 3) return
       items.sort((a, b) => a.c - b.c)

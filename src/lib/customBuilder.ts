@@ -691,8 +691,10 @@ export function layerScaleOf(doc: LottieJson, i: number, frame?: number): number
   const ksS = (layer.ks as Record<string, unknown> | undefined)?.s as
     | { a?: number; k?: number[] | number }
     | undefined
-  if (ksS && ksS.a === 0 && Array.isArray(ksS.k))
-    return Math.max(0.01, (Number(ksS.k[0]) || 100) / 100)
+  if (ksS && ksS.a === 0 && Array.isArray(ksS.k)) {
+    const v0 = Number(ksS.k[0])
+    return Math.max(0.01, (Number.isFinite(v0) ? v0 : 100) / 100)
+  }
   // 애니메이션 중(a:1) — xkf s 채널(프레임 보간) 또는 정착값
   const xsel = normSel(layer.xsel as Partial<CustomSel> | undefined, doc.op)
   const xkf = normKf(layer.xkf as Partial<CustomKf> | undefined)

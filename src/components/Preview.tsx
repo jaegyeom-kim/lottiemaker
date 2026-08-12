@@ -8,7 +8,7 @@ import {
 import { durationSec, parseLottie, type LottieJson } from '../lib/lottieUtils'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
 import {
-  layerHalfOf, layerCenterOffsetOf, layerAabbOf, normKf, kfValueAt,
+  layerHalfOf, layerAabbOf, normKf, kfValueAt,
   kfChannelKeys, normSel, animSpans, kfFallbackValue,
   type CustomPayload, type CustomKf, type CustomSel, type KfChannel,
 } from '../lib/customBuilder'
@@ -130,11 +130,11 @@ export default function Preview() {
       if ((lyr as Record<string, unknown>).hd === true) return
       const b = layerBase(i)
       if (!b) return
-      const [cox, coy] = layerCenterOffsetOf(doc2, i)
-      const [hw, hh] = layerHalf(i)
-      const cx = b[0] + cox
-      const cy = b[1] + coy
-      if (cx + hw >= x0 && cx - hw <= x1 && cy + hh >= y0 && cy - hh <= y1) hits.push(i)
+      const { half, offset } = layerAabbOf(doc2, i, Math.round(frameRef.current))
+      const cx = b[0] + offset[0]
+      const cy = b[1] + offset[1]
+      if (cx + half[0] >= x0 && cx - half[0] <= x1 && cy + half[1] >= y0 && cy - half[1] <= y1)
+        hits.push(i)
     })
     s2.setCustomSelList([...mq.base, ...hits])
   }
@@ -917,10 +917,6 @@ export default function Preview() {
     return layerBaseOf(s.sourceData, i, s.curFrame)
   }
 
-  const layerHalf = (i: number): [number, number] => {
-    const s = useEditor.getState()
-    return s.sourceData ? layerHalfOf(s.sourceData, i, Math.round(frameRef.current)) : [60, 60]
-  }
 
   /** 포인터 아래 모든 레이어 — 위(배열 앞)→아래 순. */
   const hitLayers = (px: number, py: number): number[] => {
@@ -1888,17 +1884,16 @@ export default function Preview() {
                     sourceData?.layers.map((_, i) => {
                       const b = layerBaseOf(sourceData, i, Math.round(frame))
                       if (!b) return null
-                      const [hw, hh] = layerHalfOf(sourceData, i)
-                      const [cox, coy] = layerCenterOffsetOf(sourceData, i)
+                      const { half, offset } = layerAabbOf(sourceData, i, Math.round(frame))
                       return (
                         <div
                           key={i}
                           className="allbox"
                           style={{
-                            left: `${((b[0] + cox - hw) / cw) * 100}%`,
-                            top: `${((b[1] + coy - hh) / ch) * 100}%`,
-                            width: `${((hw * 2) / cw) * 100}%`,
-                            height: `${((hh * 2) / ch) * 100}%`,
+                            left: `${((b[0] + offset[0] - half[0]) / cw) * 100}%`,
+                            top: `${((b[1] + offset[1] - half[1]) / ch) * 100}%`,
+                            width: `${((half[0] * 2) / cw) * 100}%`,
+                            height: `${((half[1] * 2) / ch) * 100}%`,
                           }}
                         />
                       )
@@ -1962,12 +1957,15 @@ export default function Preview() {
                         setHoverIdx(null)
                         const base = layerBase(hit)
                         if (!base) return
-                        const [hw, hh] = layerHalf(hit)
+                        // 스냅/드래그 박스 — 회전·스케일 반영 AABB
                         const src2 = useEditor.getState().sourceData
-                        const [cox, coy] = src2 ? layerCenterOffsetOf(src2, hit) : [0, 0]
+                        const aabb = src2
+                          ? layerAabbOf(src2, hit, Math.round(frameRef.current))
+                          : { half: [60, 60] as [number, number], offset: [0, 0] as [number, number] }
                         dragStart.current = {
-                          x: e.clientX, y: e.clientY, bx: base[0], by: base[1], f, hw, hh,
-                          ox: cox, oy: coy,
+                          x: e.clientX, y: e.clientY, bx: base[0], by: base[1], f,
+                          hw: aabb.half[0], hh: aabb.half[1],
+                          ox: aabb.offset[0], oy: aabb.offset[1],
                         }
                         dragLast.current = { tx: base[0], ty: base[1] }
                         setDragCoord({ x: base[0], y: base[1] })
