@@ -1727,6 +1727,7 @@ export default function Preview() {
                             className={`selhandle selhandle--${c}`}
                             style={{ transform: `scale(${1 / zoom})` }}
                             onPointerDown={(e) => {
+                              if (e.button !== 0) return
                               e.stopPropagation()
                               const rect = wrapRef.current?.getBoundingClientRect()
                               const st = useEditor.getState()
@@ -1845,6 +1846,8 @@ export default function Preview() {
                       }}
                       title={t('드래그: 이동 · 빈 곳 드래그: 마키 다중 선택 (⇧ 추가) · Shift: 축 잠금 · Alt+드래그: 복제 · ⌘: 스냅 해제 · Esc: 취소')}
                       onPointerDown={(e) => {
+                        // 좌클릭만 픽/드래그 — 휠클릭은 스테이지 팬으로 (버블)
+                        if (e.button !== 0) return
                         const rect = wrapRef.current?.getBoundingClientRect()
                         if (!rect) return
                         const f = cw / rect.width
