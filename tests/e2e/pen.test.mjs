@@ -169,6 +169,22 @@ await page.mouse.up()
 await page.waitForTimeout(1300)
 let k1 = shOf(await src())
 ok(Math.abs(k1.v[1][1] - midBefore[1]) > 10, `편집 드래그 → 셰이프 v 반영 (${midBefore[1].toFixed(1)} → ${k1.v[1][1].toFixed(1)})`)
+// 편집 후 바운딩 박스가 새 지오메트리를 따라오는지 (중심 오프셋 메타 회귀)
+const boxCmp = await page.evaluate(() => {
+  const wrapEl = document.querySelector('.preview__lottiewrap')
+  const wr = wrapEl.getBoundingClientRect()
+  const f = 512 / wr.width
+  const box = document.querySelector('.selbox')?.getBoundingClientRect()
+  // 고스트 패스 = 지금 편집 중인 그 패스 (CTM 매핑이라 렌더와 동일 기하)
+  const pb = document.querySelector('.drawghost__path')?.getBoundingClientRect()
+  if (!box || !pb) return null
+  return {
+    dx: (box.x + box.width / 2 - (pb.x + pb.width / 2)) * f,
+    dy: (box.y + box.height / 2 - (pb.y + pb.height / 2)) * f,
+  }
+})
+ok(boxCmp && Math.abs(boxCmp.dx) < 6 && Math.abs(boxCmp.dy) < 6, `편집 후 박스-지오메트리 정합 (Δ${boxCmp?.dx.toFixed(1)},${boxCmp?.dy.toFixed(1)})`)
+
 // ⌥클릭 = 핸들 제거 (스무스 앵커 → 코너)
 ab = await (await page.$$('.drawghost__anchor'))[1].boundingBox()
 await page.keyboard.down('Alt')

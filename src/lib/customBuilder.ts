@@ -735,7 +735,11 @@ export function layerCenterOffsetOf(doc: LottieJson, i: number, frame?: number):
   )
   if (asset && typeof asset.w === 'number' && !asset.layers)
     return [((asset.w as number) / 2 - a[0]) * sc, ((asset.h as number) / 2 - a[1]) * sc]
-  return [-a[0] * sc, -a[1] * sc]
+  // 셰이프 — 펜 포인트 편집으로 bbox 중심이 그룹 앵커에서 벗어난 만큼(bboxCx/Cy) 보정
+  const g = (layer.shapes as Record<string, unknown>[] | undefined)?.[0]
+  const cx = Number(g?.bboxCx ?? 0)
+  const cy = Number(g?.bboxCy ?? 0)
+  return [(cx - a[0]) * sc, (cy - a[1]) * sc]
 }
 
 export type CustomPayload =

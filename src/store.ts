@@ -1283,6 +1283,15 @@ export const useEditor = create<EditorState>((set, get) => {
         group.bboxW = acc.maxX - acc.minX
         group.bboxH = acc.maxY - acc.minY
         group.bboxMax = Math.max(acc.maxX - acc.minX, acc.maxY - acc.minY)
+        // 시각 중심이 그룹 앵커에서 얼마나 벗어났는지 — 선택 박스/히트가 따라오게
+        // (포인트 편집으로 bbox 중심이 이동해도 xbase/앵커는 그대로이기 때문)
+        const tr = (group.it as Record<string, unknown>[] | undefined)?.find(
+          (it) => it.ty === 'tr',
+        ) as { a?: { k: number[] }; s?: { k: number[] } } | undefined
+        const ta = tr?.a?.k ?? [0, 0]
+        const gsc = ((tr?.s?.k?.[0] as number | undefined) ?? 100) / 100
+        group.bboxCx = ((acc.minX + acc.maxX) / 2 - ta[0]) * gsc
+        group.bboxCy = ((acc.minY + acc.maxY) / 2 - ta[1]) * gsc
       }
       const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
       set({
