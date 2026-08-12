@@ -2938,8 +2938,11 @@ body.drag-cross * { cursor: crosshair !important; }
 }
 
 .anchorgrid--big {
+  /* 패널이 좁아 flex가 가로만 줄여도 정사각 유지 */
   width: 128px;
-  height: 128px;
+  height: auto;
+  aspect-ratio: 1;
+  min-width: 0;
   grid-template-columns: repeat(3, 1fr);
   grid-template-rows: repeat(3, 1fr);
   gap: 6px;
@@ -2955,7 +2958,9 @@ body.drag-cross * { cursor: crosshair !important; }
 
 .anchorcell {
   width: 128px;
-  height: 128px;
+  height: auto;
+  aspect-ratio: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
