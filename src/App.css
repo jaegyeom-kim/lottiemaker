@@ -181,6 +181,7 @@ body.drag-cross * { cursor: crosshair !important; }
 }
 
 .tile {
+  position: relative;
   background: var(--bg-raise2);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -199,10 +200,6 @@ body.drag-cross * { cursor: crosshair !important; }
 }
 
 /* 타일 즐겨찾기 별 */
-.tile {
-  position: relative;
-}
-
 .tile__fav {
   position: absolute;
   top: 4px;
@@ -1126,11 +1123,6 @@ body.drag-cross * { cursor: crosshair !important; }
   font-variant-numeric: tabular-nums;
 }
 
-.graphicrow .input--select {
-  flex: 1;
-  appearance: auto;
-  padding: 8px 10px;
-}
 
 .graphicpreview {
   display: flex;
@@ -1736,18 +1728,6 @@ body.drag-cross * { cursor: crosshair !important; }
   font-weight: 600;
 }
 
-.grouphead__sub {
-  margin-left: 6px;
-  font-weight: 500;
-  font-size: 10.5px;
-  color: var(--text-dim);
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  display: inline-block;
-  vertical-align: bottom;
-}
 
 /* 레이어명 + 우측 트월 */
 .timeline__lname {
@@ -2345,9 +2325,6 @@ body.drag-cross * { cursor: crosshair !important; }
 .kfrow__vals {
   display: flex;
   gap: 4px;
-}
-
-.kfrow__vals {
   flex-shrink: 0;
 }
 
@@ -2951,22 +2928,7 @@ body.drag-cross * { cursor: crosshair !important; }
   border-color: var(--blue);
 }
 
-.anchorpop {
-  position: absolute;
-  width: 190px;
-}
 
-.anchorpop--fixed {
-  position: fixed;
-  width: 200px;
-  background: var(--bg-raise);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 10px;
-  z-index: 8;
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
-  transform-origin: top left;
-}
 
 /* 앵커 퀵설정 + 직접 조정 좌우 배치 (동일 크기) */
 .anchorrow {
@@ -3016,9 +2978,6 @@ body.drag-cross * { cursor: crosshair !important; }
   line-height: 1.6;
 }
 
-.anchorpop--fixed {
-  width: 292px;
-}
 
 /* 정렬 패널 (일러스트레이터 Align) */
 .alignrow {
@@ -3466,16 +3425,6 @@ body.drag-cross * { cursor: crosshair !important; }
   margin-left: 0;
 }
 
-/* 그래프 에디터 모달 */
-.gemodal {
-  position: fixed;
-  inset: 0;
-  background: rgb(0 0 0 / 0.45);
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
 
 .gepanel {
   background: var(--bg-raise);
@@ -3559,6 +3508,8 @@ body.drag-cross * { cursor: crosshair !important; }
 .gepanel__graph {
   display: block;
   background: var(--bg);
+  cursor: crosshair; /* 드래그 = 마키 키 선택 */
+  touch-action: none;
 }
 
 .gepanel__grid {
@@ -3779,11 +3730,6 @@ body.drag-cross * { cursor: crosshair !important; }
 }
 
 .preview__playbtn svg,
-.player__play svg {
-  width: 16px;
-  height: 16px;
-  display: block;
-}
 
 .timeline__twirl svg,
 .csection__twirl svg {
@@ -3930,11 +3876,6 @@ body.drag-cross * { cursor: crosshair !important; }
   margin-right: auto;
 }
 
-.gepanel__graph {
-  cursor: grab;
-  touch-action: none;
-}
-
 .gepanel__graph:active {
   cursor: grabbing;
 }
@@ -3946,10 +3887,6 @@ body.drag-cross * { cursor: crosshair !important; }
   stroke-width: 1;
   stroke-dasharray: 4 3;
   pointer-events: none;
-}
-
-.gepanel__graph {
-  cursor: crosshair;
 }
 
 /* 핸들 연결선은 시각 전용 — 키 클릭 가로채지 않게 */
