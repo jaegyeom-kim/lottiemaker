@@ -3922,3 +3922,8 @@ body.drag-cross * { cursor: crosshair !important; }
   flex: 1;
   min-width: 0;
 }
+
+/* 픽 서피스를 페이스트보드까지 — 캔버스 밖 레이어도 클릭 선택 (좌표는 wrap 기준이라 그대로 유효) */
+.customdrag {
+  inset: -100%;
+}

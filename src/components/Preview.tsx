@@ -446,9 +446,25 @@ export default function Preview() {
     const s = useEditor.getState()
     if (created) {
       s.replaceCustomGraphicLive(payload, built.center, built.size)
-      s.commitEdit()
+      // 스트로크 전체 = 언두 1회 (addCustomLayer가 이미 push) — 중간 상태로 되돌지 않게
+      s.squashEdit()
     } else {
       s.addCustomLayer(payload, t('패스'), built.center, built.size)
+    }
+  }
+
+  /** 그리는 중 마지막 앵커 제거 — Backspace/⌘Z 공용 (일러 방식). */
+  const popPenPoint = () => {
+    const s = useEditor.getState()
+    const rest = penPtsRef.current.slice(0, -1)
+    setPenSel(null)
+    setPenPts(rest)
+    if (rest.length >= 2) syncPenLayer(rest)
+    else if (penCreated.current && s.customIdxs.length) {
+      // 점 1개 이하 — 생성했던 라이브 레이어 제거
+      s.cancelEdit()
+      s.removeCustomLayers([Math.min(s.customIdx, (s.sourceData?.layers.length ?? 1) - 1)])
+      penCreated.current = false
     }
   }
 
@@ -484,6 +500,17 @@ export default function Preview() {
       if (el.tagName === 'TEXTAREA' || el.isContentEditable) return true
       // 슬라이더/체크박스 포커스가 단축키(⌘Z 등)를 삼키지 않게 — 텍스트 입력만 차단
       return el.tagName === 'INPUT' && !['range', 'checkbox', 'radio', 'button'].includes(el.type)
+    }
+    // 펜 드로잉 중 ⌘Z = 마지막 앵커 취소 (일러) — 스토어 언두로 새면 그리던
+    // 레이어/포인트 상태가 어긋난다. 등록 순서와 무관하게 App 전역 언두보다
+    // 먼저 잡히도록 캡처 페이즈 사용. ⇧⌘Z(리두)는 드로잉 중 무시.
+    const penUndoCapture = (e: KeyboardEvent) => {
+      if (isTyping(e.target)) return
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z') return
+      if (toolRef.current !== 'pen' || !penPtsRef.current.length) return
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      if (!e.shiftKey) popPenPoint()
     }
     const down = (e: KeyboardEvent) => {
       if (isTyping(e.target)) return
@@ -570,18 +597,18 @@ export default function Preview() {
         if (toolRef.current === 'pen' && penPtsRef.current.length) {
           // 선택 앵커가 있으면 그 점, 없으면 마지막 점
           const selIdx = penSelRef.current
-          const rest =
-            selIdx !== null && selIdx < penPtsRef.current.length
-              ? penPtsRef.current.filter((_, i) => i !== selIdx)
-              : penPtsRef.current.slice(0, -1)
-          setPenSel(null)
-          setPenPts(rest)
-          if (rest.length >= 2) syncPenLayer(rest)
-          else if (penCreated.current && s.customIdxs.length) {
-            // 점 1개 이하 — 생성했던 라이브 레이어 제거
-            s.cancelEdit()
-            s.removeCustomLayers([Math.min(s.customIdx, (s.sourceData?.layers.length ?? 1) - 1)])
-            penCreated.current = false
+          if (selIdx !== null && selIdx < penPtsRef.current.length) {
+            const rest = penPtsRef.current.filter((_, i) => i !== selIdx)
+            setPenSel(null)
+            setPenPts(rest)
+            if (rest.length >= 2) syncPenLayer(rest)
+            else if (penCreated.current && s.customIdxs.length) {
+              s.cancelEdit()
+              s.removeCustomLayers([Math.min(s.customIdx, (s.sourceData?.layers.length ?? 1) - 1)])
+              penCreated.current = false
+            }
+          } else {
+            popPenPoint()
           }
           return
         }
@@ -752,9 +779,11 @@ export default function Preview() {
     const up = (e: KeyboardEvent) => {
       if (e.key.startsWith('Arrow')) useEditor.getState().commitEdit()
     }
+    window.addEventListener('keydown', penUndoCapture, true)
     window.addEventListener('keydown', down)
     window.addEventListener('keyup', up)
     return () => {
+      window.removeEventListener('keydown', penUndoCapture, true)
       window.removeEventListener('keydown', down)
       window.removeEventListener('keyup', up)
     }

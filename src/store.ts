@@ -168,6 +168,8 @@ interface EditorState {
   /** 템플릿 전체 초기화 — 노브·색상·커스텀 그래픽·크기 전부 로드 시점 원본으로 (undo 가능). */
   resetTemplate: () => void
   commitEdit: () => void
+  /** 라이브 편집을 새 언두 스텝 없이 확정 — 이전 push와 한 스텝으로 합칠 때 (펜 드로잉 등). */
+  squashEdit: () => void
   toggleLayer: (index: number) => void
   setSize: (w: number, h: number) => void
   /** match로 시작하는 레이어들의 셰이프를 커스텀 그래픽 그룹으로 교체 (원본에도 미러). */
@@ -975,6 +977,10 @@ export const useEditor = create<EditorState>((set, get) => {
         past: [...past.slice(-HISTORY_CAP + 1), editBaseline],
         editBaseline: null,
       })
+    },
+
+    squashEdit: () => {
+      if (get().editBaseline) set({ editBaseline: null })
     },
 
     cancelEdit: () => {
