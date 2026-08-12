@@ -111,5 +111,38 @@ S().importLottieLayers(matteDoc('B'))
   ok(at100?.r === 90 && at100?.o === 100, `병합 키에 r·o 모두 보존 (r=${at100?.r}, o=${at100?.o})`)
 }
 
+// ── 4) xlock — store 레벨 강제 (UI 우회 차단) ──
+{
+  const li = 0
+  const before = structuredClone(S().sourceData.layers[li])
+  S().toggleLayerLock(li)
+  ok(S().sourceData.layers[li].xlock === true, '잠금 설정')
+
+  S().renameLayer(li, '변경시도')
+  ok(S().sourceData.layers[li].nm === before.nm, '잠금: rename 차단')
+
+  const n0 = S().sourceData.layers.length
+  S().removeCustomLayers([li])
+  ok(S().sourceData.layers.length === n0, '잠금: 삭제 차단')
+
+  useEditor.setState({ customIdx: li, customIdxs: [li] })
+  const base0 = [...S().sourceData.layers[li].xbase]
+  S().nudgeCustomBase(50, 0)
+  const base1 = S().sourceData.layers[li].xbase
+  ok(base1[0] === base0[0] && base1[1] === base0[1], '잠금: 이동 차단')
+
+  const keys0 = JSON.stringify(S().sourceData.layers[li].xkf?.keys ?? [])
+  S().setKfChannel('r', 10, 45)
+  ok(JSON.stringify(S().sourceData.layers[li].xkf?.keys ?? []) === keys0, '잠금: 키프레임 편집 차단')
+
+  S().setLayerMatte(li, { type: 'alpha', invert: false, sourceLi: 1 })
+  ok(S().sourceData.layers[li].tt === undefined, '잠금: 매트 설정 차단')
+
+  S().toggleLayerLock(li)
+  ok(S().sourceData.layers[li].xlock !== true, '잠금 해제')
+  S().renameLayer(li, '해제후변경')
+  ok(S().sourceData.layers[li].nm === '해제후변경', '해제 후 rename 동작')
+}
+
 console.log(failed ? `STORE FAIL ${failed}` : 'STORE PASS')
 process.exit(failed ? 1 : 0)

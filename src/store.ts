@@ -496,6 +496,7 @@ export const useEditor = create<EditorState>((set, get) => {
   ): Pick<EditorState, 'animationData' | 'sourceData' | 'colorGroups'> | null => {
     const { sourceData, templateKnobs, knobValues, customIdx } = st
     if (!sourceData) return null
+    if (lockedAt(sourceData, Math.min(customIdx, sourceData.layers.length - 1))) return null
     const src = structuredClone(sourceData)
     const layer = src.layers[Math.min(customIdx, src.layers.length - 1)] as Record<string, unknown>
     if (!layer) return null
@@ -512,6 +513,7 @@ export const useEditor = create<EditorState>((set, get) => {
   ): Pick<EditorState, 'animationData' | 'sourceData' | 'colorGroups'> | null => {
     const { sourceData, templateKnobs, knobValues, customIdx } = st
     if (!sourceData) return null
+    if (lockedAt(sourceData, Math.min(customIdx, sourceData.layers.length - 1))) return null
     const src = structuredClone(sourceData)
     const layer = src.layers[Math.min(customIdx, src.layers.length - 1)] as Record<string, unknown>
     if (!layer) return null
@@ -548,14 +550,23 @@ export const useEditor = create<EditorState>((set, get) => {
     return { animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) }
   }
 
-  /** 클론된 src의 레이어 li에 xkf 변형 적용 + 채널·클립 재생성. 성공 여부 반환. */
+  /** 잠긴 레이어(xlock) 여부 — UI와 별개로 store 차원에서 편집을 차단하는 기준. */
+  const lockedAt = (src: LottieJson | null | undefined, li: number): boolean =>
+    (src?.layers[li] as Record<string, unknown> | undefined)?.xlock === true
+
+  /**
+   * 클론된 src의 레이어 li에 xkf 변형 적용 + 채널·클립 재생성. 성공 여부 반환.
+   * 잠긴 레이어는 차단 — 시스템 재생성(임포트·컴프 길이 등)은 force로 통과.
+   */
   const editKfLayerIn = (
     src: LottieJson,
     li: number,
     mutate: (xkf: CustomKf, layer: Record<string, unknown>) => void,
+    force = false,
   ): boolean => {
     const layer = src.layers[li] as Record<string, unknown> | undefined
     if (!layer) return false
+    if (!force && layer.xlock === true) return false
     const xkf = normKf(layer.xkf as Partial<CustomKf> | undefined)
     mutate(xkf, layer)
     xkf.keys.sort((a, b) => a.t - b.t)
@@ -1208,7 +1219,7 @@ export const useEditor = create<EditorState>((set, get) => {
       }
       src.assets = assets
       src.layers[li] = layer as never
-      editKfLayerIn(src, li, () => {})
+      editKfLayerIn(src, li, () => {}, true)
       const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
       set({
         animationData: applied,
@@ -1275,7 +1286,7 @@ export const useEditor = create<EditorState>((set, get) => {
         // 채널 재생성 — 메인/씬 레이어 전부 (씬은 가짜 문서 래퍼로)
         const rebuild = (layersArr: Record<string, unknown>[], scopeOp: number) => {
           const fake = { op: scopeOp, layers: layersArr } as unknown as LottieJson
-          layersArr.forEach((_, i) => editKfLayerIn(fake, i, () => {}))
+          layersArr.forEach((_, i) => editKfLayerIn(fake, i, () => {}, true))
           reindexLayers(layersArr)
         }
         rebuild(sc.main, sc.op)
@@ -1351,7 +1362,7 @@ export const useEditor = create<EditorState>((set, get) => {
           assets: conv.assets, layers: conv.layers,
         } as unknown as LottieJson
         ensureLayerColors(newDoc)
-        newDoc.layers.forEach((_, i) => editKfLayerIn(newDoc, i, () => {}))
+        newDoc.layers.forEach((_, i) => editKfLayerIn(newDoc, i, () => {}, true))
         newDoc.layers.forEach((l, i) => (l.ind = i + 1))
         get().loadTemplate(newDoc, '__custom', [])
         set({ customIdx: 0, customIdxs: [0], loop: false, playing: false })
@@ -1394,7 +1405,7 @@ export const useEditor = create<EditorState>((set, get) => {
         { members: conv.layers as Record<string, unknown>[] },
         { members: existingLayers },
       ])
-      for (let i = 0; i < conv.layers.length; i++) editKfLayerIn(src, i, () => {})
+      for (let i = 0; i < conv.layers.length; i++) editKfLayerIn(src, i, () => {}, true)
       const applied = applyKnobs(src, templateKnobs, knobValues)
       push({
         animationData: applied,
@@ -1410,7 +1421,9 @@ export const useEditor = create<EditorState>((set, get) => {
     removeCustomLayers: (idxs) => {
       const { sourceData, templateKnobs, knobValues } = get()
       if (!sourceData) return
-      const uniq = [...new Set(idxs)].filter((i) => i >= 0 && i < sourceData.layers.length)
+      const uniq = [...new Set(idxs)].filter(
+        (i) => i >= 0 && i < sourceData.layers.length && !lockedAt(sourceData, i),
+      )
       if (!uniq.length) return
       if (uniq.length >= sourceData.layers.length) {
         // 전부 삭제 = 세션 비움 (undo 가능)
@@ -1471,6 +1484,7 @@ export const useEditor = create<EditorState>((set, get) => {
       if (!sourceData) return
       const n = sourceData.layers.length
       if (from === to || from < 0 || from >= n || to < 0 || to >= n) return
+      if (lockedAt(sourceData, from)) return
       const src = structuredClone(sourceData)
       ensureLayerColors(src)
       const [moved] = src.layers.splice(from, 1)
@@ -1532,7 +1546,7 @@ export const useEditor = create<EditorState>((set, get) => {
 
     renameCustomLayer: (i, name) => {
       const { sourceData, templateKnobs, knobValues } = get()
-      if (!sourceData?.layers[i] || !name.trim()) return
+      if (!sourceData?.layers[i] || !name.trim() || lockedAt(sourceData, i)) return
       const src = structuredClone(sourceData)
       src.layers[i].nm = name.trim()
       const applied = applyKnobs(src, templateKnobs, knobValues)
@@ -1560,7 +1574,9 @@ export const useEditor = create<EditorState>((set, get) => {
       const src = structuredClone(sourceData)
       ensureLayerColors(src)
       // 다중 선택 전체 이동 — 선택이 없으면 아무것도 안 움직인다
-      const sel = [...new Set(customIdxs)].filter((i) => i >= 0 && i < src.layers.length)
+      const sel = [...new Set(customIdxs)].filter(
+        (i) => i >= 0 && i < src.layers.length && !lockedAt(src, i),
+      )
       if (!sel.length) return
       for (const i of sel) {
         shiftLayer(src.layers[i] as Record<string, unknown>, dx, dy)
@@ -1599,7 +1615,9 @@ export const useEditor = create<EditorState>((set, get) => {
       const dy = y - xb[1]
       if (!dx && !dy) return
       // 주 선택은 절대 좌표, 함께 선택된 레이어들은 같은 델타로 동반 이동 — 선택 없으면 무시
-      const sel = [...new Set(customIdxs)].filter((i) => i >= 0 && i < src.layers.length)
+      const sel = [...new Set(customIdxs)].filter(
+        (i) => i >= 0 && i < src.layers.length && !lockedAt(src, i),
+      )
       if (!sel.length) return
       for (const i of sel) {
         shiftLayer(src.layers[i] as Record<string, unknown>, dx, dy)
@@ -1622,7 +1640,9 @@ export const useEditor = create<EditorState>((set, get) => {
       const src = structuredClone(sourceData)
       ensureLayerColors(src)
       // 선택된 레이어만 — 선택이 없으면 아무 일도 하지 않는다 (일러와 동일)
-      const targets = [...new Set(get().customIdxs)].filter((i) => i >= 0 && i < src.layers.length)
+      const targets = [...new Set(get().customIdxs)].filter(
+        (i) => i >= 0 && i < src.layers.length && !lockedAt(src, i),
+      )
       if (!targets.length) return
       // 각 레이어의 시각적 박스
       const boxes = targets.map((i) => {
@@ -1666,8 +1686,10 @@ export const useEditor = create<EditorState>((set, get) => {
       const src = structuredClone(sourceData)
       ensureLayerColors(src)
       // 다중 선택 3개 이상이면 선택만, 아니면 전체 — 양끝 고정, 사이 균등
-      const selD = [...new Set(get().customIdxs)].filter((i) => i >= 0 && i < src.layers.length)
-      const pool = selD.length >= 3 ? selD : src.layers.map((_, i) => i)
+      const selD = [...new Set(get().customIdxs)].filter(
+        (i) => i >= 0 && i < src.layers.length && !lockedAt(src, i),
+      )
+      const pool = selD.length >= 3 ? selD : src.layers.map((_, i) => i).filter((i) => !lockedAt(src, i))
       const items = pool.map((i) => {
         const l = src.layers[i]
         const xb = ((l as Record<string, unknown>).xbase as number[]) ?? [256, 256]
@@ -1721,7 +1743,7 @@ export const useEditor = create<EditorState>((set, get) => {
             kept.push(k)
           }
           xkf.keys = kept
-        })
+        }, true)
       })
       const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
       set({
@@ -1992,6 +2014,7 @@ export const useEditor = create<EditorState>((set, get) => {
     setLayerBlend: (bm) => {
       const { sourceData, templateKnobs, knobValues, customIdx } = get()
       if (!sourceData?.layers.length) return
+      if (lockedAt(sourceData, Math.min(customIdx, sourceData.layers.length - 1))) return
       const src = structuredClone(sourceData)
       ensureLayerColors(src)
       const layer = src.layers[Math.min(customIdx, src.layers.length - 1)] as Record<
@@ -2030,7 +2053,7 @@ export const useEditor = create<EditorState>((set, get) => {
 
     setLayerMatte: (li, opts) => {
       const { sourceData, templateKnobs, knobValues } = get()
-      if (!sourceData?.layers[li]) return
+      if (!sourceData?.layers[li] || lockedAt(sourceData, li)) return
       const src = structuredClone(sourceData)
       const layers = src.layers as Record<string, unknown>[]
       // ind 보장 — tp 참조용
@@ -2062,7 +2085,7 @@ export const useEditor = create<EditorState>((set, get) => {
 
     setLayerParent: (li, targetLi) => {
       const { sourceData, templateKnobs, knobValues } = get()
-      if (!sourceData?.layers[li]) return
+      if (!sourceData?.layers[li] || lockedAt(sourceData, li)) return
       const src = structuredClone(sourceData)
       const layers = src.layers as Record<string, unknown>[]
       // ind 보장 — 없는 레이어에 순차 부여 (그린 도형 등)
@@ -2116,7 +2139,7 @@ export const useEditor = create<EditorState>((set, get) => {
     renameLayer: (li, name) => {
       const { sourceData, templateKnobs, knobValues } = get()
       const nm = name.trim()
-      if (!sourceData?.layers[li] || !nm) return
+      if (!sourceData?.layers[li] || !nm || lockedAt(sourceData, li)) return
       const src = structuredClone(sourceData)
       ;(src.layers[li] as Record<string, unknown>).nm = nm
       const applied = applyKnobs(src, templateKnobs, knobValues)
@@ -2295,7 +2318,7 @@ export const useEditor = create<EditorState>((set, get) => {
           mapFrom: [...originals, ...(copies as Record<string, unknown>[])],
         },
       ])
-      for (let i = li + 1; i <= li + copies.length; i++) editKfLayerIn(src, i, () => {})
+      for (let i = li + 1; i <= li + copies.length; i++) editKfLayerIn(src, i, () => {}, true)
       const applied = applyKnobs(src, templateKnobs, knobValues)
       push({
         animationData: applied,
