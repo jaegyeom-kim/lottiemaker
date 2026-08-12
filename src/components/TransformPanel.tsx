@@ -89,8 +89,12 @@ export default function TransformPanel() {
             max={400}
             step={1}
             unit="%"
-            value={kfValueAt(xkf, 's', curFrame, 100) as number}
-            onLive={(v) => setKfChannelLive('s', curFrame, v)}
+            value={sKeys ? (kfValueAt(xkf, 's', curFrame, xsel.scale) as number) : xsel.scale}
+            onLive={(v) => {
+              // 키가 이미 있는 채널만 재생헤드에 키 — 없으면 정적 값 (AE 스톱워치 꺼짐)
+              if (sKeys) setKfChannelLive('s', curFrame, v)
+              else setCustomChannelsLive({ ...xsel, scale: v })
+            }}
             onCommit={commitEdit}
           />
         </div>

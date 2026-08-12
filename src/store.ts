@@ -673,7 +673,11 @@ export const useEditor = create<EditorState>((set, get) => {
     ease?: Bezier4,
   ) => {
     const t = Math.max(0, Math.round(frame))
-    let k = xkf.keys.find((x) => Math.abs(x.t - t) < 0.5)
+    // 같은 t에 키가 여러 개면(구버전 임포트) 해당 채널을 이미 가진 키 우선 —
+    // 다른 키에 얹으면 같은 채널 키가 같은 t에 중복된다
+    let k =
+      xkf.keys.find((x) => Math.abs(x.t - t) < 0.5 && x[ch] !== undefined) ??
+      xkf.keys.find((x) => Math.abs(x.t - t) < 0.5)
     if (!k) {
       k = { t }
       xkf.keys.push(k)
@@ -1571,17 +1575,23 @@ export const useEditor = create<EditorState>((set, get) => {
     nudgeCustomBase: (dx, dy) => {
       const { sourceData, templateKnobs, knobValues, customIdxs, customIdx, curFrame } = get()
       if (!sourceData) return
-      // 키프레임 모드 단독 선택 — 현재 프레임 위치에 자동 키
+      // 키프레임 모드 단독 선택 + p 키 보유 — 현재 프레임에 자동 키
+      // (키 없는 채널은 정적 이동 — AE 스톱워치 꺼진 상태와 동일)
       {
         const pi = Math.min(customIdx, sourceData.layers.length - 1)
         const lr = sourceData.layers[pi] as Record<string, unknown>
         const sel1 = [...new Set(customIdxs)]
-        if ((lr?.xkf as CustomKf | undefined)?.on && sel1.length === 1 && sel1[0] === pi) {
-          const xkf = normKf(lr.xkf as Partial<CustomKf>)
+        const xkf0 = normKf(lr?.xkf as Partial<CustomKf> | undefined)
+        if (
+          xkf0.on &&
+          kfChannelKeys(xkf0, 'p').length > 0 &&
+          sel1.length === 1 &&
+          sel1[0] === pi
+        ) {
           const xb = Array.isArray(lr.xbase)
             ? ([...(lr.xbase as number[])] as [number, number])
             : ([256, 256] as [number, number])
-          const cur = kfValueAt(xkf, 'p', curFrame, xb) as [number, number]
+          const cur = kfValueAt(xkf0, 'p', curFrame, xb) as [number, number]
           get().setKfChannel('p', curFrame, [cur[0] + dx, cur[1] + dy])
           return
         }
@@ -1611,12 +1621,19 @@ export const useEditor = create<EditorState>((set, get) => {
       const st = get()
       const { sourceData, templateKnobs, knobValues, customIdx, customIdxs } = st
       if (!sourceData) return
-      // 키프레임 모드 단독 선택 — 이동은 통째 시프트가 아니라 현재 프레임 자동 키 (AE 방식)
+      // 키프레임 모드 단독 선택 + p 키 보유 — 현재 프레임에 자동 키 (AE 방식)
+      // (키 없는 채널은 정적 이동 — 스톱워치 꺼진 상태)
       {
         const pi = Math.min(customIdx, sourceData.layers.length - 1)
         const lr = sourceData.layers[pi] as Record<string, unknown>
         const sel1 = [...new Set(customIdxs)]
-        if ((lr?.xkf as CustomKf | undefined)?.on && sel1.length === 1 && sel1[0] === pi) {
+        const xkf0 = normKf(lr?.xkf as Partial<CustomKf> | undefined)
+        if (
+          xkf0.on &&
+          kfChannelKeys(xkf0, 'p').length > 0 &&
+          sel1.length === 1 &&
+          sel1[0] === pi
+        ) {
           get().setKfChannelLive('p', st.curFrame, [x, y])
           return
         }

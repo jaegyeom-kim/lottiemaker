@@ -63,6 +63,8 @@ export interface CustomSel {
   size: number
   rotation: number
   opacity: number
+  /** 정적 균등 스케일 % — 키프레임 모드에서 s 채널 키가 없을 때의 값. */
+  scale: number
   anchor: [number, number]
   /** 레이어 클립 구간 [시작 f, 끝 f] — 밖에서는 레이어가 렌더되지 않는다 (ip/op). */
   clip: [number, number]
@@ -73,7 +75,7 @@ export interface CustomSel {
 }
 
 export const DEFAULT_SEL: CustomSel = {
-  size: 240, rotation: 0, opacity: 100, anchor: [0.5, 0.5],
+  size: 240, rotation: 0, opacity: 100, scale: 100, anchor: [0.5, 0.5],
   clip: [0, CUSTOM_OP],
   in: { type: 0, delay: 0, dur: 24, dist: 80, bounce: 1 },
   loop: { type: 0, amount: 24, period: 60 },
@@ -406,7 +408,20 @@ export function normKf(raw: Partial<CustomKf> | undefined): CustomKf {
       return { ...rest, t: Math.round(k.t * 10) / 10, ...(Object.keys(e).length ? { e } : {}) }
     })
     .sort((a, b) => a.t - b.t)
-  return { on: !!r.on, ease: typeof r.ease === 'number' ? r.ease : 1, smooth: !!r.smooth, keys }
+  // 같은 t(±0.5f)에 쪼개진 키 병합 — 채널별 별도 키를 만드는 구버전 임포트 정규화.
+  // 채널 값·이징 모두 앞선 키 우선으로 합친다.
+  const merged: typeof keys = []
+  for (const k of keys) {
+    const dup = merged.find((m) => Math.abs(m.t - k.t) < 0.5)
+    if (!dup) {
+      merged.push(k)
+      continue
+    }
+    for (const ch of ['p', 's', 'r', 'o', 'ts', 'te'] as const)
+      if (dup[ch] === undefined && k[ch] !== undefined) (dup[ch] as unknown) = k[ch]
+    if (k.e) dup.e = { ...k.e, ...(dup.e ?? {}) }
+  }
+  return { on: !!r.on, ease: typeof r.ease === 'number' ? r.ease : 1, smooth: !!r.smooth, keys: merged }
 }
 
 /** 곡선 경로용 키 j의 Catmull-Rom 접선 (이웃 클램프 — 끝점은 단방향/2). */
@@ -442,7 +457,7 @@ export function kfFallbackValue(
   base: [number, number],
 ): number | [number, number] {
   if (ch === 'p') return base
-  if (ch === 's') return 100
+  if (ch === 's') return xsel.scale ?? 100
   if (ch === 'r') return xsel.rotation
   if (ch === 'ts') return 0
   if (ch === 'te') return 100
@@ -535,9 +550,10 @@ export function buildKfKs(
     }
     return { a: 1, k }
   }
+  const st = sel.scale ?? 100
   return {
     p: mk('p', 3, (v: [number, number]) => [R(v[0]), R(v[1]), 0], [base[0], base[1], 0]),
-    s: mk('s', 3, (v: number) => [R(v), R(v), 100], [100, 100, 100]),
+    s: mk('s', 3, (v: number) => [R(v), R(v), 100], [R(st), R(st), 100]),
     r: mk('r', 1, (v: number) => [R(v)], [sel.rotation ?? 0]),
     o: mk('o', 1, (v: number) => [Math.max(0, Math.min(100, v))], [maxO]),
   }
