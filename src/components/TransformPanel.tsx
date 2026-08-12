@@ -37,6 +37,7 @@ export default function TransformPanel() {
   )
   const xkf: CustomKf = normKf(selLayer.xkf as Partial<CustomKf> | undefined)
   const kfOn = xkf.on
+  const sKeys = kfOn && kfChannelKeys(xkf, 's').length > 0
   const rKeys = kfOn && kfChannelKeys(xkf, 'r').length > 0
   const oKeys = kfOn && kfChannelKeys(xkf, 'o').length > 0
   const base: [number, number] = Array.isArray(selLayer.xbase)
@@ -78,6 +79,22 @@ export default function TransformPanel() {
           onCommit={commitEdit}
         />
       </div>
+
+      {/* 스케일 (%) — 키프레임 모드 전용 s 채널. 프리셋 모드는 위 '그래픽 크기(px)'가 담당 */}
+      {kfOn && (
+        <div className="knob">
+          <SliderRow
+            label={sKeys ? t('스케일 ({f}f 키)').replace('{f}', String(curFrame)) : t('스케일')}
+            min={0}
+            max={400}
+            step={1}
+            unit="%"
+            value={kfValueAt(xkf, 's', curFrame, 100) as number}
+            onLive={(v) => setKfChannelLive('s', curFrame, v)}
+            onCommit={commitEdit}
+          />
+        </div>
+      )}
 
       <div className="knob">
         <SliderRow
