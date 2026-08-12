@@ -8,7 +8,7 @@ import {
 import { durationSec, parseLottie, type LottieJson } from '../lib/lottieUtils'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
 import {
-  layerHalfOf, layerCenterOffsetOf, layerColor, tint, normKf, kfValueAt,
+  layerHalfOf, layerCenterOffsetOf, normKf, kfValueAt,
   kfChannelKeys, normSel, animSpans, kfFallbackValue,
   type CustomPayload, type CustomKf, type CustomSel, type KfChannel,
 } from '../lib/customBuilder'
@@ -867,11 +867,6 @@ export default function Preview() {
       .map((f) => ({ f, past: f < cur }))
   })()
 
-  // 주/보조 선택 박스 스트로크 = 레이어 라벨 컬러
-  const primaryColor =
-    sourceData?.layers[idxClamped] !== undefined
-      ? layerColor(sourceData.layers[idxClamped] as Record<string, unknown>, idxClamped)
-      : '#5B8DEF'
 
   // 호버 박스 — 선택될 레이어 미리 표시 (선택된 레이어와 같으면 생략)
   let hoverBox: { x: number; y: number; hw: number; hh: number } | null = null
@@ -1571,7 +1566,7 @@ export default function Preview() {
                               className={`drawghost__anchor ${penSel === i ? 'drawghost__anchor--sel' : ''}`}
                               cx={pp.p[0]}
                               cy={pp.p[1]}
-                              r={penSel === i ? 5 : 3.6}
+                              r={penSel === i ? 5 : 4}
                               data-i={i}
                               onPointerDown={grabEditKnob('anchor')}
                             />
@@ -1641,7 +1636,7 @@ export default function Preview() {
                               className={`drawghost__anchor ${i === 0 && penPts.length >= 3 ? 'drawghost__anchor--first' : ''} ${penSel === i ? 'drawghost__anchor--sel' : ''}`}
                               cx={pp.p[0]}
                               cy={pp.p[1]}
-                              r={penSel === i ? 5 : i === 0 && penPts.length >= 3 ? 5 : 3.6}
+                              r={penSel === i ? 5 : i === 0 && penPts.length >= 3 ? 5 : 4}
                               onPointerDown={grabKnob('anchor')}
                             />
                           </g>
@@ -1702,7 +1697,6 @@ export default function Preview() {
                         if (!b) return null
                         const [hw2, hh2] = layerHalfOf(sourceData!, i)
                         const [ox2, oy2] = layerCenterOffsetOf(sourceData!, i)
-                        const mc = layerColor(sourceData!.layers[i] as Record<string, unknown>, i)
                         return (
                           <div
                             key={`m${i}`}
@@ -1712,7 +1706,6 @@ export default function Preview() {
                               top: `${((b[1] + oy2 - hh2) / ch) * 100}%`,
                               width: `${((hw2 * 2) / cw) * 100}%`,
                               height: `${((hh2 * 2) / ch) * 100}%`,
-                              borderColor: mc,
                             }}
                           />
                         )
@@ -1725,8 +1718,6 @@ export default function Preview() {
                         top: `${((selBox.y - selBox.hh) / ch) * 100}%`,
                         width: `${((selBox.hw * 2) / cw) * 100}%`,
                         height: `${((selBox.hh * 2) / ch) * 100}%`,
-                        borderColor: primaryColor,
-                        boxShadow: `0 0 0 1px ${tint(primaryColor, 0.35)}`,
                       }}
                     >
                       {!handActive &&
@@ -1734,7 +1725,7 @@ export default function Preview() {
                           <div
                             key={c}
                             className={`selhandle selhandle--${c}`}
-                            style={{ transform: `scale(${1 / zoom})`, borderColor: primaryColor }}
+                            style={{ transform: `scale(${1 / zoom})` }}
                             onPointerDown={(e) => {
                               e.stopPropagation()
                               const rect = wrapRef.current?.getBoundingClientRect()

@@ -142,7 +142,7 @@ export default function GraphEditor({ onClose }: { onClose: () => void }) {
   const graph = useMemo(() => {
     if (!ch || !keys.length) return null
     const series: { color: string; d: string; dots: { x: number; y: number; t: number }[] }[] = []
-    const colors = dims === 2 ? ['#4f8ef7', '#b06ef7'] : ['#4f8ef7']
+    const colors = dims === 2 ? ['#3182f6', '#b06ef7'] : ['#3182f6'] // X=가이드 파랑, Y=보라
     for (let d = 0; d < dims; d++) {
       let path = ''
       const dots: { x: number; y: number; t: number }[] = []

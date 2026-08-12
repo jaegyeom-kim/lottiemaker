@@ -15,6 +15,10 @@
   --text: #e9eaee;
   --text-dim: #8b8f9a;
   --blue: #3182f6;
+  /* 캔버스/타임라인 가이드 공통 토큰 — 모든 선택·마키·핸들이 이 파랑 하나를 쓴다 */
+  --guide-fill: color-mix(in srgb, var(--blue) 12%, transparent);
+  --guide-dim: color-mix(in srgb, var(--blue) 45%, transparent);
+  --guide-soft: color-mix(in srgb, var(--blue) 65%, transparent);
   --blue-dim: #1b64d8;
   --red: #f04452;
   --radius: 12px;

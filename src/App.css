@@ -1351,8 +1351,8 @@ body.drag-cross * { cursor: crosshair !important; }
 /* 빈 곳 프레스 — 전체 레이어 영역 표시 */
 .allbox {
   position: absolute;
-  border: 1px dashed rgb(49 130 246 / 0.55);
-  background: rgb(49 130 246 / 0.06);
+  border: 1px dashed var(--guide-dim);
+  background: color-mix(in srgb, var(--blue) 6%, transparent);
   pointer-events: none;
   z-index: 2;
 }
@@ -1613,6 +1613,7 @@ body.drag-cross * { cursor: crosshair !important; }
 .selbox {
   position: absolute;
   border: 1px solid var(--blue);
+  box-shadow: 0 0 0 1px var(--guide-fill); /* 어두운 그림 위 가독 후광 */
   pointer-events: none;
   z-index: 3;
 }
@@ -1785,8 +1786,8 @@ body.drag-cross * { cursor: crosshair !important; }
 /* 캔버스 마키 다중 선택 박스 */
 .canvasmarquee {
   position: absolute;
-  border: 1px solid var(--blue);
-  background: rgb(51 128 245 / 0.12);
+  border: 1px dashed var(--blue);
+  background: var(--guide-fill);
   pointer-events: none;
   z-index: 4;
 }
@@ -1803,7 +1804,7 @@ body.drag-cross * { cursor: crosshair !important; }
 }
 
 .drawghost__shape {
-  fill: rgb(51 128 245 / 0.25);
+  fill: color-mix(in srgb, var(--blue) 25%, transparent);
   stroke: var(--blue);
   stroke-width: 1.2;
   vector-effect: non-scaling-stroke;
@@ -1829,7 +1830,7 @@ body.drag-cross * { cursor: crosshair !important; }
 .drawghost__hdot {
   fill: #fff;
   stroke: var(--blue);
-  stroke-width: 1;
+  stroke-width: 1.5;
   pointer-events: all;
   cursor: grab !important;
 }
@@ -1837,7 +1838,7 @@ body.drag-cross * { cursor: crosshair !important; }
 .drawghost__anchor {
   fill: #fff;
   stroke: var(--blue);
-  stroke-width: 1.4;
+  stroke-width: 1.5;
   pointer-events: all;
   cursor: grab !important;
 }
@@ -1888,7 +1889,7 @@ body.drag-cross * { cursor: crosshair !important; }
 /* 호버 하이라이트 박스 */
 .hoverbox {
   position: absolute;
-  border: 1px solid rgb(49 130 246 / 0.45);
+  border: 1px solid var(--guide-dim);
   pointer-events: none;
   z-index: 2;
 }
@@ -2460,7 +2461,7 @@ body.drag-cross * { cursor: crosshair !important; }
 .timeline__marquee {
   position: absolute;
   border: 1px dashed var(--blue);
-  background: rgb(49 130 246 / 0.12);
+  background: var(--guide-fill);
   pointer-events: none;
   z-index: 5;
 }
@@ -3017,8 +3018,8 @@ body.drag-cross * { cursor: crosshair !important; }
 
 /* 다중 선택 표시 */
 .selbox--multi {
-  border-style: dashed;
-  border-color: rgb(49 130 246 / 0.65);
+  /* 점선은 마키(진행 중 영역) 전용 — 다중 멤버는 흐린 실선 */
+  border-color: var(--guide-soft);
 }
 
 .layerrow--multi {
@@ -3778,8 +3779,8 @@ body.drag-cross * { cursor: crosshair !important; }
 }
 
 .gepanel__handle {
-  fill: #f5a623;
-  stroke: var(--bg);
+  fill: #fff;
+  stroke: var(--blue);
   stroke-width: 1.5;
   cursor: grab;
   touch-action: none;
@@ -3890,7 +3891,7 @@ body.drag-cross * { cursor: crosshair !important; }
 
 /* 그래프 에디터 마키 */
 .gepanel__marquee {
-  fill: rgb(49 130 246 / 0.12);
+  fill: var(--guide-fill);
   stroke: var(--blue);
   stroke-width: 1;
   stroke-dasharray: 4 3;
