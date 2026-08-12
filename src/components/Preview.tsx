@@ -826,26 +826,44 @@ export default function Preview() {
   // 선택 박스 — 드래그 중엔 커서 따라, 평소엔 선택 레이어 위치 (sourceData 구독으로 반응)
   // 프리뷰(재생) 중·선택 해제 상태에는 표시하지 않는다
   const hasSelection = customIdxs.length > 0
-  // 앵커 포인트 툴 — 드래그로 xsel.anchor 이동 (그래픽 제자리, withCustomAnchor가 보정)
-  const anchorDrag = useRef(false)
-  const applyAnchorDrag = (pt: [number, number]) => {
+  // 앵커 포인트 툴 — 위치(p)는 고정, 앵커 분율만 변경 (그래픽이 이동).
+  // 드래그 시작 시 그래픽 프레임(중심·크기·회전)을 고정해 매핑이 흔들리지 않게.
+  const anchorDrag = useRef<{
+    cx: number
+    cy: number
+    gw: number
+    gh: number
+    rot: number
+  } | null>(null)
+  const beginAnchorDrag = (): boolean => {
     const st = useEditor.getState()
-    if (!st.sourceData?.layers.length) return
+    if (!st.sourceData?.layers.length) return false
     const li = Math.min(st.customIdx, st.sourceData.layers.length - 1)
     const layer = st.sourceData.layers[li] as Record<string, unknown>
-    if (layer.xlock === true) return
+    if (layer.xlock === true) return false
     const xsel = normSel(layer.xsel as Partial<CustomSel> | undefined, st.sourceData.op)
     const base = layerBaseOf(st.sourceData, li, Math.round(frameRef.current))
     const [hw, hh] = layerHalfOf(st.sourceData, li)
-    if (!base || hw < 0.5 || hh < 0.5) return
-    // 앵커 월드 = base — 커서와의 차를 무회전 로컬로 돌려 분율 증분
-    const rot = ((xsel.rotation ?? 0) * Math.PI) / 180
-    const dx = pt[0] - base[0]
-    const dy = pt[1] - base[1]
-    const lx = dx * Math.cos(-rot) - dy * Math.sin(-rot)
-    const ly = dx * Math.sin(-rot) + dy * Math.cos(-rot)
-    const [ax, ay] = xsel.anchor ?? [0.5, 0.5]
-    st.setCustomAnchorLive(ax + lx / (hw * 2), ay + ly / (hh * 2))
+    const [ox, oy] = layerCenterOffsetOf(st.sourceData, li)
+    if (!base || hw < 0.5 || hh < 0.5) return false
+    anchorDrag.current = {
+      cx: base[0] + ox,
+      cy: base[1] + oy,
+      gw: hw * 2,
+      gh: hh * 2,
+      rot: ((xsel.rotation ?? 0) * Math.PI) / 180,
+    }
+    return true
+  }
+  const applyAnchorDrag = (pt: [number, number]) => {
+    const d = anchorDrag.current
+    if (!d) return
+    // 드래그 시작 시점 그래픽 프레임 기준 — 커서가 가리키는 지점을 새 앵커 분율로
+    const dx = pt[0] - d.cx
+    const dy = pt[1] - d.cy
+    const lx = dx * Math.cos(-d.rot) - dy * Math.sin(-d.rot)
+    const ly = dx * Math.sin(-d.rot) + dy * Math.cos(-d.rot)
+    useEditor.getState().setCustomAnchorOnlyLive(0.5 + lx / d.gw, 0.5 + ly / d.gh)
   }
 
   let anchorPt: [number, number] | null = null
@@ -1166,7 +1184,7 @@ export default function Preview() {
               if (hit === null) return
               setCustomIdx(hit)
             }
-            anchorDrag.current = true
+            if (!beginAnchorDrag()) return
             applyAnchorDrag(pt)
             ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
             return
@@ -1348,7 +1366,7 @@ export default function Preview() {
         }}
         onPointerUp={() => {
           if (anchorDrag.current) {
-            anchorDrag.current = false
+            anchorDrag.current = null
             useEditor.getState().commitEdit()
             return
           }
@@ -1403,7 +1421,7 @@ export default function Preview() {
         }}
         onPointerCancel={() => {
           if (anchorDrag.current) {
-            anchorDrag.current = false
+            anchorDrag.current = null
             useEditor.getState().commitEdit()
           }
           setDrawDrag(null)
@@ -1448,7 +1466,7 @@ export default function Preview() {
               [
                 { id: 'move', glyph: <CursorIcon />, tip: '이동 툴 (V)' },
                 { id: 'hand', glyph: <HandIcon />, tip: '핸드 툴 (H)' },
-                { id: 'anchor', glyph: <AnchorTargetIcon />, tip: '앵커 포인트 툴 (Y) — 드래그로 회전·스케일 피벗 이동 (그래픽은 제자리)' },
+                { id: 'anchor', glyph: <AnchorTargetIcon />, tip: '앵커 포인트 툴 (Y) — 드래그한 지점이 새 피벗 (위치 값은 그대로, 그래픽이 이동)' },
                 { id: 'sep1', glyph: null, tip: '' },
                 { id: 'rect', glyph: <SquareIcon />, tip: '사각형 (Q 순환) — 드래그로 그리기 · ⇧ 정사각형' },
                 { id: 'ellipse', glyph: <CircleIcon />, tip: '원 (Q 순환) — 드래그로 그리기 · ⇧ 정원' },

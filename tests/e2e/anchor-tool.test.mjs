@@ -31,37 +31,39 @@ const boxBefore = await page.$eval('.selbox', (e) => {
   return { x: r.x, y: r.y, w: r.width }
 })
 
-// 앵커를 좌상 방향으로 드래그 (base → base-100,-60)
-await page.mouse.move(...tc(base0[0], base0[1]))
+// 그래픽 좌상단 지점(분율 0.25, 0.25)을 새 앵커로 드래그
+const boxB = await page.$eval('.selbox', (e) => {
+  const r = e.getBoundingClientRect()
+  return { x: r.x, y: r.y, w: r.width, h: r.height }
+})
+await page.mouse.move(boxB.x + boxB.w / 2, boxB.y + boxB.h / 2)
 await page.mouse.down()
-await page.mouse.move(...tc(base0[0] - 100, base0[1] - 60), { steps: 6 })
+await page.mouse.move(boxB.x + boxB.w * 0.25, boxB.y + boxB.h * 0.25, { steps: 6 })
 await page.mouse.up()
 await page.waitForTimeout(1300)
 
 const after = await sessionSource(page)
 const l1 = after.layers[0]
+// 핵심: 위치 값(xbase)은 그대로
 ok(
-  Math.abs(l1.xbase[0] - (base0[0] - 100)) < 3 && Math.abs(l1.xbase[1] - (base0[1] - 60)) < 3,
-  `앵커 월드가 커서 위치로 (${l1.xbase.map((v) => v.toFixed(1))})`,
+  Math.abs(l1.xbase[0] - base0[0]) < 0.5 && Math.abs(l1.xbase[1] - base0[1]) < 0.5,
+  `위치 값 불변 (${l1.xbase.map((v) => v.toFixed(1))})`,
 )
 const [ax, ay] = l1.xsel.anchor
-ok(ax < 0.5 && ay < 0.5, `anchor 분율 감소 (${ax.toFixed(2)}, ${ay.toFixed(2)})`)
-// 그래픽은 제자리 — 선택 박스 화면 위치 불변
+ok(Math.abs(ax - 0.25) < 0.06 && Math.abs(ay - 0.25) < 0.06, `anchor 분율 = 드래그 지점 (${ax.toFixed(2)}, ${ay.toFixed(2)})`)
+// 그래픽은 이동 — 앵커 지점이 고정 위치(base)로 오도록
 const boxAfter = await page.$eval('.selbox', (e) => {
   const r = e.getBoundingClientRect()
   return { x: r.x, y: r.y, w: r.width }
 })
-ok(
-  Math.abs(boxAfter.x - boxBefore.x) < 2 && Math.abs(boxAfter.y - boxBefore.y) < 2,
-  `그래픽 제자리 (박스 Δ=${(boxAfter.x - boxBefore.x).toFixed(1)},${(boxAfter.y - boxBefore.y).toFixed(1)})`,
-)
-// 마커가 새 앵커 위치로 이동
+ok(Math.abs(boxAfter.x - boxBefore.x) > 10, `그래픽 이동 (박스 Δx=${(boxAfter.x - boxBefore.x).toFixed(1)})`)
+// 마커는 고정 위치(base)에 그대로
 const mk = await page.$eval('.anchorpoint', (e) => {
   const r = e.getBoundingClientRect()
   return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
 })
-const [ex, ey] = tc(l1.xbase[0], l1.xbase[1])
-ok(Math.hypot(mk.x - ex, mk.y - ey) < 4, `마커 = 앵커 위치 (Δ${Math.hypot(mk.x - ex, mk.y - ey).toFixed(1)}px)`)
+const [ex, ey] = tc(base0[0], base0[1])
+ok(Math.hypot(mk.x - ex, mk.y - ey) < 4, `마커 = 고정 위치 유지 (Δ${Math.hypot(mk.x - ex, mk.y - ey).toFixed(1)}px)`)
 // V 복귀 시 마커는 남고 드래그 모드 해제
 await page.keyboard.press('v')
 await page.waitForTimeout(200)
@@ -71,5 +73,8 @@ ok((await page.locator('.anchorpoint').count()) === 1, '마커는 유지 (정보
 await page.keyboard.press('Meta+z')
 await page.waitForTimeout(1300)
 const undone = await sessionSource(page)
-ok(Math.abs(undone.layers[0].xbase[0] - base0[0]) < 0.5, '⌘Z → 앵커 복원')
+ok(
+  Math.abs((undone.layers[0].xsel.anchor?.[0] ?? 0.5) - 0.5) < 0.01,
+  `⌘Z → 앵커 복원 (${undone.layers[0].xsel.anchor})`,
+)
 await done(browser)

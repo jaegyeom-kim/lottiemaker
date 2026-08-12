@@ -242,6 +242,8 @@ interface EditorState {
   setCustomAnchor: (fx: number, fy: number) => void
   /** 라이브 버전 — 드래그 패드용, commitEdit로 확정. */
   setCustomAnchorLive: (fx: number, fy: number) => void
+  /** 앵커 툴 전용 — 위치(p)는 고정, 앵커만 변경 (그래픽이 이동). */
+  setCustomAnchorOnlyLive: (fx: number, fy: number) => void
 
   // ── 키프레임 모드 (AE 사용자용) — 선택 레이어의 xkf 편집
   /** 재생헤드 파킹 프레임 — 키프레임 모드 자동 키가 찍히는 시각. 히스토리 없음. */
@@ -526,6 +528,7 @@ export const useEditor = create<EditorState>((set, get) => {
     st: EditorState,
     fx: number,
     fy: number,
+    keepGraphic = true, // true = 위치 보정으로 그래픽 제자리(팬비하인드) / false = 위치 고정, 그래픽 이동
   ): Pick<EditorState, 'animationData' | 'sourceData' | 'colorGroups'> | null => {
     const { sourceData, templateKnobs, knobValues, customIdx } = st
     if (!sourceData) return null
@@ -553,14 +556,16 @@ export const useEditor = create<EditorState>((set, get) => {
     }
     const oldA = ((ks.a as { k?: number[] })?.k as number[]) ?? [0, 0, 0]
     const xsel = { ...DEFAULT_SEL, ...((layer.xsel as Partial<CustomSel>) ?? {}) }
-    // 팬비하인드 — 앵커 이동분에 정착 회전 반영해 포지션 보정 (스케일은 항상 100으로 정착)
-    const rad = ((xsel.rotation ?? 0) * Math.PI) / 180
-    const da = [newA[0] - oldA[0], newA[1] - oldA[1]]
-    const dx = da[0] * Math.cos(rad) - da[1] * Math.sin(rad)
-    const dy = da[0] * Math.sin(rad) + da[1] * Math.cos(rad)
     ks.a = { a: 0, k: newA }
-    // 포지션 보정 — shiftLayer가 ks.p·xbase·xkf.p를 한 번에 (공유 배열 가드 포함)
-    shiftLayer(layer, dx, dy)
+    if (keepGraphic) {
+      // 팬비하인드 — 앵커 이동분에 정착 회전 반영해 포지션 보정 (스케일은 항상 100으로 정착)
+      const rad = ((xsel.rotation ?? 0) * Math.PI) / 180
+      const da = [newA[0] - oldA[0], newA[1] - oldA[1]]
+      const dx = da[0] * Math.cos(rad) - da[1] * Math.sin(rad)
+      const dy = da[0] * Math.sin(rad) + da[1] * Math.cos(rad)
+      // 포지션 보정 — shiftLayer가 ks.p·xbase·xkf.p를 한 번에 (공유 배열 가드 포함)
+      shiftLayer(layer, dx, dy)
+    }
     layer.xsel = { ...xsel, anchor: [fx, fy] }
     const applied = applyKnobs(src, templateKnobs, knobValues)
     return { animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) }
@@ -1895,6 +1900,13 @@ export const useEditor = create<EditorState>((set, get) => {
     setCustomAnchor: (fx, fy) => {
       const next = withCustomAnchor(get(), fx, fy)
       if (next) push(next)
+    },
+
+    setCustomAnchorOnlyLive: (fx, fy) => {
+      const st = get()
+      const next = withCustomAnchor(st, fx, fy, false)
+      if (!next) return
+      set({ ...next, editBaseline: st.editBaseline ?? snap(), future: [] })
     },
 
     setCustomAnchorLive: (fx, fy) => {
