@@ -8,7 +8,7 @@ import {
 import { durationSec, parseLottie, type LottieJson } from '../lib/lottieUtils'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
 import {
-  layerHalfOf, layerCenterOffsetOf, normKf, kfValueAt,
+  layerHalfOf, layerCenterOffsetOf, layerAabbOf, normKf, kfValueAt,
   kfChannelKeys, normSel, animSpans, kfFallbackValue,
   type CustomPayload, type CustomKf, type CustomSel, type KfChannel,
 } from '../lib/customBuilder'
@@ -855,9 +855,8 @@ export default function Preview() {
     const i = Math.min(customIdx, sourceData.layers.length - 1)
     const b = layerBaseOf(sourceData, i, Math.round(frame))
     if (b) {
-      const [hw, hh] = layerHalfOf(sourceData, i, Math.round(frame))
-      const [ox, oy] = layerCenterOffsetOf(sourceData, i, Math.round(frame))
-      selBox = { x: b[0] + ox, y: b[1] + oy, hw, hh }
+      const { half, offset } = layerAabbOf(sourceData, i, Math.round(frame))
+      selBox = { x: b[0] + offset[0], y: b[1] + offset[1], hw: half[0], hh: half[1] }
       anchorPt = b // 앵커 월드 좌표 = 레이어 포지션
     }
   }
@@ -906,9 +905,8 @@ export default function Preview() {
   ) {
     const b = layerBaseOf(sourceData, hoverIdx, Math.round(frame))
     if (b) {
-      const [hw, hh] = layerHalfOf(sourceData, hoverIdx)
-      const [ox, oy] = layerCenterOffsetOf(sourceData, hoverIdx)
-      hoverBox = { x: b[0] + ox, y: b[1] + oy, hw, hh }
+      const { half, offset } = layerAabbOf(sourceData, hoverIdx, Math.round(frame))
+      hoverBox = { x: b[0] + offset[0], y: b[1] + offset[1], hw: half[0], hh: half[1] }
     }
   }
 
@@ -939,9 +937,9 @@ export default function Preview() {
       if (anySolo && lr?.xsolo !== true) continue
       const b = layerBase(i)
       if (!b || !s.sourceData) continue
-      const [hw, hh] = layerHalf(i)
-      const [ox, oy] = layerCenterOffsetOf(s.sourceData, i, Math.round(frameRef.current))
-      if (Math.abs(px - b[0] - ox) <= hw && Math.abs(py - b[1] - oy) <= hh) hits.push(i)
+      const { half, offset } = layerAabbOf(s.sourceData, i, Math.round(frameRef.current))
+      if (Math.abs(px - b[0] - offset[0]) <= half[0] && Math.abs(py - b[1] - offset[1]) <= half[1])
+        hits.push(i)
     }
     return hits
   }
@@ -1756,8 +1754,7 @@ export default function Preview() {
                       .map((i) => {
                         const b = layerBaseOf(sourceData!, i, Math.round(frame))
                         if (!b) return null
-                        const [hw2, hh2] = layerHalfOf(sourceData!, i, Math.round(frame))
-                        const [ox2, oy2] = layerCenterOffsetOf(sourceData!, i, Math.round(frame))
+                        const { half: [hw2, hh2], offset: [ox2, oy2] } = layerAabbOf(sourceData!, i, Math.round(frame))
                         return (
                           <div
                             key={`m${i}`}

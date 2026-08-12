@@ -686,6 +686,14 @@ export function extractTrimToKf(layer: Record<string, unknown>): boolean {
 export function layerScaleOf(doc: LottieJson, i: number, frame?: number): number {
   const layer = doc.layers[i] as Record<string, unknown> | undefined
   if (!layer) return 1
+  // 정적 ks.s가 진실 소스 — 임포트된 씬 래퍼처럼 xsel 밖에서 온 스케일 포함
+  // (xkf/프리셋 재구축 레이어의 정적 ks.s도 xsel.scale과 일치하므로 안전)
+  const ksS = (layer.ks as Record<string, unknown> | undefined)?.s as
+    | { a?: number; k?: number[] | number }
+    | undefined
+  if (ksS && ksS.a === 0 && Array.isArray(ksS.k))
+    return Math.max(0.01, (Number(ksS.k[0]) || 100) / 100)
+  // 애니메이션 중(a:1) — xkf s 채널(프레임 보간) 또는 정착값
   const xsel = normSel(layer.xsel as Partial<CustomSel> | undefined, doc.op)
   const xkf = normKf(layer.xkf as Partial<CustomKf> | undefined)
   const v =
@@ -693,6 +701,44 @@ export function layerScaleOf(doc: LottieJson, i: number, frame?: number): number
       ? (kfValueAt(xkf, 's', frame, xsel.scale ?? 100) as number)
       : (xsel.scale ?? 100)
   return Math.max(0.01, v / 100)
+}
+
+/** 정착 회전(도) — 정적 ks.r 우선, 애니메이션 중엔 xkf r 채널/xsel. layerScaleOf와 같은 규칙. */
+export function layerRotationOf(doc: LottieJson, i: number, frame?: number): number {
+  const layer = doc.layers[i] as Record<string, unknown> | undefined
+  if (!layer) return 0
+  const ksR = (layer.ks as Record<string, unknown> | undefined)?.r as
+    | { a?: number; k?: number }
+    | undefined
+  if (ksR && ksR.a === 0 && typeof ksR.k === 'number') return ksR.k
+  const xsel = normSel(layer.xsel as Partial<CustomSel> | undefined, doc.op)
+  const xkf = normKf(layer.xkf as Partial<CustomKf> | undefined)
+  return xkf.on && frame !== undefined
+    ? (kfValueAt(xkf, 'r', frame, xsel.rotation ?? 0) as number)
+    : (xsel.rotation ?? 0)
+}
+
+/**
+ * 화면(축 정렬) 바운딩 박스 — 회전 반영 AABB 절반 + 중심 오프셋.
+ * 셀렉션 박스/호버/히트테스트용. 앵커 분율 수학은 무회전 layerHalfOf를 쓸 것.
+ */
+export function layerAabbOf(
+  doc: LottieJson,
+  i: number,
+  frame?: number,
+): { half: [number, number]; offset: [number, number] } {
+  const [hw, hh] = layerHalfOf(doc, i, frame)
+  const [ox, oy] = layerCenterOffsetOf(doc, i, frame)
+  const deg = layerRotationOf(doc, i, frame)
+  if (Math.abs(deg % 360) < 0.01) return { half: [hw, hh], offset: [ox, oy] }
+  const r = (deg * Math.PI) / 180
+  const c = Math.cos(r)
+  const sn = Math.sin(r)
+  return {
+    half: [Math.abs(hw * c) + Math.abs(hh * sn), Math.abs(hw * sn) + Math.abs(hh * c)],
+    // 중심 오프셋 벡터도 회전 — 앵커가 중심이 아니면 회전 시 중심이 원호를 돈다
+    offset: [ox * c - oy * sn, ox * sn + oy * c],
+  }
 }
 
 export function layerHalfOf(doc: LottieJson, i: number, frame?: number): [number, number] {

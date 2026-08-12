@@ -493,12 +493,19 @@ export const useEditor = create<EditorState>((set, get) => {
       const bboxMax = group?.bboxMax as number | undefined
       if (group && bboxMax) {
         const tr = (group.it as Record<string, unknown>[]).find((i) => i.ty === 'tr')
+        const oldSc = ((tr?.s as { k: number[] } | undefined)?.k?.[0] ?? 100) / 100
         if (tr) (tr.s as { k: number[] }).k = [(px / bboxMax) * 100, (px / bboxMax) * 100]
+        const newSc = px / bboxMax
         // 앵커 오프셋도 비례 스케일 — 비율 유지
         const prev = ((layer.xsel as CustomSel | undefined)?.size ?? 240)
         const ak = ((layer.ks as Record<string, unknown>).a as { k: number[] }).k
         ak[0] = (ak[0] * px) / prev
         ak[1] = (ak[1] * px) / prev
+        // 펜 편집 중심 오프셋(bboxCx/Cy)은 그룹 스케일 곱으로 저장돼 있음 — 재스케일
+        if (oldSc > 0 && typeof group.bboxCx === 'number') {
+          group.bboxCx = (group.bboxCx as number) * (newSc / oldSc)
+          group.bboxCy = (Number(group.bboxCy) || 0) * (newSc / oldSc)
+        }
       }
     }
     const xsel = { ...DEFAULT_SEL, ...((layer.xsel as Partial<CustomSel>) ?? {}) }
