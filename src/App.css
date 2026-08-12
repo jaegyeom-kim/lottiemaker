@@ -2408,13 +2408,14 @@ body.drag-cross * { cursor: crosshair !important; }
   width: 9px;
   height: 9px;
   margin: -4.5px 0 0 -4.5px;
+  /* 플레이헤드(10)보다 위 — 라인과 겹친 키도 클릭/더블클릭 가능해야 한다 */
+  z-index: 11;
   background: #fff;
   border: 1px solid rgb(0 0 0 / 0.4);
   border-radius: 1.5px;
   transform: rotate(45deg);
   cursor: ew-resize;
   touch-action: none;
-  z-index: 2;
 }
 
 .timeline__kf:hover {
