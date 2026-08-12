@@ -1773,14 +1773,26 @@ export default function Preview() {
                       })}
                   {/* 앵커 포인트 마커 (⊕) — 바운딩박스와 함께, 앵커 툴에서 드래그 대상 표시 */}
                   {anchorPt && !dragBox && (
-                    <div
+                    <svg
                       className={`anchorpoint ${tool === 'anchor' ? 'anchorpoint--active' : ''}`}
+                      viewBox="0 0 24 24"
                       style={{
                         left: `${(anchorPt[0] / cw) * 100}%`,
                         top: `${(anchorPt[1] / ch) * 100}%`,
                         transform: `translate(-50%, -50%) scale(${1 / zoom})`,
                       }}
-                    />
+                    >
+                      {/* 흰 케이싱(할로) — 어떤 배경에서도 링·십자가 분리돼 보이게 */}
+                      <g className="anchorpoint__halo">
+                        <circle cx="12" cy="12" r="6" />
+                        <path d="M12 1v5M12 18v5M1 12h5M18 12h5" />
+                      </g>
+                      <g className="anchorpoint__ink">
+                        <circle cx="12" cy="12" r="6" />
+                        <path d="M12 1v5M12 18v5M1 12h5M18 12h5" />
+                      </g>
+                      <circle className="anchorpoint__dot" cx="12" cy="12" r="2" />
+                    </svg>
                   )}
                   {selBox && (
                     <div
