@@ -3,6 +3,7 @@ import { templates, categories, type TemplateDef } from '../templates'
 import { useEditor, loadSavedSession } from '../store'
 import type { LottieJson } from '../lib/lottieUtils'
 import { durationKnob } from '../lib/lottieKnobs'
+import { t } from '../lib/i18n'
 import LottiePlayer from './LottiePlayer'
 import CustomBuilder from './CustomBuilder'
 
@@ -92,13 +93,13 @@ export default function TemplateGallery() {
             style={{ marginBottom: 8 }}
             onClick={() => useEditor.getState().restoreSession(savedTpl)}
           >
-            이전 템플릿 작업 이어하기
+            {t('이전 템플릿 작업 이어하기')}
           </button>
         )}
         <input
           className="gallery__search"
           type="search"
-          placeholder="템플릿 검색"
+          placeholder={t('템플릿 검색')}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -107,14 +108,14 @@ export default function TemplateGallery() {
             className={`chip ${category === 'all' ? 'chip--on' : ''}`}
             onClick={() => setCategory('all')}
           >
-            전체
+            {t('전체')}
           </button>
           {favs.length > 0 && (
             <button
               className={`chip ${category === 'fav' ? 'chip--on' : ''}`}
               onClick={() => setCategory('fav')}
             >
-              ★ 즐겨찾기
+              {t('★ 즐겨찾기')}
             </button>
           )}
           {recents.length > 0 && (
@@ -122,7 +123,7 @@ export default function TemplateGallery() {
               className={`chip ${category === 'recent' ? 'chip--on' : ''}`}
               onClick={() => setCategory('recent')}
             >
-              최근
+              {t('최근')}
             </button>
           )}
           {categories.map((c) => (
@@ -131,7 +132,7 @@ export default function TemplateGallery() {
               className={`chip ${category === c.id ? 'chip--on' : ''}`}
               onClick={() => setCategory(c.id)}
             >
-              {c.label}
+              {t(c.label)}
             </button>
           ))}
         </div>
@@ -148,7 +149,7 @@ export default function TemplateGallery() {
           />
         ))}
         {list.length === 0 && (
-          <p className="gallery__none">"{query}"에 맞는 템플릿이 없어요.</p>
+          <p className="gallery__none">{t('"{q}"에 맞는 템플릿이 없어요.').replace('{q}', query)}</p>
         )}
       </div>
     </aside>
@@ -165,13 +166,13 @@ function SideTabs() {
         className={`opttab ${mode === 'template' ? 'opttab--on' : ''}`}
         onClick={() => setMode('template')}
       >
-        템플릿
+        {t('템플릿')}
       </button>
       <button
         className={`opttab ${mode === 'custom' ? 'opttab--on' : ''}`}
         onClick={() => setMode('custom')}
       >
-        커스텀
+        {t('커스텀')}
       </button>
     </div>
   )
@@ -200,7 +201,11 @@ function Tile({
       onClick={() => onPick(template)}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      title={current ? `${template.label} (현재 열려 있음)` : template.label}
+      title={
+        current
+          ? t('{label} (현재 열려 있음)').replace('{label}', t(template.label))
+          : t(template.label)
+      }
     >
       <LottiePlayer
         data={template.data}
@@ -208,12 +213,12 @@ function Tile({
         seekFrame={hover ? null : poster}
         className="tile__anim"
       />
-      <span className="tile__label">{template.label}</span>
+      <span className="tile__label">{t(template.label)}</span>
       {/* 즐겨찾기 별 — 호버 또는 이미 즐겨찾기일 때만 표시 */}
       {(hover || fav) && onToggleFav && (
         <span
           className={`tile__fav ${fav ? 'tile__fav--on' : ''}`}
-          title={fav ? '즐겨찾기 해제' : '즐겨찾기'}
+          title={fav ? t('즐겨찾기 해제') : t('즐겨찾기')}
           onClick={(e) => {
             e.stopPropagation()
             onToggleFav(template.id)

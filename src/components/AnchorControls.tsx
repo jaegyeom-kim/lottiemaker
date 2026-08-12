@@ -1,4 +1,5 @@
 import { useEditor } from '../store'
+import { t } from '../lib/i18n'
 import { normSel, type CustomSel } from '../lib/customBuilder'
 import AnchorPad from './AnchorPad'
 
@@ -26,7 +27,7 @@ export default function AnchorControls() {
   return (
     <div>
       <div className="knob__head">
-        <span className="knob__name">앵커 포인트</span>
+        <span className="knob__name">{t('앵커 포인트')}</span>
         <span className="knob__unit">
           {Math.round(anchor[0] * 100)}% · {Math.round(anchor[1] * 100)}%
         </span>
@@ -58,11 +59,11 @@ export default function AnchorControls() {
               maxH={116}
             />
           ) : (
-            <span className="anchorcell__empty">◇<br />SVG는 그리드로</span>
+            <span className="anchorcell__empty">◇<br />{t('SVG는 그리드로')}</span>
           )}
         </div>
       </div>
-      <p className="knob__note">그래픽은 제자리 — 회전·스케일 피벗만 바뀝니다.</p>
+      <p className="knob__note">{t('그래픽은 제자리 — 회전·스케일 피벗만 바뀝니다.')}</p>
     </div>
   )
 }

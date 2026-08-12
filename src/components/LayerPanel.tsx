@@ -1,5 +1,7 @@
 import { useRef, useState } from 'react'
 import { useEditor } from '../store'
+import { t } from '../lib/i18n'
+import { EyeIcon, EyeOffIcon, CopyIcon, TrashIcon } from './icons'
 import { getLayers } from '../lib/lottieUtils'
 import { layerColor } from '../lib/customBuilder'
 
@@ -18,16 +20,15 @@ function SimpleLayerPanel() {
 
   return (
     <div className="panel__section">
-      <h3 className="panel__label">레이어</h3>
       <ul className="layers">
         {layers.map((l) => (
           <li key={l.index} className={`layers__item ${l.hidden ? 'layers__item--off' : ''}`}>
             <button
               className="layers__eye"
               onClick={() => toggleLayer(l.index)}
-              title={l.hidden ? '보이기' : '숨기기'}
+              title={l.hidden ? t('보이기') : t('숨기기')}
             >
-              {l.hidden ? '◌' : '●'}
+              {l.hidden ? <EyeOffIcon /> : <EyeIcon />}
             </button>
             <span className="layers__name">{l.name}</span>
           </li>
@@ -40,7 +41,7 @@ function SimpleLayerPanel() {
 /** 커스텀 빌더용 레이어 패널 — 햄버거(≡) 홀드 드래그로 순서 변경. */
 function CustomLayerPanel() {
   const {
-    toggleLayer, setCustomIdx, toggleCustomSel, duplicateCustomLayer, removeCustomLayer,
+    toggleLayerHide, setCustomIdx, toggleCustomSel, setCustomSelList, duplicateCustomLayer, removeCustomLayer,
     renameCustomLayer, reorderCustomLayer,
   } = useEditor()
   const sourceData = useEditor((s) => s.sourceData)
@@ -65,7 +66,6 @@ function CustomLayerPanel() {
 
   return (
     <div className="panel__section">
-      <h3 className="panel__label">레이어</h3>
       <div className="layerlist">
         {layers.map((l, i) => {
           const lr = l as Record<string, unknown> & { nm?: string; hd?: boolean }
@@ -85,8 +85,13 @@ function CustomLayerPanel() {
                 insertAfter ? 'layerrow--insafter' : '',
               ].join(' ')}
               onClick={(e) => {
-                // Shift/⌘ = 다중 선택 토글
-                if (e.shiftKey || e.metaKey || e.ctrlKey) toggleCustomSel(i)
+                // ⇧ = 범위 선택 (주 선택 → 클릭한 행), ⌘ = 개별 토글
+                if (e.shiftKey) {
+                  const anchor = useEditor.getState().customIdx
+                  const [a, b] = anchor <= i ? [anchor, i] : [i, anchor]
+                  const range = Array.from({ length: b - a + 1 }, (_, n) => a + n)
+                  setCustomSelList(range)
+                } else if (e.metaKey || e.ctrlKey) toggleCustomSel(i)
                 else setCustomIdx(i)
               }}
             >
@@ -118,50 +123,50 @@ function CustomLayerPanel() {
               ) : (
                 <span
                   className="layerrow__name"
-                  title="더블클릭: 이름 변경"
+                  title={t('더블클릭: 이름 변경')}
                   onDoubleClick={(e) => {
                     e.stopPropagation()
                     setEditingIdx(i)
                     setNameDraft(String(lr.nm ?? ''))
                   }}
                 >
-                  {lr.nm ?? `레이어 ${i + 1}`}
+                  {lr.nm ?? t('레이어 {n}').replace('{n}', String(i + 1))}
                 </span>
               )}
               <button
                 className={`layerrow__btn ${lr.hd ? 'layerrow__btn--off' : ''}`}
-                title="표시/숨김"
+                title={t('표시/숨김')}
                 onClick={(e) => {
                   e.stopPropagation()
-                  toggleLayer(i)
+                  toggleLayerHide(i)
                 }}
               >
-                {lr.hd ? '◌' : '●'}
+                {lr.hd ? <EyeOffIcon /> : <EyeIcon />}
               </button>
               <button
                 className="layerrow__btn"
-                title="복제 (⌘D)"
+                title={t('복제 (⌘D)')}
                 onClick={(e) => {
                   e.stopPropagation()
                   duplicateCustomLayer(i)
                 }}
               >
-                ⧉
+                <CopyIcon />
               </button>
               <button
                 className="layerrow__del"
-                title="레이어 삭제 (Delete)"
+                title={t('레이어 삭제 (Delete)')}
                 onClick={(e) => {
                   e.stopPropagation()
                   removeCustomLayer(i)
                 }}
               >
-                ×
+                <TrashIcon />
               </button>
               {/* 햄버거 핸들 — 누른 채로 끌면 순서 변경 */}
               <button
                 className="layerrow__grip"
-                title="드래그로 순서 변경"
+                title={t('드래그로 순서 변경')}
                 onClick={(e) => e.stopPropagation()}
                 onPointerDown={(e) => {
                   e.stopPropagation()
@@ -205,7 +210,7 @@ function CustomLayerPanel() {
           )
         })}
       </div>
-      <p className="panel__hint">≡를 누른 채 끌면 순서가 바뀝니다 (위 = 앞).</p>
+      <p className="panel__hint">{t('≡를 누른 채 끌면 순서가 바뀝니다 (위 = 앞).')}</p>
     </div>
   )
 }

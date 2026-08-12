@@ -1638,6 +1638,232 @@ body.drag-cross * { cursor: crosshair !important; }
   z-index: 6;
 }
 
+/* 드로잉 툴바 — Figma UI3 하단 중앙 플로팅 필 */
+.drawbar {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: rgb(30 30 36 / 0.94);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 4px;
+  z-index: 6;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.25);
+}
+
+.drawbar__btn {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  line-height: 1;
+  border-radius: 8px;
+  color: #cfd2da;
+}
+
+.drawbar__btn:hover {
+  background: rgb(255 255 255 / 0.08);
+  color: #fff;
+}
+
+.drawbar__btn--on {
+  background: var(--blue);
+  color: #fff;
+}
+
+.drawbar__sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--line);
+}
+
+/* 드로잉 중 — 크로스헤어 + 레이어 히트박스 무력화 */
+.preview__canvas--draw,
+.preview__canvas--draw .preview__lottiewrap,
+.preview__canvas--draw .preview__lottiewrap * {
+  cursor: crosshair !important;
+}
+
+.preview__canvas--draw .hoverbox,
+.preview__canvas--draw .selbox,
+.preview__canvas--draw .allbox {
+  pointer-events: none !important;
+  opacity: 0.3;
+}
+
+/* 리사이즈 핸들·앵커 버튼도 드로잉 중엔 무력화 — 고스트 앵커/핸들을 가리지 않게 */
+.preview__canvas--draw .selhandle,
+.preview__canvas--draw .anchorbtn {
+  pointer-events: none !important;
+  opacity: 0;
+}
+
+/* 씬 탭 — 타임라인 위 컴포지션 전환 스트립 (LottieFiles Creator 방식) */
+.scenetabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 10px 0;
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.scenetab {
+  padding: 4px 12px;
+  font-size: 12px;
+  border-radius: 8px 8px 0 0;
+  color: var(--text-dim);
+  white-space: nowrap;
+  border: 1px solid transparent;
+  border-bottom: none;
+}
+
+.scenetab:hover {
+  color: var(--text);
+  background: var(--bg-raise2);
+}
+
+.scenetab--on {
+  color: var(--text);
+  background: var(--bg-raise);
+  border-color: var(--line);
+  font-weight: 600;
+}
+
+.grouphead__sub {
+  margin-left: 6px;
+  font-weight: 500;
+  font-size: 10.5px;
+  color: var(--text-dim);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: bottom;
+}
+
+/* 레이어명 + 우측 트월 */
+.timeline__lname {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.timeline__twirl--end {
+  margin-left: auto;
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* 씬 트리 행 (AE 프리컴프 펼침) */
+.timeline__label--scene {
+  cursor: pointer;
+  color: var(--text-dim);
+}
+
+.timeline__label--scene:hover {
+  color: var(--text);
+}
+
+.colordot--sm {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+}
+
+.timeline__track--scene {
+  background: none;
+}
+
+.timeline__subclip {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  min-width: 4px;
+}
+
+.timeline__subclip:hover {
+  filter: brightness(1.15);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.5);
+}
+
+/* 캔버스 마키 다중 선택 박스 */
+.canvasmarquee {
+  position: absolute;
+  border: 1px solid var(--blue);
+  background: rgb(51 128 245 / 0.12);
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* 드로잉 고스트 오버레이 */
+.drawghost {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 3;
+}
+
+.drawghost__shape {
+  fill: rgb(51 128 245 / 0.25);
+  stroke: var(--blue);
+  stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
+}
+
+.drawghost__stroke,
+.drawghost__path {
+  fill: none;
+  stroke: var(--blue);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.drawghost__handle {
+  stroke: var(--blue);
+  stroke-width: 1;
+  opacity: 0.7;
+  vector-effect: non-scaling-stroke;
+}
+
+.drawghost__hdot {
+  fill: #fff;
+  stroke: var(--blue);
+  stroke-width: 1;
+  pointer-events: all;
+  cursor: grab !important;
+}
+
+.drawghost__anchor {
+  fill: #fff;
+  stroke: var(--blue);
+  stroke-width: 1.4;
+  pointer-events: all;
+  cursor: grab !important;
+}
+
+.drawghost__anchor--first {
+  fill: var(--blue);
+}
+
 .canvastools__btn {
   width: 28px;
   height: 26px;
@@ -1856,8 +2082,9 @@ body.drag-cross * { cursor: crosshair !important; }
 
 .timeline__head {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: center;
+  gap: 4px;
   margin-bottom: 6px;
 }
 
@@ -1870,6 +2097,7 @@ body.drag-cross * { cursor: crosshair !important; }
 .timeline__hint {
   font-size: 10px;
   color: var(--text-dim);
+  margin-left: auto;
 }
 
 .timeline__body {
@@ -1886,11 +2114,11 @@ body.drag-cross * { cursor: crosshair !important; }
 
 .timeline__label {
   height: 20px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   font-size: 10px;
   color: var(--text-dim);
-  width: 92px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1950,11 +2178,16 @@ body.drag-cross * { cursor: crosshair !important; }
   display: flex;
   flex-direction: column;
   gap: 4px;
+  /* 스크롤 콘텐츠가 넘칠 때 stretch로 컨테이너 높이에 붙잡히면
+     플레이헤드(bottom:0)가 중간에서 잘린다 — 콘텐츠만큼 자라게 */
+  height: max-content;
+  min-height: 100%;
 }
 
 .timeline__track {
   position: relative;
   height: 20px;
+  flex-shrink: 0;
   background: var(--bg-raise2);
   border-radius: 5px;
   overflow: hidden;
@@ -2004,7 +2237,7 @@ body.drag-cross * { cursor: crosshair !important; }
   margin-left: -4px;
   cursor: ew-resize;
   touch-action: none;
-  z-index: 3;
+  z-index: 10; /* 클립·마키 위, sticky 눈금자(15) 아래 */
 }
 
 .timeline__playhead::after {
@@ -2012,29 +2245,47 @@ body.drag-cross * { cursor: crosshair !important; }
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 4px;
-  width: 1px;
+  left: 3.5px;
+  width: 2px;
+  border-radius: 1px;
   background: var(--blue);
+  box-shadow: 0 0 5px rgb(49 130 246 / 0.55);
 }
 
-/* Figma Motion식 원형 헤드 */
-.timeline__playhead-head {
+/* Creator식 프레임 번호 칩 — 헤드가 곧 드래그 핸들. 눈금자 줄(14px) 안에 완전히 들어가게 */
+.timeline__playhead-chip {
   position: absolute;
-  top: -1px;
-  left: 0;
-  width: 9px;
-  height: 9px;
+  top: 3px;
+  transform: translateX(-50%);
+  min-width: 18px;
+  height: 14px;
+  pointer-events: none;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: var(--blue);
-  border-radius: 50%;
-  box-shadow: 0 0 0 1.5px rgb(49 130 246 / 0.35);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 12px;
+  border-radius: 3.5px;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+  white-space: nowrap;
+  overflow: visible;
+  z-index: 16; /* sticky 눈금자 위 */
 }
 
 .timeline__ruler {
-  position: relative;
-  height: 14px;
+  /* 스크롤 컨테이너(body) 기준 상단 고정 — Creator처럼 눈금이 항상 보인다 */
+  position: sticky;
+  top: 0;
+  height: 20px;
+  flex-shrink: 0; /* flex column에서 내용 넘칠 때 0으로 짜부되던 것 */
   background: var(--bg-raise2);
   border-radius: 5px;
   cursor: ew-resize;
+  z-index: 15;
 }
 
 /* 키프레임 모드 패널 — 채널 행 (◀ ◆ ▶ 라벨 값) */
@@ -2152,7 +2403,7 @@ body.drag-cross * { cursor: crosshair !important; }
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
   margin-left: 10px;
-  margin-right: auto;
+  margin-right: 6px;
 }
 
 /* 프로퍼티 레인 — 배경 없는 얇은 행, 키 연결선 */
@@ -2347,6 +2598,29 @@ body.drag-cross * { cursor: crosshair !important; }
   border-color: var(--blue);
 }
 
+/* 언어 토글 — 상단바 */
+.btn--lang {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* 타임라인 선택 액션 — 선택 배지 안 미니 버튼 */
+.timeline__selact {
+  margin-left: 8px;
+  padding: 1px 8px;
+  font-size: 11px;
+  border-radius: 999px;
+  border: 1px solid var(--blue);
+  color: var(--blue);
+  white-space: nowrap;
+}
+
+.timeline__selact:hover {
+  background: var(--blue);
+  color: #fff;
+}
+
 /* AI 모션 패널 — 자연어 → 키프레임 (BYOK) */
 .aipanel__prompt {
   resize: vertical;
@@ -2432,12 +2706,13 @@ body.drag-cross * { cursor: crosshair !important; }
 }
 
 .timeline__label--ruler {
-  height: 14px;
+  height: 20px; /* 트랙 쪽 눈금자와 동일 — 어긋나면 전 행이 통째로 밀린다 */
+  flex-shrink: 0;
 }
 
 .timeline__ticklabel {
   position: absolute;
-  top: 1px;
+  top: 5px;
   font-size: 8px;
   color: var(--text-dim);
   white-space: nowrap;
@@ -2474,10 +2749,10 @@ body.drag-cross * { cursor: crosshair !important; }
   overflow: hidden;
 }
 
-/* 라이트 테마 — 밝은 틴트 바 위 흰 글씨가 안 보이던 것 */
+/* 채도 높인 클립 — 흰 글씨 + 그림자, 라이트/다크 공통 */
 :root[data-theme='light'] .timeline__barlabel {
-  color: rgb(20 22 28 / 0.82);
-  text-shadow: none;
+  color: rgb(255 255 255 / 0.96);
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.45);
 }
 
 .topbar__saved {
@@ -2540,11 +2815,21 @@ body.drag-cross * { cursor: crosshair !important; }
   bottom: 0;
   background: rgb(139 143 154 / 0.18);
   border: 1px solid rgb(139 143 154 / 0.55);
-  border-radius: 5px;
+  border-radius: 6px;
   cursor: grab;
   touch-action: none;
   min-width: 10px;
   overflow: hidden;
+}
+
+/* 트림 캡 — 채도 높은 바 위에서도 보이게 (Creator의 흰 캡) */
+.timeline__clip .timeline__edge::after {
+  background: rgb(255 255 255 / 0.75);
+}
+
+/* 행 호버 — 스크럽 중 어느 레이어인지 시선 고정 */
+.timeline__trackgroup:hover > .timeline__track {
+  box-shadow: inset 0 0 0 1px var(--hairline);
 }
 
 .timeline__clip:active {
@@ -2573,7 +2858,7 @@ body.drag-cross * { cursor: crosshair !important; }
 .timeline__seg--loop {
   background: repeating-linear-gradient(
     -45deg,
-    rgb(0 0 0 / 0.22) 0 5px,
+    rgb(255 255 255 / 0.2) 0 5px,
     transparent 5px 10px
   );
 }
@@ -2608,7 +2893,6 @@ body.drag-cross * { cursor: crosshair !important; }
   text-overflow: ellipsis;
   white-space: nowrap;
   height: 24px;
-  width: 72px;
   border-radius: 4px;
   padding: 0 4px;
 }
@@ -2797,4 +3081,878 @@ body.drag-cross * { cursor: crosshair !important; }
 .timeline__label--multi {
   color: var(--text);
   background: rgb(49 130 246 / 0.1);
+}
+
+/* ═══ 타임라인 시인성 개선 (AE 수준) — 기존 규칙 오버라이드 ═══ */
+
+/* 드래그 중 텍스트 선택 방지 — 스크럽/클립 이동/마키에서 글씨가 파랗게 끌리던 것 */
+.timeline,
+.scenetabs,
+.drawbar,
+.preview,
+.panel {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.timeline input,
+.panel input,
+.panel textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 인라인 리네임 입력 */
+.timeline__rename {
+  flex: 1;
+  min-width: 0;
+  height: 18px;
+  font-size: 11px;
+  padding: 0 4px;
+  border: 1px solid var(--blue);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+}
+
+/* 레이어 이름 — 크고 밝게 */
+.timeline__label--row {
+  font-size: 11px;
+  color: var(--text);
+  gap: 5px;
+}
+
+.timeline__label--row:hover {
+  background: var(--bg-raise2);
+}
+
+/* 선택 레이어 — 파란 배경으로 확실히 (AE 선택 행).
+   :hover(특이도 0-2-0)에 안 덮이게 --row와 겹쳐서 선언.
+   불투명 합성색 — 아이콘 오버레이가 background:inherit로 재도포해도 색이 안 겹친다 */
+.timeline__label--row.timeline__label--on,
+.timeline__label--row.timeline__label--on:hover {
+  background: color-mix(in srgb, var(--blue) 22%, var(--bg-raise));
+  color: var(--text);
+  font-weight: 700;
+}
+
+.timeline__label--row.timeline__label--multi,
+.timeline__label--row.timeline__label--multi:hover {
+  background: color-mix(in srgb, var(--blue) 13%, var(--bg-raise));
+}
+
+/* 트랙 레인 — 기본 배경 + 얼룩말 줄무늬로 행 구분 */
+.timeline__track--slots {
+  background: rgb(127 127 127 / 0.07);
+  border-radius: 4px;
+}
+
+.timeline__trackgroup:nth-child(even) .timeline__track--slots {
+  background: rgb(127 127 127 / 0.12);
+}
+
+/* 선택 레이어 트랙 — 라벨과 같은 파란 틴트 */
+.timeline__track--sel {
+  background: rgb(49 130 246 / 0.14);
+  box-shadow: none;
+}
+
+/* 클립 — 라벨 대비 강화 */
+.timeline__barlabel {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.85);
+}
+
+/* 눈금자 — 초 라벨 밝게 + 눈금선 */
+.timeline__ticklabel {
+  color: var(--text);
+  font-size: 9.5px;
+  opacity: 0.85;
+}
+
+.timeline__ticklabel::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 12px;
+  height: 6px;
+  width: 1px;
+  background: var(--text-dim);
+}
+
+/* 트랙 그리드 세로선 — 살짝 진하게 */
+.timeline__tick {
+  background: rgb(127 127 127 / 0.22);
+}
+
+/* 프로퍼티 행 — 라벨/개수 밝게, 레인 바닥선으로 행 분리 */
+.timeline__label--prop {
+  color: var(--text);
+  opacity: 0.85;
+}
+
+.timeline__propcount {
+  color: var(--text);
+  opacity: 0.6;
+}
+
+.timeline__track--prop {
+  background: rgb(127 127 127 / 0.05);
+  border-radius: 3px;
+}
+
+.timeline__proplink {
+  background: rgb(127 127 127 / 0.55);
+}
+
+/* 다이아몬드 — 크고 또렷하게 (AE 키프레임) */
+.timeline__kf--prop::after {
+  inset: 3.5px;
+  background: var(--bg);
+  border: 1.5px solid var(--text);
+  border-radius: 1px;
+}
+
+.timeline__kf--prop:hover::after {
+  background: var(--blue);
+  border-color: #fff;
+}
+
+/* 이징 작대기 — 평소에도 흐릿하게 보이게 */
+.timeline__ease {
+  opacity: 0.55;
+}
+
+.timeline__ease:hover,
+.timeline__trackgroup:hover .timeline__ease {
+  opacity: 1;
+}
+
+/* 플레이헤드 — 라인 더 선명 + 칩 볼드 */
+.timeline__playhead::after {
+  background: var(--blue);
+  box-shadow: 0 0 4px rgb(49 130 246 / 0.6);
+}
+
+.timeline__playhead-chip {
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.4);
+}
+
+/* 트월 — 살짝 크게, 호버 시 밝게 */
+.timeline__twirl {
+  font-size: 9px;
+}
+
+.timeline__twirl:hover {
+  color: var(--text);
+}
+
+/* ═══ 편집 패널 접이식 섹션 ═══ */
+.csection {
+  border-top: 1px solid var(--hairline);
+}
+
+.csection:first-child {
+  border-top: none;
+}
+
+.csection__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 9px 2px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  text-align: left;
+}
+
+.csection__head:hover {
+  color: var(--text);
+}
+
+.csection__twirl {
+  width: 10px;
+  font-size: 8px;
+  flex-shrink: 0;
+}
+
+.csection--closed .csection__body {
+  display: none;
+}
+
+/* 자식이 아무것도 안 그리면(null) 섹션 통째로 숨김 */
+.csection:has(> .csection__body:empty) {
+  display: none;
+}
+
+/* 섹션 안 패널은 자체 아래 여백 축소 — 섹션 경계가 간격을 담당 */
+.csection__body > .panel__section {
+  margin-bottom: 10px;
+}
+
+/* 속성 패널 (TransformPanel) — knob 카드 사이 간격 */
+.panel__group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+
+/* 타임라인 라벨 열 리사이즈 핸들 (세로) */
+.timeline__vresize {
+  width: 7px;
+  margin: 0 -1px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  touch-action: none;
+  position: relative;
+  z-index: 16;
+}
+
+.timeline__vresize::after {
+  content: '';
+  position: absolute;
+  inset: 0 3px;
+  background: var(--hairline);
+}
+
+.timeline__vresize:hover::after,
+.timeline__vresize:active::after {
+  background: var(--blue);
+}
+
+/* h3 제거 후 초기화 버튼이 좌측으로 밀리던 것 — 항상 우측 정렬 */
+.panel__labelrow > .linkbtn {
+  margin-left: auto;
+}
+
+/* ═══ 타임라인 레이어 아이콘 + 헤더 버튼 + 그래프 에디터 ═══ */
+.tlbtn {
+  width: 22px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  line-height: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tlbtn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.tlbtn:hover {
+  background: var(--bg-raise2);
+  color: var(--text);
+}
+
+.tlbtn--on {
+  color: var(--blue);
+  background: rgb(49 130 246 / 0.15);
+}
+
+/* 라벨 행 아이콘 — 호버/선택 시 우측 오버레이 (이름을 밀지 않게 행 배경 상속) */
+.timeline__label--row {
+  position: relative;
+}
+
+.timeline__lbtns {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 1px;
+  opacity: 0;
+  pointer-events: none;
+  background: var(--bg-raise);
+  padding-left: 8px;
+}
+
+/* 상태별 배경을 행과 동일한 불투명 색으로 명시 — 겹침 없음 */
+.timeline__label--row:hover .timeline__lbtns {
+  background: var(--bg-raise2);
+}
+
+.timeline__label--row.timeline__label--on .timeline__lbtns,
+.timeline__label--row.timeline__label--on:hover .timeline__lbtns {
+  background: color-mix(in srgb, var(--blue) 22%, var(--bg-raise));
+}
+
+.timeline__label--row.timeline__label--multi .timeline__lbtns,
+.timeline__label--row.timeline__label--multi:hover .timeline__lbtns {
+  background: color-mix(in srgb, var(--blue) 13%, var(--bg-raise));
+}
+
+.timeline__label--row:hover .timeline__lbtns,
+.timeline__label--on .timeline__lbtns,
+.timeline__lbtns:has(.timeline__lbtn--on) {
+  opacity: 1;
+}
+
+/* 컨테이너는 이벤트 투과 — 버튼 사이/여백 더블클릭이 행(컴프 진입/리네임)으로 전달 */
+.timeline__lbtns {
+  pointer-events: none !important;
+}
+
+.timeline__lbtns .timeline__lbtn {
+  pointer-events: auto;
+}
+
+.timeline__label--row:hover .timeline__lbtns,
+.timeline__label--on .timeline__lbtns {
+  opacity: 1;
+}
+
+/* 활성 상태(잠금/숨김/끄기)는 항상 표시 */
+.timeline__lbtns:has(.timeline__lbtn--on) {
+  opacity: 1;
+}
+
+.timeline__lbtn {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  line-height: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.timeline__lbtn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.timeline__lbtn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.timeline__lbtn:hover {
+  background: var(--bg-raise2);
+  color: var(--text);
+}
+
+.timeline__lbtn--on {
+  color: var(--blue);
+  background: rgb(49 130 246 / 0.16);
+}
+
+/* 아이콘이 auto 마진을 가져가므로 트월은 그냥 뒤에 */
+.timeline__twirl--end {
+  margin-left: 0;
+}
+
+/* 그래프 에디터 모달 */
+.gemodal {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.45);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gepanel {
+  background: var(--bg-raise);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 18px 60px rgb(0 0 0 / 0.45);
+  overflow: hidden;
+}
+
+.gepanel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 13px;
+}
+
+.gepanel__close {
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.gepanel__close:hover {
+  color: var(--text);
+}
+
+.gepanel__body {
+  display: flex;
+}
+
+.gepanel__props {
+  width: 150px;
+  border-right: 1px solid var(--hairline);
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.gepanel__propstitle {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.gepanel__prop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.gepanel__prop:hover {
+  background: var(--bg-raise2);
+}
+
+.gepanel__prop--on {
+  background: rgb(49 130 246 / 0.18);
+}
+
+.gepanel__count {
+  margin-left: auto;
+  font-size: 9px;
+  color: var(--text-dim);
+}
+
+.gepanel__graph {
+  display: block;
+  background: var(--bg);
+}
+
+.gepanel__grid {
+  stroke: rgb(127 127 127 / 0.15);
+  stroke-width: 1;
+}
+
+.gepanel__tick {
+  fill: var(--text-dim);
+  font-size: 9px;
+  font-family: ui-monospace, monospace;
+}
+
+.gepanel__playhead {
+  stroke: var(--blue);
+  stroke-width: 1.5;
+  opacity: 0.8;
+}
+
+.gepanel__key {
+  fill: var(--bg);
+  stroke: var(--text);
+  stroke-width: 1.5;
+  cursor: pointer;
+}
+
+.gepanel__key:hover,
+.gepanel__key--sel {
+  fill: var(--blue);
+  stroke: #fff;
+}
+
+.gepanel__empty {
+  fill: var(--text-dim);
+  font-size: 12px;
+}
+
+.gepanel__foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--hairline);
+}
+
+.gepanel__btn {
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-raise2);
+  color: var(--text);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.gepanel__btn:hover:not(:disabled) {
+  border-color: var(--blue);
+}
+
+.gepanel__btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.gepanel__sep {
+  width: 1px;
+  height: 16px;
+  background: var(--hairline);
+  margin: 0 2px;
+}
+
+.gepanel__hint {
+  margin-left: auto;
+  font-size: 9.5px;
+  color: var(--text-dim);
+}
+
+/* 잠긴 레이어 라벨 — 살짝 희미하게 */
+.timeline__label--locked .timeline__lname {
+  opacity: 0.55;
+}
+
+/* 부모 선택 팝오버 */
+.parentpop__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+}
+
+.parentpop {
+  position: fixed;
+  width: 180px;
+  max-height: 230px;
+  overflow-y: auto;
+  background: var(--bg-raise);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 10px 32px rgb(0 0 0 / 0.4);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.parentpop__title {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding: 3px 6px 5px;
+}
+
+.parentpop__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.parentpop__item:hover {
+  background: var(--bg-raise2);
+}
+
+.parentpop__item--on {
+  background: rgb(49 130 246 / 0.18);
+}
+
+/* 매트 팝오버 — 타입 탭 + 반전 + 소스 리스트 */
+.mattepop {
+  width: 200px;
+}
+
+.mattepop__tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--bg);
+  border-radius: 7px;
+  padding: 3px;
+  margin-bottom: 6px;
+}
+
+.mattepop__tab {
+  flex: 1;
+  padding: 5px 0;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.mattepop__tab:hover {
+  color: var(--text);
+}
+
+.mattepop__tab--on {
+  background: var(--bg-raise2);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.mattepop__invert {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text);
+  padding: 4px 6px 8px;
+  border-bottom: 1px solid var(--hairline);
+  margin-bottom: 4px;
+  cursor: pointer;
+}
+
+.mattepop__invert--off {
+  color: var(--text-dim);
+  cursor: default;
+}
+
+.mattepop__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+/* ═══ Material 아이콘 크기 규격 ═══ */
+.btn--icon svg {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+
+.drawbar__btn svg {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+
+.layers__eye svg,
+.layerrow__btn svg,
+.layerrow__del svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
+.preview__playbtn svg,
+.player__play svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.timeline__twirl svg,
+.csection__twirl svg {
+  width: 11px;
+  height: 11px;
+  display: block;
+}
+
+.csection__twirl {
+  display: inline-flex;
+  align-items: center;
+}
+
+.timeline__twirl {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.canvastools__btn svg {
+  width: 13px;
+  height: 13px;
+  display: block;
+}
+
+.scenetab svg {
+  width: 11px;
+  height: 11px;
+  vertical-align: -1.5px;
+  margin-right: 3px;
+}
+
+/* 그래프 에디터 베지어 핸들 */
+.gepanel__handles line {
+  stroke: var(--text-dim);
+  stroke-width: 1;
+  stroke-dasharray: 3 2;
+}
+
+.gepanel__handle {
+  fill: #f5a623;
+  stroke: var(--bg);
+  stroke-width: 1.5;
+  cursor: grab;
+  touch-action: none;
+}
+
+.gepanel__handle:active {
+  cursor: grabbing;
+}
+
+.gepanel__handle:hover {
+  fill: #ffc04d;
+}
+
+/* ═══ 편집/내보내기 패널 마무리 ═══ */
+
+/* 버튼 아이콘 정렬 */
+.btn--primary,
+.btn--secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.btn--primary svg,
+.btn--secondary svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+/* 속성 섹션 안 레이어 이름 — 칩으로 */
+.csection__body .panel__group > .grouphead {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 3px 9px;
+  background: var(--bg-raise2);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 10.5px;
+  color: var(--text);
+}
+
+/* 내보내기 섹션 내부 여백 정리 */
+.csection__body > .panel__section {
+  margin-top: 2px;
+}
+
+/* 내보내기 2열 버튼 — 줄바꿈 방지 */
+.exportrow .btn {
+  white-space: nowrap;
+  padding-left: 8px;
+  padding-right: 8px;
+  font-size: 11.5px;
+}
+
+
+/* 씬 탭 ↔ 타임라인 결합 — 탭이 패널 위에 브라우저 탭처럼 붙는다 */
+.scenetabs + .timeline {
+  margin-top: 0;
+  border-top-left-radius: 0;
+}
+
+.scenetabs {
+  position: relative;
+  z-index: 1;
+  margin-top: 8px;
+  margin-bottom: -1px; /* 활성 탭이 타임라인 테두리를 덮어 이어져 보이게 */
+}
+
+.scenetab--on {
+  border-bottom: 1px solid var(--bg-raise);
+}
+
+/* 그래프 에디터 — 독립 창 (배경 비차단, 헤더 드래그 이동) */
+.gepanel--float {
+  position: fixed;
+  z-index: 220;
+  box-shadow: 0 18px 60px rgb(0 0 0 / 0.55);
+}
+
+.gepanel__head--drag {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.gepanel__head--drag:active {
+  cursor: grabbing;
+}
+
+/* 그래프 에디터 내비 힌트 + 팬 커서 */
+.gepanel__navhint {
+  font-size: 9.5px;
+  color: var(--text-dim);
+  margin-left: 10px;
+  margin-right: auto;
+}
+
+.gepanel__graph {
+  cursor: grab;
+  touch-action: none;
+}
+
+.gepanel__graph:active {
+  cursor: grabbing;
+}
+
+/* 그래프 에디터 마키 */
+.gepanel__marquee {
+  fill: rgb(49 130 246 / 0.12);
+  stroke: var(--blue);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+
+.gepanel__graph {
+  cursor: crosshair;
+}
+
+/* 핸들 연결선은 시각 전용 — 키 클릭 가로채지 않게 */
+.gepanel__handles line {
+  pointer-events: none;
 }

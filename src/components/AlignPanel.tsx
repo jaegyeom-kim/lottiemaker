@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { ReactElement } from 'react'
 import { useEditor } from '../store'
 import { evalNumExpr } from '../lib/num'
+import { t } from '../lib/i18n'
 
 const I = (d: string) => (
   <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
@@ -43,20 +44,19 @@ export default function AlignPanel() {
 
   return (
     <div className="panel__section">
-      <h3 className="panel__label">정렬</h3>
       <div className="opttabs" style={{ marginBottom: 8 }}>
         <button
           className={`opttab ${basis === 'canvas' ? 'opttab--on' : ''}`}
           onClick={() => setBasis('canvas')}
         >
-          캔버스 기준
+          {t('캔버스 기준')}
         </button>
         <button
           className={`opttab ${basis === 'selection' ? 'opttab--on' : ''}`}
-          title={selCount < 2 ? '레이어 2개 이상 선택 필요' : '선택 영역(합집합) 기준'}
+          title={selCount < 2 ? t('레이어 2개 이상 선택 필요') : t('선택 영역(합집합) 기준')}
           onClick={() => setBasis('selection')}
         >
-          선택끼리
+          {t('선택끼리')}
         </button>
       </div>
       <div className="alignrow">
@@ -66,8 +66,10 @@ export default function AlignPanel() {
             className="alignbtn"
             title={
               selCount
-                ? `${a.label} (${effBasis === 'selection' ? '선택 영역' : '캔버스'} 기준)`
-                : '레이어를 먼저 선택하세요'
+                ? t('{label} ({basis} 기준)')
+                    .replace('{label}', t(a.label))
+                    .replace('{basis}', effBasis === 'selection' ? t('선택 영역') : t('캔버스'))
+                : t('레이어를 먼저 선택하세요')
             }
             disabled={!selCount}
             onClick={() => alignCustom(a.mode, effBasis)}
@@ -76,14 +78,14 @@ export default function AlignPanel() {
           </button>
         ))}
       </div>
-      {!selCount && <p className="knob__note">레이어를 선택하면 정렬할 수 있습니다.</p>}
+      {!selCount && <p className="knob__note">{t('레이어를 선택하면 정렬할 수 있습니다.')}</p>}
       {basis === 'selection' && selCount > 0 && selCount < 2 && (
-        <p className="knob__note">레이어 2개 이상 선택하면 선택끼리 정렬 — 지금은 캔버스 기준.</p>
+        <p className="knob__note">{t('레이어 2개 이상 선택하면 선택끼리 정렬 — 지금은 캔버스 기준.')}</p>
       )}
       <div className="alignrow">
         <button
           className="alignbtn"
-          title="가로 균등 분배 (레이어 3개 이상)"
+          title={t('가로 균등 분배 (레이어 3개 이상)')}
           disabled={layerCount < 3}
           onClick={() => distributeCustom('h')}
         >
@@ -91,14 +93,14 @@ export default function AlignPanel() {
         </button>
         <button
           className="alignbtn"
-          title="세로 균등 분배 (레이어 3개 이상)"
+          title={t('세로 균등 분배 (레이어 3개 이상)')}
           disabled={layerCount < 3}
           onClick={() => distributeCustom('v')}
         >
           {ICONS.dv}
         </button>
         <span className="panel__hint" style={{ alignSelf: 'center', marginLeft: 4 }}>
-          {selCount >= 3 ? '선택한 레이어끼리 분배' : '전체 레이어 분배'}
+          {selCount >= 3 ? t('선택한 레이어끼리 분배') : t('전체 레이어 분배')}
         </span>
       </div>
 
@@ -115,6 +117,8 @@ function PatternDuplicate({ disabled }: { disabled: boolean }) {
   const [dy, setDy] = useState(0)
   const [drot, setDrot] = useState(0)
   const [dt, setDt] = useState(6)
+  const [ds, setDs] = useState(0)
+  const [dop, setDop] = useState(0)
 
   const Field = ({
     label,
@@ -133,24 +137,26 @@ function PatternDuplicate({ disabled }: { disabled: boolean }) {
 
   return (
     <>
-      <h3 className="panel__label">패턴 복제</h3>
+      <h3 className="panel__label">{t('패턴 복제')}</h3>
       <div className="patgrid">
-        <Field label="개수" value={count} onChange={(v) => setCount(Math.max(2, Math.min(12, Math.round(v))))} />
-        <Field label="X 간격" value={dx} onChange={setDx} />
-        <Field label="Y 간격" value={dy} onChange={setDy} />
-        <Field label="회전 +°" value={drot} onChange={setDrot} />
-        <Field label="시간차 f" value={dt} onChange={(v) => setDt(Math.round(v))} />
+        <Field label={t('개수')} value={count} onChange={(v) => setCount(Math.max(2, Math.min(12, Math.round(v))))} />
+        <Field label={t('X 간격')} value={dx} onChange={setDx} />
+        <Field label={t('Y 간격')} value={dy} onChange={setDy} />
+        <Field label={t('회전 +°')} value={drot} onChange={setDrot} />
+        <Field label={t('시간차 f')} value={dt} onChange={(v) => setDt(Math.round(v))} />
+        <Field label={t('크기 +%')} value={ds} onChange={(v) => setDs(Math.max(-90, Math.min(200, v)))} />
+        <Field label={t('투명 +%')} value={dop} onChange={(v) => setDop(Math.max(-100, Math.min(100, v)))} />
         <button
           className="btn btn--secondary"
           disabled={disabled}
-          title={disabled ? '레이어를 먼저 선택하세요' : '선택 레이어를 누적 오프셋으로 복제'}
-          onClick={() => duplicatePattern(count, dx, dy, drot, dt)}
+          title={disabled ? t('레이어를 먼저 선택하세요') : t('선택 레이어를 누적 오프셋으로 복제')}
+          onClick={() => duplicatePattern(count, dx, dy, drot, dt, ds, dop)}
         >
-          복제
+          {t('복제')}
         </button>
       </div>
       <p className="panel__hint">
-        복제본마다 간격·회전·시간차가 누적됩니다 — 스태거 등장, 방사형 패턴에 유용.
+        {t('복제본마다 간격·회전·크기·투명도·시간차가 누적됩니다 — 스태거 등장, 방사형·페이드 패턴에 유용.')}
       </p>
     </>
   )

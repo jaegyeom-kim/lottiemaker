@@ -1,13 +1,19 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useEditor, loadLastSession } from './store'
 import { setDragCursor } from './lib/cursor'
+import { getLang, setLangValue, t, type Lang } from './lib/i18n'
 import TemplateGallery from './components/TemplateGallery'
 import Preview from './components/Preview'
 import ColorEditor from './components/ColorEditor'
 import TemplateOptions from './components/TemplateOptions'
 import CustomGraphic from './components/CustomGraphic'
 import AlignPanel from './components/AlignPanel'
+import TransformPanel from './components/TransformPanel'
 import LayerPanel from './components/LayerPanel'
+import Section from './components/Section'
+import {
+  UndoIcon, RedoIcon, LightModeIcon, DarkModeIcon, MatteIcon as AutoThemeIcon,
+} from './components/icons'
 import ExportPanel from './components/ExportPanel'
 import './App.css'
 
@@ -57,7 +63,11 @@ function clampLayout(left: number, right: number, winW: number): { left: number;
 
 const THEME_KEY = 'lottiemaker.theme'
 const THEME_NEXT: Record<ThemePref, ThemePref> = { system: 'light', light: 'dark', dark: 'system' }
-const THEME_ICON: Record<ThemePref, string> = { system: '◐', light: '☀︎', dark: '☾︎' }
+const THEME_ICON: Record<ThemePref, ReactNode> = {
+  system: <AutoThemeIcon />,
+  light: <LightModeIcon />,
+  dark: <DarkModeIcon />,
+}
 const THEME_LABEL: Record<ThemePref, string> = { system: '시스템 설정', light: '라이트 모드', dark: '다크 모드' }
 
 /** 저장된 설정 없으면 시스템 따라가기 (구버전 'light'/'dark' 저장값도 그대로 존중). */
@@ -76,6 +86,13 @@ export default function App() {
   const saveStatus = useEditor((s) => s.saveStatus)
   const [tab, setTab] = useState<Tab>('edit')
   const [themePref, setThemePref] = useState<ThemePref>(initialThemePref)
+  // 언어 — 전환 시 루트 key로 통째 리마운트해 모든 t()가 재평가된다
+  const [lang, setLangState] = useState<Lang>(getLang)
+  const toggleLang = () => {
+    const next: Lang = lang === 'ko' ? 'en' : 'ko'
+    setLangValue(next)
+    setLangState(next)
+  }
   // 패널 폭 — 드래그 리사이즈, 저장·복원, 창 크기 변화에 자동 클램프
   const [cols, setCols] = useState(() =>
     clampLayout(loadLayout().left, loadLayout().right, window.innerWidth),
@@ -195,8 +212,8 @@ export default function App() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       // 입력 필드 안에서는 텍스트 편집 undo를 가로채지 않는다
-      const t = e.target as HTMLElement | null
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      const tgt = e.target as HTMLElement | null
+      if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)) return
       // Shift를 누르면 key가 'Z'(대문자)가 되므로 소문자로 비교
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault()
@@ -217,35 +234,44 @@ export default function App() {
   }, [undo, redo])
 
   return (
-    <div className="app">
+    <div className="app" key={lang}>
       <header className="topbar">
         <div className="topbar__brand">
           <span className="topbar__logo">◒</span>
           <h1 className="topbar__name">LottieMaker</h1>
-          <span className="topbar__tag">로티, 빠르고 쉽게</span>
+          <span className="topbar__tag">{t('로티, 빠르고 쉽게')}</span>
         </div>
         <div className="topbar__actions">
           {/* 실제 저장 결과 기준 — 저장 안 되는 세션(외부 파일·용량 초과)에 거짓 배지 금지 */}
           {animationData && saveStatus === 'saved' && (
-            <span className="topbar__saved">자동 저장됨</span>
+            <span className="topbar__saved">{t('자동 저장됨')}</span>
           )}
           {animationData && saveStatus === 'blocked' && (
-            <span className="topbar__saved topbar__saved--warn" title="용량이 커서 자동 저장할 수 없습니다. 내보내기 탭에서 프로젝트 파일로 저장하세요.">
-              자동 저장 안 됨
+            <span className="topbar__saved topbar__saved--warn" title={t('용량이 커서 자동 저장할 수 없습니다. 내보내기 탭에서 프로젝트 파일로 저장하세요.')}>
+              {t('자동 저장 안 됨')}
             </span>
           )}
           <button
+            className="btn btn--icon btn--lang"
+            onClick={toggleLang}
+            title={lang === 'ko' ? 'Switch to English' : '한국어로 전환'}
+          >
+            {lang === 'ko' ? '한' : 'EN'}
+          </button>
+          <button
             className="btn btn--icon"
             onClick={cycleTheme}
-            title={`테마: ${THEME_LABEL[themePref]} — 클릭하면 ${THEME_LABEL[THEME_NEXT[themePref]]}`}
+            title={t('테마: {cur} — 클릭하면 {next}')
+              .replace('{cur}', t(THEME_LABEL[themePref]))
+              .replace('{next}', t(THEME_LABEL[THEME_NEXT[themePref]]))}
           >
             {THEME_ICON[themePref]}
           </button>
-          <button className="btn btn--icon" onClick={undo} disabled={!past.length} title="실행 취소 (⌘Z)">
-            ↩
+          <button className="btn btn--icon" onClick={undo} disabled={!past.length} title={t('실행 취소 (⌘Z)')}>
+            <UndoIcon />
           </button>
-          <button className="btn btn--icon" onClick={redo} disabled={!future.length} title="다시 실행 (⇧⌘Z)">
-            ↪
+          <button className="btn btn--icon" onClick={redo} disabled={!future.length} title={t('다시 실행 (⇧⌘Z)')}>
+            <RedoIcon />
           </button>
         </div>
       </header>
@@ -254,9 +280,9 @@ export default function App() {
         <div className="themetoast" key={themeToast.id}>
           <span className="themetoast__icon">{THEME_ICON[themeToast.pref]}</span>
           <span>
-            {THEME_LABEL[themeToast.pref]}
+            {t(THEME_LABEL[themeToast.pref])}
             {themeToast.pref === 'system' &&
-              ` · 현재 ${window.matchMedia?.('(prefers-color-scheme: light)').matches ? '라이트' : '다크'}`}
+              ` · ${window.matchMedia?.('(prefers-color-scheme: light)').matches ? t('현재 라이트') : t('현재 다크')}`}
           </span>
         </div>
       )}
@@ -272,7 +298,7 @@ export default function App() {
         <TemplateGallery />
         <div
           className="divider"
-          title="드래그: 너비 조절 · 더블클릭: 초기화"
+          title={t('드래그: 너비 조절 · 더블클릭: 초기화')}
           onPointerDown={(e) => beginResize(e, 'left')}
           onDoubleClick={resetCols}
         />
@@ -280,14 +306,14 @@ export default function App() {
         <div
           className="divider"
           style={panelOpen ? undefined : { visibility: 'hidden' }}
-          title="드래그: 너비 조절 · 더블클릭: 초기화"
+          title={t('드래그: 너비 조절 · 더블클릭: 초기화')}
           onPointerDown={(e) => panelOpen && beginResize(e, 'right')}
           onDoubleClick={() => panelOpen && resetCols()}
         />
         {!panelOpen && (
           <aside className="panel panel--rail">
             {/* 접힘 상태엔 펼치기 버튼만 — 탭 버튼은 펼친 뒤에 */}
-            <button className="panelrail__btn" title="패널 펼치기" onClick={() => togglePanel(true)}>
+            <button className="panelrail__btn" title={t('패널 펼치기')} onClick={() => togglePanel(true)}>
               «
             </button>
           </aside>
@@ -296,17 +322,17 @@ export default function App() {
         <aside className="panel">
           <nav className="tabs">
             <button className={`tabs__btn ${tab === 'edit' ? 'tabs__btn--on' : ''}`} onClick={() => setTab('edit')}>
-              편집
+              {t('편집')}
             </button>
             <button
               className={`tabs__btn ${tab === 'export' ? 'tabs__btn--on' : ''}`}
               onClick={() => setTab('export')}
             >
-              내보내기
+              {t('내보내기')}
             </button>
             <button
               className="tabs__collapse"
-              title="패널 접기"
+              title={t('패널 접기')}
               onClick={() => togglePanel(false)}
             >
               »
@@ -318,31 +344,50 @@ export default function App() {
                 // 모드별 패널 구성 — 템플릿: 그래픽 교체 / 커스텀: 정렬
                 mode === 'custom' ? (
                   <>
-                    <TemplateOptions />
-                    <AlignPanel />
-                    <ColorEditor />
-                    <LayerPanel />
+                    <Section key="play" id="play" title="재생 설정">
+                      <TemplateOptions />
+                    </Section>
+                    <Section key="props" id="props" title="속성">
+                      <TransformPanel />
+                    </Section>
+                    <Section key="align" id="align" title="정렬">
+                      <AlignPanel />
+                    </Section>
+                    <Section key="color" id="color" title="색상 · 크기">
+                      <ColorEditor />
+                    </Section>
+                    <Section key="layers" id="layers" title="레이어">
+                      <LayerPanel />
+                    </Section>
                   </>
                 ) : (
                   <>
-                    <TemplateOptions />
-                    <CustomGraphic />
-                    <ColorEditor />
-                    <LayerPanel />
+                    <Section key="tplopts" id="tplopts" title="템플릿 옵션">
+                      <TemplateOptions />
+                    </Section>
+                    <Section key="graphic" id="graphic" title="내 그래픽">
+                      <CustomGraphic />
+                    </Section>
+                    <Section key="color" id="color" title="색상 · 크기">
+                      <ColorEditor />
+                    </Section>
+                    <Section key="layers" id="layers" title="레이어">
+                      <LayerPanel />
+                    </Section>
                   </>
                 )
               ) : (
                 <p className="panel__hint panel__hint--pad">
                   {mode === 'custom'
-                    ? '그래픽(SVG/PNG)을 업로드하면 편집 옵션이 나타납니다.'
-                    : '템플릿을 선택하면 편집 옵션이 나타납니다.'}
+                    ? t('그래픽(SVG/PNG)을 업로드하면 편집 옵션이 나타납니다.')
+                    : t('템플릿을 선택하면 편집 옵션이 나타납니다.')}
                 </p>
               ))}
             {tab === 'export' &&
               (animationData ? (
                 <ExportPanel />
               ) : (
-                <p className="panel__hint panel__hint--pad">내보낼 로티가 없습니다.</p>
+                <p className="panel__hint panel__hint--pad">{t('내보낼 로티가 없습니다.')}</p>
               ))}
           </div>
         </aside>

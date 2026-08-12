@@ -337,6 +337,19 @@ export function springValue(u: number, zeta: number, cycles: number): number {
   return 1 - decay * (Math.cos(wd * u) + ((zeta * w) / wd) * Math.sin(wd * u))
 }
 
+/** 정규화 낙하 바운스 곡선 — u∈[0,1] → 0→1 (easeOutBounce, 물리 낙하+튕김 근사). */
+export function bounceValue(u: number): number {
+  if (u <= 0) return 0
+  if (u >= 1) return 1
+  const n1 = 7.5625
+  const d1 = 2.75
+  let x = u
+  if (x < 1 / d1) return n1 * x * x
+  if (x < 2 / d1) return n1 * (x -= 1.5 / d1) * x + 0.75
+  if (x < 2.5 / d1) return n1 * (x -= 2.25 / d1) * x + 0.9375
+  return n1 * (x -= 2.625 / d1) * x + 0.984375
+}
+
 /** 레이어 기본 이징 인덱스(KF_EASES) → 베지어. */
 export function easeIndexBez(i: number): Bezier4 {
   return (EASE_PRESETS[i] ?? EASE_PRESETS[1]).bez
@@ -352,12 +365,16 @@ export interface KfKey {
   r?: number
   /** 불투명도 0~100. */
   o?: number
+  /** 트림 패스 시작 0~100 (%). */
+  ts?: number
+  /** 트림 패스 끝 0~100 (%). */
+  te?: number
   /** 이 키에서 시작하는 구간의 채널별 이징 오버라이드 — 없으면 레이어 기본. */
-  e?: Partial<Record<'p' | 's' | 'r' | 'o', Bezier4>>
+  e?: Partial<Record<KfChannel, Bezier4>>
 }
 
 /** 키 k에서 시작하는 ch 구간의 이징 — 오버라이드 → 레이어 기본 순. */
-export function segEaseOf(xkf: CustomKf, k: KfKey, ch: 'p' | 's' | 'r' | 'o'): Bezier4 {
+export function segEaseOf(xkf: CustomKf, k: KfKey, ch: KfChannel): Bezier4 {
   const o = k.e?.[ch]
   if (Array.isArray(o) && o.length === 4 && o.every((n) => typeof n === 'number')) return o
   return easeIndexBez(xkf.ease)
@@ -367,6 +384,8 @@ export interface CustomKf {
   on: boolean
   /** KF_EASES 인덱스 — 레이어 전체 세그먼트에 적용. */
   ease: number
+  /** 위치 모션 패스를 곡선(Catmull-Rom 스무스)으로 보간할지 — 기본 직선. */
+  smooth?: boolean
   keys: KfKey[]
 }
 
@@ -377,7 +396,7 @@ export function normKf(raw: Partial<CustomKf> | undefined): CustomKf {
     .filter((k) => typeof k?.t === 'number')
     .map((k) => {
       const e: KfKey['e'] = {}
-      for (const ch of ['p', 's', 'r', 'o'] as const) {
+      for (const ch of ['p', 's', 'r', 'o', 'ts', 'te'] as const) {
         const b = k.e?.[ch]
         if (Array.isArray(b) && b.length === 4 && b.every((n) => typeof n === 'number'))
           e[ch] = [b[0], b[1], b[2], b[3]]
@@ -387,10 +406,17 @@ export function normKf(raw: Partial<CustomKf> | undefined): CustomKf {
       return { ...rest, t: Math.round(k.t * 10) / 10, ...(Object.keys(e).length ? { e } : {}) }
     })
     .sort((a, b) => a.t - b.t)
-  return { on: !!r.on, ease: typeof r.ease === 'number' ? r.ease : 1, keys }
+  return { on: !!r.on, ease: typeof r.ease === 'number' ? r.ease : 1, smooth: !!r.smooth, keys }
 }
 
-export type KfChannel = 'p' | 's' | 'r' | 'o'
+/** 곡선 경로용 키 j의 Catmull-Rom 접선 (이웃 클램프 — 끝점은 단방향/2). */
+function crTangent(pts: [number, number][], j: number): [number, number] {
+  const p0 = pts[Math.max(0, j - 1)]
+  const p2 = pts[Math.min(pts.length - 1, j + 1)]
+  return [(p2[0] - p0[0]) / 2, (p2[1] - p0[1]) / 2]
+}
+
+export type KfChannel = 'p' | 's' | 'r' | 'o' | 'ts' | 'te'
 
 /** 타임라인 키 선택 항목 — 레이어 인덱스 + 채널 + 시각. */
 export interface KfSelItem {
@@ -405,6 +431,8 @@ export const KF_CHANNEL_DEFS: { ch: KfChannel; label: string; unit: string }[] =
   { ch: 's', label: '크기', unit: '%' },
   { ch: 'r', label: '회전', unit: '°' },
   { ch: 'o', label: '불투명도', unit: '%' },
+  { ch: 'ts', label: '트림 시작', unit: '%' },
+  { ch: 'te', label: '트림 끝', unit: '%' },
 ]
 
 /** 채널의 키 없는 구간 기본값 — ◆ 캡처/단축키/패널이 공유. */
@@ -413,7 +441,12 @@ export function kfFallbackValue(
   xsel: CustomSel,
   base: [number, number],
 ): number | [number, number] {
-  return ch === 'p' ? base : ch === 's' ? 100 : ch === 'r' ? xsel.rotation : xsel.opacity
+  if (ch === 'p') return base
+  if (ch === 's') return 100
+  if (ch === 'r') return xsel.rotation
+  if (ch === 'ts') return 0
+  if (ch === 'te') return 100
+  return xsel.opacity
 }
 
 /** 채널에 값이 있는 키만 t순으로. */
@@ -440,8 +473,22 @@ export function kfValueAt(
       const f = b.t === a.t ? 0 : (t - a.t) / (b.t - a.t)
       const va = val(a)
       const vb = val(b)
-      if (Array.isArray(va) && Array.isArray(vb))
+      if (Array.isArray(va) && Array.isArray(vb)) {
+        // 곡선 경로면 렌더와 같은 공간 베지어로 (박스/모션패스 오버레이 일치)
+        if (ch === 'p' && xkf.smooth) {
+          const pts = keys.map((k) => k.p as [number, number])
+          const m1 = crTangent(pts, i)
+          const m2 = crTangent(pts, i + 1)
+          const c1: [number, number] = [va[0] + m1[0] / 3, va[1] + m1[1] / 3]
+          const c2: [number, number] = [vb[0] - m2[0] / 3, vb[1] - m2[1] / 3]
+          const u = 1 - f
+          return [
+            u * u * u * va[0] + 3 * u * u * f * c1[0] + 3 * u * f * f * c2[0] + f * f * f * vb[0],
+            u * u * u * va[1] + 3 * u * u * f * c1[1] + 3 * u * f * f * c2[1] + f * f * f * vb[1],
+          ]
+        }
         return [va[0] + (vb[0] - va[0]) * f, va[1] + (vb[1] - va[1]) * f]
+      }
       return (va as number) + ((vb as number) - (va as number)) * f
     }
   }
@@ -466,7 +513,7 @@ export function buildKfKs(
       const v = keys.length ? toArr(keys[0][ch] as never) : staticVal
       return { a: 0, k: dims === 1 ? v[0] : v }
     }
-    const k = keys.map((x, i) => {
+    const k: Record<string, unknown>[] = keys.map((x, i) => {
       if (i === keys.length - 1) return { t: x.t, s: toArr(x[ch] as never) }
       const [x1, y1, x2, y2] = segEaseOf(xkf, x, ch)
       return {
@@ -476,6 +523,16 @@ export function buildKfKs(
         s: toArr(x[ch] as never),
       }
     })
+    // 곡선 모션 패스 — 위치 키에 공간 접선(to/ti) 부여 (Catmull-Rom)
+    if (ch === 'p' && xkf.smooth && keys.length >= 2) {
+      const pts = keys.map((x) => x.p as [number, number])
+      for (let i = 0; i < keys.length - 1; i++) {
+        const m1 = crTangent(pts, i)
+        const m2 = crTangent(pts, i + 1)
+        k[i].to = [R(m1[0] / 3), R(m1[1] / 3), 0]
+        k[i].ti = [R(-m2[0] / 3), R(-m2[1] / 3), 0]
+      }
+    }
     return { a: 1, k }
   }
   return {
@@ -486,14 +543,135 @@ export function buildKfKs(
   }
 }
 
+/** 스칼라 채널 → 로티 프로퍼티 (구간 이징 포함) — 트림 패스 등 ks 밖 채널용. */
+export function buildKfScalarProp(
+  xkf: CustomKf,
+  ch: KfChannel,
+): { a: number; k: unknown } | null {
+  const keys = kfChannelKeys(xkf, ch)
+  if (!keys.length) return null
+  if (keys.length < 2) return { a: 0, k: R(keys[0][ch] as number) }
+  return {
+    a: 1,
+    k: keys.map((x, i) => {
+      if (i === keys.length - 1) return { t: x.t, s: [R(x[ch] as number)] }
+      const [x1, y1, x2, y2] = segEaseOf(xkf, x, ch)
+      return {
+        o: { x: [x1], y: [y1] },
+        i: { x: [x2], y: [y2] },
+        t: x.t,
+        s: [R(x[ch] as number)],
+      }
+    }),
+  }
+}
+
+/** shapes 트리에서 첫 트림(tm) 셰이프 찾기. */
+export function findTrimShape(node: unknown): Record<string, unknown> | null {
+  if (Array.isArray(node)) {
+    for (const x of node) {
+      const r = findTrimShape(x)
+      if (r) return r
+    }
+    return null
+  }
+  if (!node || typeof node !== 'object') return null
+  const obj = node as Record<string, unknown>
+  if (obj.ty === 'tm') return obj
+  return findTrimShape(obj.it ?? null)
+}
+
+/**
+ * xkf의 트림 채널(ts/te)을 레이어 shapes의 tm에 반영 — 키 있는 채널만 덮어쓴다.
+ * tm이 없으면 첫 그룹에 생성 (지오메트리 뒤·페인터 앞 — AE 배치).
+ */
+export function applyTrimChannels(layer: Record<string, unknown>, xkf: CustomKf): void {
+  const tsProp = buildKfScalarProp(xkf, 'ts')
+  const teProp = buildKfScalarProp(xkf, 'te')
+  if (!tsProp && !teProp) return
+  const shapes = layer.shapes as Record<string, unknown>[] | undefined
+  if (!shapes?.length) return
+  let tm = findTrimShape(shapes)
+  if (!tm) {
+    const group = shapes.find((g) => g.ty === 'gr' && Array.isArray(g.it))
+    if (!group) return
+    const it = group.it as Record<string, unknown>[]
+    tm = {
+      ty: 'tm',
+      s: { a: 0, k: 0 },
+      e: { a: 0, k: 100 },
+      o: { a: 0, k: 0 },
+      m: 1,
+      nm: 'Trim Paths',
+    }
+    const painterIdx = it.findIndex((x) => ['st', 'fl', 'gf', 'gs'].includes(String(x.ty)))
+    const trIdx = it.findIndex((x) => x.ty === 'tr')
+    const at = painterIdx >= 0 ? painterIdx : trIdx >= 0 ? trIdx : it.length
+    it.splice(at, 0, tm)
+  }
+  if (tsProp) tm.s = tsProp
+  if (teProp) tm.e = teProp
+}
+
+/**
+ * 레이어 tm의 s/e 애니메이션을 xkf ts/te 키로 추출 (시간은 이미 문서 시간축).
+ * 해당 채널에 키가 이미 있으면 건너뜀 — 구버전 세션 마이그레이션용. 추가 시 true.
+ */
+export function extractTrimToKf(layer: Record<string, unknown>): boolean {
+  const tm = findTrimShape(layer.shapes ?? null)
+  if (!tm) return false
+  const xkfRaw = (layer.xkf ?? {}) as Partial<CustomKf>
+  const keys: KfKey[] = Array.isArray(xkfRaw.keys) ? (xkfRaw.keys as KfKey[]) : []
+  const has = (ch: 'ts' | 'te') => keys.some((k) => k[ch] !== undefined)
+  let added = false
+  for (const [prop, ch] of [['s', 'ts'], ['e', 'te']] as const) {
+    if (has(ch)) continue
+    const p = tm[prop] as { a?: number; k?: unknown } | undefined
+    if (!p || p.a !== 1 || !Array.isArray(p.k)) continue
+    for (const kf of p.k as Record<string, unknown>[]) {
+      if (typeof kf.t !== 'number' || !Array.isArray(kf.s)) continue
+      const rt = Math.round((kf.t as number) * 10) / 10
+      let key = keys.find((k) => Math.abs(k.t - rt) < 0.5)
+      if (!key) {
+        key = { t: rt }
+        keys.push(key)
+      }
+      ;(key as unknown as Record<string, unknown>)[ch] =
+        Math.round(Math.max(0, Math.min(100, Number(kf.s[0]) || 0)) * 10) / 10
+      const o = kf.o as { x?: number[]; y?: number[] } | undefined
+      const bi = kf.i as { x?: number[]; y?: number[] } | undefined
+      if (o?.x?.length && bi?.x?.length)
+        key.e = {
+          ...(key.e ?? {}),
+          [ch]: [o.x[0], o.y?.[0] ?? 0, bi.x[0], bi.y?.[0] ?? 1] as Bezier4,
+        }
+      added = true
+    }
+  }
+  if (added) {
+    keys.sort((a, b) => a.t - b.t)
+    layer.xkf = {
+      ...xkfRaw,
+      on: !!xkfRaw.on,
+      ease: typeof xkfRaw.ease === 'number' ? xkfRaw.ease : 1,
+      keys,
+    }
+  }
+  return added
+}
+
 /** 레이어 i의 반폭/반높이 — 이미지는 에셋 크기, SVG는 bbox×스케일. */
 export function layerHalfOf(doc: LottieJson, i: number): [number, number] {
   const layer = doc.layers[i] as Record<string, unknown> | undefined
   if (!layer) return [60, 60]
+  // 씬 참조(프리컴프) 레이어 — 뷰포트 크기가 곧 박스
+  if (Number(layer.ty) === 0 && typeof layer.w === 'number')
+    return [(layer.w as number) / 2, Number(layer.h ?? layer.w) / 2]
   const asset = (doc.assets as Record<string, unknown>[] | undefined)?.find(
     (a) => a.id === layer.refId,
   )
-  if (asset) return [(asset.w as number) / 2, (asset.h as number) / 2]
+  if (asset && typeof asset.w === 'number' && !asset.layers)
+    return [(asset.w as number) / 2, (asset.h as number) / 2]
   const g = (layer.shapes as Record<string, unknown>[] | undefined)?.[0]
   if (g && typeof g.bboxW === 'number' && typeof g.bboxH === 'number') {
     const tr = (g.it as Record<string, unknown>[]).find((it) => it.ty === 'tr')
@@ -508,10 +686,14 @@ export function layerCenterOffsetOf(doc: LottieJson, i: number): [number, number
   const layer = doc.layers[i] as Record<string, unknown> | undefined
   if (!layer) return [0, 0]
   const a = (((layer.ks as Record<string, unknown>)?.a as { k?: number[] })?.k as number[]) ?? [0, 0]
+  // 씬 참조(프리컴프) — 뷰포트(레이어 w/h) 기준 중심
+  if (Number(layer.ty) === 0 && typeof layer.w === 'number')
+    return [(layer.w as number) / 2 - a[0], Number(layer.h ?? layer.w) / 2 - a[1]]
   const asset = (doc.assets as Record<string, unknown>[] | undefined)?.find(
     (x) => x.id === layer.refId,
   )
-  if (asset) return [(asset.w as number) / 2 - a[0], (asset.h as number) / 2 - a[1]]
+  if (asset && typeof asset.w === 'number' && !asset.layers)
+    return [(asset.w as number) / 2 - a[0], (asset.h as number) / 2 - a[1]]
   return [-a[0], -a[1]]
 }
 

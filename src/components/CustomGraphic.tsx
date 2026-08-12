@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { useEditor } from '../store'
+import { t } from '../lib/i18n'
 import { templates } from '../templates'
 import type { LottieJson, LottieLayer } from '../lib/lottieUtils'
 import {
@@ -108,7 +109,7 @@ export default function CustomGraphic() {
         const image = await readImageFile(file)
         setPending({ kind: 'image', image, name: file.name })
       } else {
-        throw new Error('SVG/PNG/JPG/WebP 파일만 지원합니다')
+        throw new Error(t('SVG/PNG/JPG/WebP 파일만 지원합니다'))
       }
     } catch (e) {
       setPending(null)
@@ -139,7 +140,6 @@ export default function CustomGraphic() {
 
   return (
     <div className="panel__section">
-      <h3 className="panel__label">내 그래픽</h3>
 
       {slots.length > 1 && (
         <select
@@ -152,7 +152,7 @@ export default function CustomGraphic() {
         >
           {slots.map((s, i) => (
             <option key={s.match} value={i}>
-              {s.label} 교체
+              {t('{label} 교체').replace('{label}', s.label)}
             </option>
           ))}
         </select>
@@ -177,9 +177,9 @@ export default function CustomGraphic() {
       >
         <span className="dropzone__icon">⬆</span>
         <span>
-          SVG/PNG를 끌어다 놓거나 <u>클릭해서 선택</u>
+          {t('SVG/PNG를 끌어다 놓거나')} <u>{t('클릭해서 선택')}</u>
         </span>
-        <span className="panel__hint">→ {slot.label} 교체</span>
+        <span className="panel__hint">→ {t('{label} 교체').replace('{label}', slot.label)}</span>
       </div>
       <input
         ref={fileRef}
@@ -198,13 +198,13 @@ export default function CustomGraphic() {
           <LottiePlayer data={previewData} playing={false} seekFrame={0} className="graphicpreview__canvas" />
           <div className="graphicpreview__meta">
             <span className="graphicpreview__name">{pending.name}</span>
-            <span className="panel__hint">→ {slot.label}에 적용됩니다</span>
+            <span className="panel__hint">→ {t('{label}에 적용됩니다').replace('{label}', slot.label)}</span>
             <div className="graphicpreview__actions">
               <button className="btn btn--primary" onClick={applyPending}>
-                적용하기
+                {t('적용하기')}
               </button>
               <button className="btn btn--secondary" onClick={() => setPending(null)}>
-                취소
+                {t('취소')}
               </button>
             </div>
           </div>
@@ -215,7 +215,7 @@ export default function CustomGraphic() {
         // 이미지 교체 후 기준점(회전·스케일 피벗) 조정 — 이미지 위에서 직접 드래그
         <div className="knob">
           <div className="knob__head">
-            <span className="knob__name">앵커 (기준점)</span>
+            <span className="knob__name">{t('앵커 (기준점)')}</span>
             <span className="knob__unit">
               {Math.round(anchorFrac[0] * 100)}% · {Math.round(anchorFrac[1] * 100)}%
             </span>
@@ -228,20 +228,19 @@ export default function CustomGraphic() {
             onCommit={commitEdit}
           />
           <p className="knob__note">
-            이미지 위 십자점을 드래그 — 회전·스케일할 때 고정되는 점.
+            {t('이미지 위 십자점을 드래그 — 회전·스케일할 때 고정되는 점.')}
           </p>
         </div>
       )}
 
       {isCustom && !pending && (
         <button className="btn btn--secondary btn--full" onClick={reset}>
-          {slot.label} 디폴트로 되돌리기
+          {t('{label} 디폴트로 되돌리기').replace('{label}', slot.label)}
         </button>
       )}
 
       <p className="panel__hint">
-        벡터: 단색 SVG (텍스트는 아웃라인 필요) · 래스터: PNG/JPG/WebP (파일에 임베드, 색상 편집
-        불가). 모션은 유지되고 그래픽만 교체됩니다.
+        {t('벡터: 단색 SVG (텍스트는 아웃라인 필요) · 래스터: PNG/JPG/WebP (파일에 임베드, 색상 편집 불가). 모션은 유지되고 그래픽만 교체됩니다.')}
       </p>
       {error && <p className="panel__error">{error}</p>}
     </div>

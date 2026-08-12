@@ -175,6 +175,8 @@ export function applyKnobs(
   knobs: TemplateKnob[],
   values: Record<string, number | string>,
 ): LottieJson {
+  // 노브 없음(커스텀 모드) — 변환 없음, 호출자가 이미 소유한 클론을 그대로 공유 (핫패스 클론 절약)
+  if (!knobs.length) return base
   const out = structuredClone(base)
   for (const knob of knobs) {
     const raw = values[knob.id] ?? knob.default

@@ -4,6 +4,7 @@
 // 프로젝트 파일(.lmproj)·자동 저장·내보낸 Lottie JSON에는 절대 포함되지 않는다.
 import { normSel, normKf, type Bezier4, type KfChannel, type KfKey } from './customBuilder'
 import type { LottieJson } from './lottieUtils'
+import { t } from './i18n'
 
 const KEY_STORAGE = 'lottiemaker.anthropic.key'
 const MODEL = 'claude-sonnet-5'
@@ -149,7 +150,7 @@ export function sanitizePlan(raw: unknown, layerCount: number, op: number): AiMo
     .filter(([, v]) => v.keys.length > 0)
     .map(([index, v]) => ({ index, keys: v.keys.sort((a, b) => a.t - b.t), ...(v.clip ? { clip: v.clip } : {}) }))
     .sort((a, b) => a.index - b.index)
-  if (!layers.length) throw new Error('AI가 적용 가능한 모션을 만들지 못했습니다 — 요청을 더 구체적으로 써보세요')
+  if (!layers.length) throw new Error(t('AI가 적용 가능한 모션을 만들지 못했습니다 — 요청을 더 구체적으로 써보세요'))
   const note = typeof r.note === 'string' ? r.note.slice(0, 200) : undefined
   return { layers, ...(note ? { note } : {}) }
 }
@@ -243,17 +244,17 @@ Craft guidelines:
 function apiError(status: number, detail: string): Error {
   if (status === 401)
     return new Error(
-      'API 키가 유효하지 않습니다 — console.anthropic.com › API Keys에서 발급한 키인지(클로드 앱 구독과 별개), 전체가 빠짐없이 복사됐는지 확인하세요',
+      t('API 키가 유효하지 않습니다 — console.anthropic.com › API Keys에서 발급한 키인지(클로드 앱 구독과 별개), 전체가 빠짐없이 복사됐는지 확인하세요'),
     )
   if (status === 403)
-    return new Error(`권한이 없는 키입니다 — 워크스페이스/모델 접근 설정을 확인하세요${detail ? ` (${detail})` : ''}`)
+    return new Error(`${t('권한이 없는 키입니다 — 워크스페이스/모델 접근 설정을 확인하세요')}${detail ? ` (${detail})` : ''}`)
   if (status === 400 && /credit/i.test(detail))
-    return new Error('크레딧이 부족합니다 — console.anthropic.com에서 충전 후 다시 시도하세요')
+    return new Error(t('크레딧이 부족합니다 — console.anthropic.com에서 충전 후 다시 시도하세요'))
   if (status === 404 && /model/i.test(detail))
-    return new Error(`모델을 사용할 수 없는 키입니다 (${detail})`)
-  if (status === 429) return new Error('요청 한도 초과 — 잠시 후 다시 시도하세요')
-  if (status >= 500) return new Error('Anthropic API 일시 오류 — 잠시 후 다시 시도하세요')
-  return new Error(detail || `API 오류 (${status})`)
+    return new Error(t('모델을 사용할 수 없는 키입니다 ({detail})').replace('{detail}', detail))
+  if (status === 429) return new Error(t('요청 한도 초과 — 잠시 후 다시 시도하세요'))
+  if (status >= 500) return new Error(t('Anthropic API 일시 오류 — 잠시 후 다시 시도하세요'))
+  return new Error(detail || t('API 오류 ({status})').replace('{status}', String(status)))
 }
 
 export async function generateMotion(opts: {
@@ -277,7 +278,10 @@ export async function generateMotion(opts: {
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 8000,
+        // claude-sonnet-5는 thinking 생략 시 adaptive thinking이 기본 —
+        // max_tokens가 (thinking + 툴 JSON) 합산 상한이라 여유 있게 잡고 effort는 낮춘다
+        max_tokens: 16000,
+        output_config: { effort: 'low' },
         system: systemPrompt(doc),
         tools: [MOTION_TOOL],
         tool_choice: { type: 'tool', name: 'apply_motion' },
@@ -291,7 +295,7 @@ export async function generateMotion(opts: {
     })
   } catch (e) {
     if ((e as Error).name === 'AbortError') throw e
-    throw new Error('네트워크 오류 — 인터넷 연결을 확인하세요')
+    throw new Error(t('네트워크 오류 — 인터넷 연결을 확인하세요'))
   }
   if (!res.ok) {
     let detail = ''
@@ -309,9 +313,12 @@ export async function generateMotion(opts: {
   }
   const tool = data.content?.find((b) => b.type === 'tool_use' && b.name === 'apply_motion')
   if (!tool) {
+    // refusal은 같은 프롬프트 재시도가 무의미 — 재시도 안내 대신 표현 변경 안내
+    if (data.stop_reason === 'refusal')
+      throw new Error(t('요청이 거부되었습니다 — 다른 표현으로 다시 써보세요'))
     if (data.stop_reason === 'max_tokens')
-      throw new Error('응답이 너무 길어 잘렸습니다 — 요청을 더 작게 나눠보세요')
-    throw new Error('AI가 모션을 반환하지 않았습니다 — 다시 시도해보세요')
+      throw new Error(t('응답이 너무 길어 잘렸습니다 — 요청을 더 작게 나눠보세요'))
+    throw new Error(t('AI가 모션을 반환하지 않았습니다 — 다시 시도해보세요'))
   }
   return sanitizePlan(tool.input, doc.layers.length, doc.op)
 }

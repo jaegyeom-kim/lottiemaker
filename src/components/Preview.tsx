@@ -1,6 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useEditor } from '../store'
+import { t } from '../lib/i18n'
+import {
+  CursorIcon, HandIcon, SquareIcon, CircleIcon, TriangleIcon, StarIcon, LineIcon, PenIcon,
+  PlayIcon, PauseIcon, ReplayIcon, FitIcon, LayersIcon, SceneIcon,
+} from './icons'
 import { durationSec, parseLottie, type LottieJson } from '../lib/lottieUtils'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
 import {
@@ -11,7 +15,11 @@ import {
 import LottiePlayer from './LottiePlayer'
 import MockupView from './MockupView'
 import Timeline from './Timeline'
-import AnchorControls from './AnchorControls'
+import {
+  buildShapeSvg, buildPenSvg, penPathD, shapeGhostPoints, STROKE_W,
+  type DrawTool, type PenPt,
+} from '../lib/drawTools'
+import { readDotLottie } from '../lib/dotlottie'
 
 /** 문서에서 레이어 i의 기준 위치 (첫 키프레임 또는 정적 값). atFrame = 키프레임 모드 보간 시각. */
 function layerBaseOf(doc: LottieJson, i: number, atFrame?: number): [number, number] | null {
@@ -44,9 +52,20 @@ export default function Preview() {
     setPlaying, setSpeed, setLoop, setBg, load, replay, setCustomIdx,
     addCustomLayer,
   } = useEditor()
+  // 캔버스 논리 크기 — 씬 진입 시 컴프 뷰포트로 바뀐다 (AE 방식)
+  const cw = Number(animationData?.w ?? 512)
+  const ch = Number(animationData?.h ?? 512)
   const sourceData = useEditor((s) => s.sourceData)
   const customIdx = useEditor((s) => s.customIdx)
   const customIdxs = useEditor((s) => s.customIdxs)
+  // 씬(컴포지션) 목록 — 문서의 xscene comp 에셋에서 파생
+  const activeScene = useEditor((s) => s.activeScene)
+  const sceneTabs = (() => {
+    const as = (sourceData?.assets as Record<string, unknown>[] | undefined) ?? []
+    return as
+      .filter((a) => a.xscene === true && a.id !== '__main')
+      .map((a) => ({ id: String(a.id), name: String(a.nm ?? a.id) }))
+  })()
   // 전역 작업 모드 (템플릿/커스텀) — 아래 로컬 mode(canvas/mockup)와 다른 값
   const appMode = useEditor((s) => s.mode)
   const [frame, setFrame] = useState(0)
@@ -71,11 +90,59 @@ export default function Preview() {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null)
   // 빈 곳을 누르고 있는 동안 모든 레이어 영역 표시
   const [showAllBoxes, setShowAllBoxes] = useState(false)
-  // 앵커 팝오버 — 선택 박스 옆 픽토그램 클릭으로 토글
-  const [anchorPop, setAnchorPop] = useState(false)
-  useEffect(() => {
-    setAnchorPop(false)
-  }, [customIdx, templateId])
+  // 캔버스 마키(러버밴드) 다중 선택 — 빈 곳/페이스트보드 드래그, ⇧ = 기존 선택에 추가 (AE 방식)
+  const selMarquee = useRef<{ x0: number; y0: number; base: number[] } | null>(null)
+  const [selMarqueeBox, setSelMarqueeBox] = useState<{
+    x: number
+    y: number
+    w: number
+    h: number
+  } | null>(null)
+
+  const marqueeBegin = (px: number, py: number, additive: boolean) => {
+    selMarquee.current = {
+      x0: px,
+      y0: py,
+      base: additive ? [...useEditor.getState().customIdxs] : [],
+    }
+    if (!additive) useEditor.getState().deselectCustom()
+    setShowAllBoxes(true)
+  }
+
+  const marqueeMove = (clientX: number, clientY: number) => {
+    const mq = selMarquee.current
+    const rect = wrapRef.current?.getBoundingClientRect()
+    if (!mq || !rect) return
+    const f = cw / rect.width
+    const px = (clientX - rect.left) * f
+    const py = (clientY - rect.top) * f
+    if (Math.abs(px - mq.x0) < 3 && Math.abs(py - mq.y0) < 3) return
+    const x0 = Math.min(mq.x0, px)
+    const y0 = Math.min(mq.y0, py)
+    const x1 = Math.max(mq.x0, px)
+    const y1 = Math.max(mq.y0, py)
+    setSelMarqueeBox({ x: x0, y: y0, w: x1 - x0, h: y1 - y0 })
+    const s2 = useEditor.getState()
+    const doc2 = s2.sourceData
+    if (!doc2) return
+    const hits: number[] = []
+    doc2.layers.forEach((lyr, i) => {
+      if ((lyr as Record<string, unknown>).hd === true) return
+      const b = layerBase(i)
+      if (!b) return
+      const [cox, coy] = layerCenterOffsetOf(doc2, i)
+      const [hw, hh] = layerHalf(i)
+      const cx = b[0] + cox
+      const cy = b[1] + coy
+      if (cx + hw >= x0 && cx - hw <= x1 && cy + hh >= y0 && cy - hh <= y1) hits.push(i)
+    })
+    s2.setCustomSelList([...mq.base, ...hits])
+  }
+
+  const marqueeEnd = () => {
+    selMarquee.current = null
+    setSelMarqueeBox(null)
+  }
   const setCurFrame = useEditor((s) => s.setCurFrame)
   const jumpToken = useEditor((s) => s.jumpToken)
   // 재생 중 실제 프레임 — 단축키가 파킹값 대신 눈에 보이는 프레임을 쓰도록
@@ -96,8 +163,8 @@ export default function Preview() {
   // 아니면 내부 키프레임 클립보드를 재생헤드에 붙여넣기
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
-      const t = e.target as HTMLElement | null
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      const tgt = e.target as HTMLElement | null
+      if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)) return
       const s = useEditor.getState()
       if (s.mode !== 'custom') return
       let imgFile: File | null = null
@@ -109,7 +176,7 @@ export default function Preview() {
       }
       if (imgFile) {
         e.preventDefault()
-        const name = imgFile.name?.replace(/\.[^.]+$/, '') || '붙여넣은 이미지'
+        const name = imgFile.name?.replace(/\.[^.]+$/, '') || t('붙여넣은 이미지')
         const done = (payload: CustomPayload) => useEditor.getState().addCustomLayer(payload, name)
         if (imgFile.type === 'image/svg+xml') {
           imgFile
@@ -178,8 +245,10 @@ export default function Preview() {
   // 라이브 편집 중엔 고스트 숨김 — 매 틱 로티 인스턴스 재생성 방지
   const liveEditing = useEditor((s) => s.editBaseline !== null)
 
-  // 툴 + 뷰포트 (팬/줌)
-  const [tool, setTool] = useState<'move' | 'hand'>('move')
+  // 툴 + 뷰포트 (팬/줌) — 드로잉 툴은 Figma 단축키 (R/E/L/P)
+  const [tool, setTool] = useState<'move' | 'hand' | DrawTool>('move')
+  const toolRef = useRef(tool)
+  toolRef.current = tool
   const [zoom, setZoom] = useState(1)
   const zoomRef = useRef(1)
   zoomRef.current = zoom
@@ -187,6 +256,103 @@ export default function Preview() {
   const panDrag = useRef<{ x: number; y: number; px: number; py: number } | null>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
   const handActive = tool === 'hand'
+  const drawTool: DrawTool | null = tool !== 'move' && tool !== 'hand' ? tool : null
+
+  // ── 드로잉 상태 — 박스 드래그(도형) + 펜 포인트 ──
+  const [drawDrag, setDrawDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+  const [penPts, setPenPts] = useState<PenPt[]>([])
+  const penPtsRef = useRef(penPts)
+  penPtsRef.current = penPts
+  const [penHover, setPenHover] = useState<[number, number] | null>(null)
+  const penHandleIdx = useRef<number | null>(null)
+  // 펜 = 그리는 즉시 실제 레이어 (일러스트레이터 방식) — 2점부터 생성, 이후 라이브 갱신
+  const penCreated = useRef(false)
+  // 고스트 앵커/핸들 드래그 — kind: 앵커 이동 | 나가는 핸들 | 들어오는 핸들
+  const ghostDrag = useRef<{ kind: 'anchor' | 'ho' | 'hi'; idx: number } | null>(null)
+
+  /** 화면 좌표 → 캔버스 좌표 (512 기준, 줌은 rect가 이미 반영). */
+  const toCanvasPt = (e: { clientX: number; clientY: number }): [number, number] | null => {
+    const rect = wrapRef.current?.getBoundingClientRect()
+    if (!rect || rect.width < 1) return null
+    const f = cw / rect.width
+    const clamp = (v: number) => Math.max(-1024, Math.min(1536, v))
+    return [clamp((e.clientX - rect.left) * f), clamp((e.clientY - rect.top) * f)]
+  }
+
+  const TOOL_NAMES: Record<DrawTool, string> = {
+    rect: '사각형', ellipse: '원형', polygon: '삼각형', star: '별', line: '선', pen: '패스',
+  }
+
+  const commitDrawnShape = (dd: { x0: number; y0: number; x1: number; y1: number }) => {
+    const dt = toolRef.current
+    if (dt === 'move' || dt === 'hand' || dt === 'pen') return
+    const w = Math.abs(dd.x1 - dd.x0)
+    const h = Math.abs(dd.y1 - dd.y0)
+    if (w < 3 && h < 3) return // 클릭만 한 것 — 무시
+    const svg = buildShapeSvg(dt, w, h, dt === 'line' ? { dx: dd.x1 - dd.x0, dy: dd.y1 - dd.y0 } : undefined)
+    const size = dt === 'line' ? Math.max(w, h) + STROKE_W + 2 : Math.max(w, h)
+    useEditor
+      .getState()
+      .addCustomLayer(
+        { kind: 'svg', graphic: svgToLottie(svg) },
+        t(TOOL_NAMES[dt]),
+        [(dd.x0 + dd.x1) / 2, (dd.y0 + dd.y1) / 2],
+        size,
+      )
+    setTool('move') // Figma처럼 만들고 나면 이동 툴로
+  }
+
+  /** 펜 경로를 실제 레이어에 반영 — 2점부터 생성, 이후 라이브 교체 (일러 방식). */
+  const syncPenLayer = (pts: PenPt[], closed = false) => {
+    const built = buildPenSvg(pts, closed)
+    if (!built) return
+    const payload: CustomPayload = { kind: 'svg', graphic: svgToLottie(built.svg) }
+    const s = useEditor.getState()
+    if (!penCreated.current) {
+      s.addCustomLayer(payload, t('패스'), built.center, built.size)
+      penCreated.current = true
+    } else {
+      s.replaceCustomGraphicLive(payload, built.center, built.size)
+    }
+  }
+
+  /** 펜 종료 — 그린 만큼 레이어로 확정 (Esc·Enter·툴 전환·닫기 전부 여기로). */
+  const finishPen = (close: boolean, ptsOverride?: PenPt[]) => {
+    const pts = ptsOverride ?? penPtsRef.current
+    setPenPts([])
+    setPenHover(null)
+    penHandleIdx.current = null
+    ghostDrag.current = null
+    const created = penCreated.current
+    penCreated.current = false
+    setTool('move') // 직접 종료 시 이동 툴로 — switchTool 경유면 뒤이어 목표 툴로 덮임
+    if (pts.length < 2) {
+      // 점 하나뿐 — 레이어가 없으니 조용히 정리
+      return
+    }
+    syncPenLayerFinal(pts, close, created)
+  }
+  const syncPenLayerFinal = (pts: PenPt[], close: boolean, created: boolean) => {
+    const built = buildPenSvg(pts, close)
+    if (!built) return
+    const payload: CustomPayload = { kind: 'svg', graphic: svgToLottie(built.svg) }
+    const s = useEditor.getState()
+    if (created) {
+      s.replaceCustomGraphicLive(payload, built.center, built.size)
+      s.commitEdit()
+    } else {
+      s.addCustomLayer(payload, t('패스'), built.center, built.size)
+    }
+  }
+
+  /** 툴 전환 — 펜 진행 중이면 그린 만큼 레이어로 확정하고 전환 (일러: 오브젝트 유지). */
+  const switchTool = (next: typeof tool) => {
+    if (toolRef.current === 'pen' && penPtsRef.current.length) {
+      finishPen(false)
+    }
+    setDrawDrag(null)
+    setTool(next)
+  }
 
   // 템플릿 전환 시 뷰포트 리셋
   useEffect(() => {
@@ -206,14 +372,32 @@ export default function Preview() {
   useEffect(() => {
     if (templateId !== '__custom') return
     const isTyping = (t: EventTarget | null) => {
-      const el = t as HTMLElement | null
-      return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+      const el = t as HTMLInputElement | null
+      if (!el) return false
+      if (el.tagName === 'TEXTAREA' || el.isContentEditable) return true
+      // 슬라이더/체크박스 포커스가 단축키(⌘Z 등)를 삼키지 않게 — 텍스트 입력만 차단
+      return el.tagName === 'INPUT' && !['range', 'checkbox', 'radio', 'button'].includes(el.type)
     }
     const down = (e: KeyboardEvent) => {
       if (isTyping(e.target)) return
       const s = useEditor.getState()
       if (e.key === 'Escape') {
-        setAnchorPop(false)
+        // 마키 진행 중 취소
+        if (selMarquee.current) {
+          selMarquee.current = null
+          setSelMarqueeBox(null)
+          return
+        }
+        // 펜 진행 중 Esc = 그린 만큼 레이어로 확정하고 펜 종료 (일러 방식)
+        if (penPtsRef.current.length) {
+          finishPen(false)
+          return
+        }
+        if (toolRef.current !== 'move' && toolRef.current !== 'hand') {
+          setDrawDrag(null)
+          setTool('move')
+          return
+        }
         if (s.kfSel.length) s.setKfSel([]) // 타임라인 키 선택 해제
         // 진행 중인 드래그/리사이즈 취소 — 시작 시점으로 복원 (PS Esc)
         if (dragStart.current || resizeDrag.current) {
@@ -230,8 +414,30 @@ export default function Preview() {
           s.cancelEdit()
         }
       }
-      else if (e.key.toLowerCase() === 'v' && !e.metaKey && !e.ctrlKey) setTool('move')
-      else if (e.key.toLowerCase() === 'h' && !e.metaKey && !e.ctrlKey) setTool('hand')
+      else if (e.key.toLowerCase() === 'v' && !e.metaKey && !e.ctrlKey) switchTool('move')
+      else if (e.key.toLowerCase() === 'h' && !e.metaKey && !e.ctrlKey) switchTool('hand')
+      // 드로잉 툴 — AE 배치: G = 펜, Q = 도형 순환 (P/S/R/T는 AE 채널 공개)
+      else if (e.key.toLowerCase() === 'g' && !e.metaKey && !e.ctrlKey && !e.altKey) switchTool('pen')
+      else if (e.key.toLowerCase() === 'q' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const cycle: DrawTool[] = ['rect', 'ellipse', 'polygon', 'star', 'line']
+        const cur = cycle.indexOf(toolRef.current as DrawTool)
+        switchTool(cycle[(cur + 1) % cycle.length])
+      }
+      // AE 채널 공개 — P/S/R/T 솔로 토글, ⇧ = 추가, U = 키 있는 채널 전부
+      else if (
+        !e.metaKey && !e.ctrlKey && !e.altKey &&
+        ['p', 's', 'r', 't', 'u'].includes(e.key.toLowerCase()) &&
+        s.customIdxs.length
+      ) {
+        e.preventDefault()
+        const k = e.key.toLowerCase()
+        const spec = k === 't' ? 'o' : k === 'u' ? 'u' : (k as 'p' | 's' | 'r')
+        s.revealChannels(s.customIdxs, spec, e.shiftKey)
+      }
+      else if (e.key === 'Enter' && toolRef.current === 'pen' && penPtsRef.current.length >= 2) {
+        e.preventDefault()
+        finishPen(false)
+      }
       else if (e.key === '0' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
         setZoom(1)
@@ -241,6 +447,14 @@ export default function Preview() {
         // 타임라인 키 선택이 있으면 키 삭제, 아니면 선택 레이어 삭제
         if (s.kfSel.length) s.removeKfKeys(s.kfSel)
         else if (s.customIdxs.length) s.removeCustomLayers(s.customIdxs)
+      } else if (e.key.toLowerCase() === 'a' && (e.metaKey || e.ctrlKey)) {
+        // ⌘A = 전체 선택 / ⇧⌘A = 선택 해제 (AE)
+        e.preventDefault()
+        if (e.shiftKey) s.deselectCustom()
+        else {
+          const n = s.sourceData?.layers.length ?? 0
+          if (n) s.setCustomSelList(Array.from({ length: n }, (_, i) => i))
+        }
       } else if (e.key.toLowerCase() === 'd' && (e.metaKey || e.ctrlKey)) {
         // 복제 — 선택이 있을 때만 (빈 곳 클릭으로 해제된 상태에서 보이지 않는 레이어 편집 방지)
         e.preventDefault()
@@ -524,9 +738,14 @@ export default function Preview() {
     const s = useEditor.getState()
     const n = s.sourceData?.layers.length ?? 0
     const hits: number[] = []
+    const anySolo = (s.sourceData?.layers as Record<string, unknown>[] | undefined)?.some(
+      (l) => l.xsolo === true,
+    )
     for (let i = 0; i < n; i++) {
-      // 숨김 레이어는 클릭/호버 대상에서 제외 (패널에서는 선택 가능)
-      if ((s.sourceData?.layers[i] as Record<string, unknown> | undefined)?.hd) continue
+      // 숨김·잠금·(솔로 중) 비솔로 레이어는 클릭/호버 대상에서 제외
+      const lr = s.sourceData?.layers[i] as Record<string, unknown> | undefined
+      if (lr?.hd || lr?.xlock === true) continue
+      if (anySolo && lr?.xsolo !== true) continue
       const b = layerBase(i)
       if (!b || !s.sourceData) continue
       const [hw, hh] = layerHalf(i)
@@ -563,9 +782,10 @@ export default function Preview() {
     t: number,
     half: number,
     snapDist: number,
+    size: number = cw,
   ): { shift: number; guide: number } | null => {
-    const CENTER_TARGETS = [256, 0, 128, 384, 512]
-    const EDGE_TARGETS = [0, 256, 512]
+    const CENTER_TARGETS = [size / 2, 0, size / 4, (3 * size) / 4, size]
+    const EDGE_TARGETS = [0, size / 2, size]
     let best: { d: number; shift: number; guide: number } | null = null
     const consider = (val: number, targets: number[]) => {
       for (const g of targets) {
@@ -585,7 +805,43 @@ export default function Preview() {
     setTotalFrames(total)
   }, [])
 
+  /** 로티 문서 라우팅 — 커스텀 모드면 레이어 변환 임포트(키프레임 유지), 아니면 문서 열기. */
+  const routeLottieDoc = (doc: LottieJson, name: string) => {
+    const s = useEditor.getState()
+    if (s.mode === 'custom') {
+      const res = s.importLottieLayers(doc)
+      if (!res.added) {
+        alert(t('가져올 수 있는 레이어가 없습니다 — 셰이프/이미지/솔리드 레이어만 지원합니다'))
+        return
+      }
+      const parts = [
+        t('레이어 {n}개 가져옴 (키프레임 유지)').replace('{n}', String(res.added)),
+        ...(res.scenes ? [t('씬 {n}개 — 하단 탭에서 전환').replace('{n}', String(res.scenes))] : []),
+        ...(res.skipped ? [t('건너뜀 {n}개').replace('{n}', String(res.skipped))] : []),
+        ...res.warnings.map((w) => t(w)),
+      ]
+      if (res.skipped || res.warnings.length) alert(parts.join('\n'))
+      return
+    }
+    load(doc, name)
+  }
+
   const openFile = (file: File) => {
+    // dotLottie(.lottie) — zip에서 애니메이션 추출
+    if (/\.lottie$/i.test(file.name)) {
+      file
+        .arrayBuffer()
+        .then(async (buf) => {
+          const inner = await readDotLottie(buf)
+          if (!inner) {
+            alert(t('dotLottie 파일을 읽을 수 없습니다'))
+            return
+          }
+          routeLottieDoc(parseLottie(JSON.stringify(inner)), file.name.replace(/\.lottie$/i, ''))
+        })
+        .catch((e) => alert((e as Error).message))
+      return
+    }
     file.text().then((text) => {
       try {
         // 프로젝트 세이브 파일 (.lmproj.json) — 세션 복원
@@ -595,7 +851,7 @@ export default function Preview() {
           // 히스토리 유무가 아니라 작업공간이 비어있지 않으면 확인 — 복원 직후 세션도 보호
           if (
             s.animationData &&
-            !window.confirm('현재 작업을 프로젝트 파일 내용으로 교체할까요?')
+            !window.confirm(t('현재 작업을 프로젝트 파일 내용으로 교체할까요?'))
           )
             return
           s.restoreSession(maybe as Parameters<typeof s.restoreSession>[0])
@@ -605,7 +861,7 @@ export default function Preview() {
         // JSON 파싱 실패 → 아래 parseLottie가 에러 메시지 처리
       }
       try {
-        load(parseLottie(text), file.name)
+        routeLottieDoc(parseLottie(text), file.name)
       } catch (e) {
         alert((e as Error).message)
       }
@@ -627,10 +883,10 @@ export default function Preview() {
     const rect = wrapRef.current?.getBoundingClientRect()
     let at: [number, number] | undefined
     if (rect) {
-      const f = 512 / rect.width
+      const f = cw / rect.width
       at = [
-        Math.max(0, Math.min(512, (clientX - rect.left) * f)),
-        Math.max(0, Math.min(512, (clientY - rect.top) * f)),
+        Math.max(0, Math.min(cw, (clientX - rect.left) * f)),
+        Math.max(0, Math.min(ch, (clientY - rect.top) * f)),
       ]
     }
     addCustomLayer(payload, name, at)
@@ -649,7 +905,7 @@ export default function Preview() {
       // 그래픽 업로드는 커스텀 전용 — 템플릿 모드에선 확인 후 전환 (템플릿 작업은 보관됨)
       const s = useEditor.getState()
       if (s.mode !== 'custom') {
-        if (!window.confirm('그래픽 업로드는 커스텀 기능입니다. 커스텀으로 전환할까요?\n(템플릿 작업은 그대로 보관됩니다)'))
+        if (!window.confirm(t('그래픽 업로드는 커스텀 기능입니다. 커스텀으로 전환할까요?\n(템플릿 작업은 그대로 보관됩니다)')))
           return
         s.setMode('custom')
       }
@@ -669,20 +925,20 @@ export default function Preview() {
       onDragLeave={() => setDragOver(false)}
       onDrop={handleDrop}
     >
-      {animationData && (
+      {animationData && templateId !== '__custom' && (
         <div className="preview__modebar">
           <div className="segment segment--compact">
             <button
               className={`segment__btn ${mode === 'canvas' ? 'segment__btn--on' : ''}`}
               onClick={() => setMode('canvas')}
             >
-              미리보기
+              {t('미리보기')}
             </button>
             <button
               className={`segment__btn ${mode === 'mockup' ? 'segment__btn--on' : ''}`}
               onClick={() => setMode('mockup')}
             >
-              사용 예시
+              {t('사용 예시')}
             </button>
           </div>
         </div>
@@ -693,59 +949,215 @@ export default function Preview() {
         // 배경 옵션(체커 등)은 아트보드 내부에만 — 바깥은 항상 페이스트보드
         className={`preview__canvas ${mode === 'mockup' ? 'preview__canvas--dark' : 'preview__canvas--board'} ${
           handActive && templateId === '__custom' && mode === 'canvas' ? 'preview__canvas--hand' : ''
-        }`}
+        } ${drawTool && templateId === '__custom' && mode === 'canvas' ? 'preview__canvas--draw' : ''}`}
         onPointerDown={(e) => {
+          if (templateId !== '__custom' || mode !== 'canvas') return
+          // 드로잉 툴 — 캔버스 좌표로 도형 드래그 / 펜 포인트
+          if (drawTool) {
+            if ((e.target as HTMLElement).closest('.canvastools, .drawbar')) return
+            const pt = toCanvasPt(e)
+            if (!pt) return
+            e.preventDefault()
+            if (drawTool === 'pen') {
+              const pts = penPtsRef.current
+              // 시작점 근처 클릭 = 닫힌 패스로 완성
+              if (pts.length >= 3 && Math.hypot(pt[0] - pts[0].p[0], pt[1] - pts[0].p[1]) < 10) {
+                finishPen(true)
+                return
+              }
+              penHandleIdx.current = pts.length
+              const next = [...pts, { p: pt, ho: null, hi: null } as PenPt]
+              setPenPts(next)
+              syncPenLayer(next) // 2점부터 실제 레이어 (일러 방식)
+            } else {
+              setDrawDrag({ x0: pt[0], y0: pt[1], x1: pt[0], y1: pt[1] })
+            }
+            ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+            return
+          }
           // 핸드 툴 — 캔버스 어디서든 팬
-          if (templateId !== '__custom' || mode !== 'canvas' || !handActive) return
-          panDrag.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y }
-          ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+          if (handActive) {
+            panDrag.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y }
+            ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+            return
+          }
+          // 무브 툴 — 페이스트보드(컴프 밖)에서 마키 시작 (AE 방식)
+          if (tool === 'move') {
+            const tgt2 = e.target as HTMLElement
+            if (tgt2.closest('.canvastools, .drawbar, .scenetabs, .playbar, .customdrag, .selbox, .selhandle, .anchorbtn, .hoverbox, .allbox')) return
+            // 캔버스 위 이벤트는 자식(customdrag)이 이미 처리 — 드래그/마키 진행 중이면 패스
+            if (dragStart.current || selMarquee.current) return
+            const rect = wrapRef.current?.getBoundingClientRect()
+            if (!rect || rect.width < 1) return
+            const f = cw / rect.width
+            marqueeBegin(
+              (e.clientX - rect.left) * f,
+              (e.clientY - rect.top) * f,
+              e.shiftKey || e.metaKey || e.ctrlKey,
+            )
+            ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+          }
         }}
         onPointerMove={(e) => {
+          if (drawTool) {
+            const pt = toCanvasPt(e)
+            if (!pt) return
+            if (drawTool === 'pen') {
+              // 고스트 앵커/핸들 드래그 편집 (일러 방식 — ⌥ = 한쪽 핸들만)
+              const gd = ghostDrag.current
+              if (gd) {
+                const next = penPtsRef.current.map((pp, i) => {
+                  if (i !== gd.idx) return pp
+                  if (gd.kind === 'anchor') return { ...pp, p: pt }
+                  const v: [number, number] = [pt[0] - pp.p[0], pt[1] - pp.p[1]]
+                  const dead = Math.hypot(v[0], v[1]) < 2
+                  if (gd.kind === 'ho')
+                    return {
+                      ...pp,
+                      ho: dead ? null : v,
+                      hi: e.altKey ? pp.hi : dead ? null : ([-v[0], -v[1]] as [number, number]),
+                    }
+                  return {
+                    ...pp,
+                    hi: dead ? null : v,
+                    ho: e.altKey ? pp.ho : dead ? null : ([-v[0], -v[1]] as [number, number]),
+                  }
+                })
+                setPenPts(next)
+                syncPenLayer(next)
+                return
+              }
+              const hidx = penHandleIdx.current
+              if (hidx !== null) {
+                // 새 앵커에서 끌면 스무스 포인트 (대칭 핸들)
+                const next = penPtsRef.current.map((pp, i) => {
+                  if (i !== hidx) return pp
+                  const dx = pt[0] - pp.p[0]
+                  const dy = pt[1] - pp.p[1]
+                  const dead = Math.hypot(dx, dy) < 2
+                  return {
+                    ...pp,
+                    ho: dead ? null : ([dx, dy] as [number, number]),
+                    hi: dead ? null : ([-dx, -dy] as [number, number]),
+                  }
+                })
+                setPenPts(next)
+                syncPenLayer(next)
+              } else if (penPtsRef.current.length) {
+                setPenHover(pt)
+              }
+              return
+            }
+            setDrawDrag((dd) => {
+              if (!dd) return dd
+              let [x1, y1] = pt
+              if (e.shiftKey) {
+                const dx = x1 - dd.x0
+                const dy = y1 - dd.y0
+                if (drawTool === 'line') {
+                  // 45° 스냅
+                  const ang = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4)
+                  const len = Math.hypot(dx, dy)
+                  x1 = dd.x0 + Math.cos(ang) * len
+                  y1 = dd.y0 + Math.sin(ang) * len
+                } else {
+                  // 정비율
+                  const m = Math.max(Math.abs(dx), Math.abs(dy))
+                  x1 = dd.x0 + Math.sign(dx || 1) * m
+                  y1 = dd.y0 + Math.sign(dy || 1) * m
+                }
+              }
+              return { ...dd, x1, y1 }
+            })
+            return
+          }
+          // 페이스트보드 마키 진행 — 캡처가 스테이지에 있을 때
+          if (selMarquee.current && !dragStart.current && !drawTool) {
+            marqueeMove(e.clientX, e.clientY)
+            return
+          }
           const d = panDrag.current
           if (!d) return
           setPanState({ x: d.px + (e.clientX - d.x), y: d.py + (e.clientY - d.y) })
         }}
         onPointerUp={() => {
+          if (drawTool === 'pen') {
+            penHandleIdx.current = null
+            ghostDrag.current = null
+          } else if (drawDrag) {
+            commitDrawnShape(drawDrag)
+            setDrawDrag(null)
+          }
+          if (selMarquee.current) {
+            marqueeEnd()
+            setShowAllBoxes(false)
+          }
           panDrag.current = null
         }}
         onPointerCancel={() => {
+          setDrawDrag(null)
+          penHandleIdx.current = null
+          ghostDrag.current = null
           panDrag.current = null
+        }}
+        onDoubleClick={() => {
+          // 펜 더블클릭 = 열린 패스로 완성 (두 번째 클릭이 만든 중복 점 제거)
+          if (drawTool === 'pen' && penPtsRef.current.length >= 3) {
+            finishPen(false, penPtsRef.current.slice(0, -1))
+          }
         }}
       >
         {templateId === '__custom' && mode === 'canvas' && (
           <div className="canvastools">
-            <button
-              className={`canvastools__btn ${tool === 'move' ? 'canvastools__btn--on' : ''}`}
-              title="이동 툴 (V)"
-              onClick={() => setTool('move')}
-            >
-              ⭢
-            </button>
-            <button
-              className={`canvastools__btn ${handActive ? 'canvastools__btn--on' : ''}`}
-              title="핸드 툴 (H)"
-              onClick={() => setTool('hand')}
-            >
-              ✋
-            </button>
             <span className="canvastools__zoom">{Math.round(zoom * 100)}%</span>
             <button
               className="canvastools__btn"
-              title="100% / 중앙 (⌘0)"
+              title={t('100% / 중앙 (⌘0)')}
               onClick={() => {
                 setZoom(1)
                 setPanState({ x: 0, y: 0 })
               }}
             >
-              ⊡
+              <FitIcon />
             </button>
             <button
               className={`canvastools__btn ${onion ? 'canvastools__btn--on' : ''}`}
-              title="어니언 스킨 — 전후 프레임 겹쳐 보기 (과거 흑백 / 미래 컬러)"
+              title={t('어니언 스킨 — 전후 프레임 겹쳐 보기 (과거 흑백 / 미래 컬러)')}
               onClick={toggleOnion}
             >
-              ◎
+              <LayersIcon />
             </button>
+          </div>
+        )}
+        {/* 드로잉 툴바 — Figma UI3 방식: 캔버스 하단 중앙 플로팅 */}
+        {templateId === '__custom' && mode === 'canvas' && animationData && (
+          <div className="drawbar">
+            {(
+              [
+                { id: 'move', glyph: <CursorIcon />, tip: '이동 툴 (V)' },
+                { id: 'hand', glyph: <HandIcon />, tip: '핸드 툴 (H)' },
+                { id: 'sep1', glyph: null, tip: '' },
+                { id: 'rect', glyph: <SquareIcon />, tip: '사각형 (Q 순환) — 드래그로 그리기 · ⇧ 정사각형' },
+                { id: 'ellipse', glyph: <CircleIcon />, tip: '원 (Q 순환) — 드래그로 그리기 · ⇧ 정원' },
+                { id: 'polygon', glyph: <TriangleIcon />, tip: '삼각형 — 드래그로 그리기' },
+                { id: 'star', glyph: <StarIcon />, tip: '별 — 드래그로 그리기' },
+                { id: 'line', glyph: <LineIcon />, tip: '선 (Q 순환) — 드래그로 그리기 · ⇧ 45° 스냅' },
+                { id: 'pen', glyph: <PenIcon />, tip: '펜 (G) — 클릭 = 점 · 클릭+드래그 = 곡선 · 그리는 중 앵커/핸들 드래그 편집 (⌥ = 한쪽 핸들만) · 시작점 클릭 = 닫기 · Enter/Esc = 완성' },
+              ] as { id: string; glyph: ReactNode; tip: string }[]
+            ).map((b) =>
+              b.id === 'sep1' ? (
+                <span key={b.id} className="drawbar__sep" />
+              ) : (
+                <button
+                  key={b.id}
+                  className={`drawbar__btn ${tool === b.id ? 'drawbar__btn--on' : ''}`}
+                  title={t(b.tip)}
+                  onClick={() => switchTool(b.id as typeof tool)}
+                >
+                  {b.glyph}
+                </button>
+              ),
+            )}
           </div>
         )}
         {animationData ? (
@@ -757,8 +1169,11 @@ export default function Preview() {
               className={`preview__lottie preview__lottiewrap preview__lottiewrap--${bg}`}
               style={
                 templateId === '__custom'
-                  ? { transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }
-                  : undefined
+                  ? {
+                      transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                      aspectRatio: `${cw} / ${ch}`,
+                    }
+                  : { aspectRatio: `${cw} / ${ch}` }
               }
             >
               {/* 어니언 스킨 — 전후 프레임 고스트 (과거 흑백 / 미래 컬러) */}
@@ -788,7 +1203,7 @@ export default function Preview() {
               </div>
               {/* 모션 패스 — 위치 키 경로 (점선) + 프레임 점 + 키 마커 + 현재 위치 */}
               {motionPath && (
-                <svg className="motionpath" viewBox="0 0 512 512">
+                <svg className="motionpath" viewBox={`0 0 ${cw} ${ch}`}>
                   <polyline
                     className="motionpath__line"
                     points={motionPath.keys.map(([x, y]) => `${x},${y}`).join(' ')}
@@ -814,18 +1229,140 @@ export default function Preview() {
                   />
                 </svg>
               )}
+              {/* 드로잉 고스트 — 그리는 중인 도형/펜 경로 미리보기 */}
+              {drawTool && (drawDrag || penPts.length > 0) && (
+                <svg className="drawghost" viewBox={`0 0 ${cw} ${ch}`}>
+                  {drawDrag && drawTool === 'rect' && (
+                    <rect
+                      className="drawghost__shape"
+                      x={Math.min(drawDrag.x0, drawDrag.x1)}
+                      y={Math.min(drawDrag.y0, drawDrag.y1)}
+                      width={Math.abs(drawDrag.x1 - drawDrag.x0)}
+                      height={Math.abs(drawDrag.y1 - drawDrag.y0)}
+                    />
+                  )}
+                  {drawDrag && drawTool === 'ellipse' && (
+                    <ellipse
+                      className="drawghost__shape"
+                      cx={(drawDrag.x0 + drawDrag.x1) / 2}
+                      cy={(drawDrag.y0 + drawDrag.y1) / 2}
+                      rx={Math.abs(drawDrag.x1 - drawDrag.x0) / 2}
+                      ry={Math.abs(drawDrag.y1 - drawDrag.y0) / 2}
+                    />
+                  )}
+                  {drawDrag && (drawTool === 'polygon' || drawTool === 'star') && (
+                    <polygon
+                      className="drawghost__shape"
+                      points={shapeGhostPoints(
+                        drawTool,
+                        Math.min(drawDrag.x0, drawDrag.x1),
+                        Math.min(drawDrag.y0, drawDrag.y1),
+                        Math.abs(drawDrag.x1 - drawDrag.x0),
+                        Math.abs(drawDrag.y1 - drawDrag.y0),
+                      )}
+                    />
+                  )}
+                  {drawDrag && drawTool === 'line' && (
+                    <line
+                      className="drawghost__stroke"
+                      x1={drawDrag.x0}
+                      y1={drawDrag.y0}
+                      x2={drawDrag.x1}
+                      y2={drawDrag.y1}
+                    />
+                  )}
+                  {drawTool === 'pen' && penPts.length > 0 && (
+                    <>
+                      <path className="drawghost__path" d={penPathD(penPts, false, penHover)} />
+                      {penPts.map((pp, i) => {
+                        const grabKnob =
+                          (kind: 'anchor' | 'ho' | 'hi') => (e: React.PointerEvent) => {
+                            e.stopPropagation()
+                            e.preventDefault()
+                            // 첫 앵커 클릭 = 닫힌 패스로 완성 (일러/피그마)
+                            if (kind === 'anchor' && i === 0 && penPtsRef.current.length >= 3) {
+                              finishPen(true)
+                              return
+                            }
+                            ghostDrag.current = { kind, idx: i }
+                            canvasRef.current?.setPointerCapture(e.pointerId)
+                          }
+                        return (
+                          <g key={i}>
+                            {pp.ho && (
+                              <>
+                                <line
+                                  className="drawghost__handle"
+                                  x1={pp.p[0]}
+                                  y1={pp.p[1]}
+                                  x2={pp.p[0] + pp.ho[0]}
+                                  y2={pp.p[1] + pp.ho[1]}
+                                />
+                                <circle
+                                  className="drawghost__hdot"
+                                  cx={pp.p[0] + pp.ho[0]}
+                                  cy={pp.p[1] + pp.ho[1]}
+                                  r={3}
+                                  onPointerDown={grabKnob('ho')}
+                                />
+                              </>
+                            )}
+                            {pp.hi && (
+                              <>
+                                <line
+                                  className="drawghost__handle"
+                                  x1={pp.p[0]}
+                                  y1={pp.p[1]}
+                                  x2={pp.p[0] + pp.hi[0]}
+                                  y2={pp.p[1] + pp.hi[1]}
+                                />
+                                <circle
+                                  className="drawghost__hdot"
+                                  cx={pp.p[0] + pp.hi[0]}
+                                  cy={pp.p[1] + pp.hi[1]}
+                                  r={3}
+                                  onPointerDown={grabKnob('hi')}
+                                />
+                              </>
+                            )}
+                            <circle
+                              className={`drawghost__anchor ${i === 0 && penPts.length >= 3 ? 'drawghost__anchor--first' : ''}`}
+                              cx={pp.p[0]}
+                              cy={pp.p[1]}
+                              r={i === 0 && penPts.length >= 3 ? 5 : 3.6}
+                              onPointerDown={grabKnob('anchor')}
+                            />
+                          </g>
+                        )
+                      })}
+                    </>
+                  )}
+                </svg>
+              )}
+              {/* 마키 다중 선택 박스 */}
+              {selMarqueeBox && (
+                <div
+                  className="canvasmarquee"
+                  style={{
+                    left: `${(selMarqueeBox.x / cw) * 100}%`,
+                    top: `${(selMarqueeBox.y / ch) * 100}%`,
+                    width: `${(selMarqueeBox.w / cw) * 100}%`,
+                    height: `${(selMarqueeBox.h / ch) * 100}%`,
+                  }}
+                />
+              )}
               <span className="canvasbadge">
                 {animationData.w} × {animationData.h}
               </span>
               {templateId === '__custom' && (
                 <>
                   {guides.v !== null && (
-                    <div className="snapguide snapguide--v" style={{ left: `${(guides.v / 512) * 100}%` }}>
+                    <div className="snapguide snapguide--v" style={{ left: `${(guides.v / cw) * 100}%` }}>
                       <span className="snapguide__label">{guides.v}</span>
                     </div>
                   )}
                   {guides.h !== null && (
-                    <div className="snapguide snapguide--h" style={{ top: `${(guides.h / 512) * 100}%` }}>
+                    <div className="snapguide snapguide--h" style={{ top: `${(guides.h / ch) * 100}%` }}>
                       <span className="snapguide__label">{guides.h}</span>
                     </div>
                   )}
@@ -838,54 +1375,12 @@ export default function Preview() {
                     <div
                       className="hoverbox"
                       style={{
-                        left: `${((hoverBox.x - hoverBox.hw) / 512) * 100}%`,
-                        top: `${((hoverBox.y - hoverBox.hh) / 512) * 100}%`,
-                        width: `${((hoverBox.hw * 2) / 512) * 100}%`,
-                        height: `${((hoverBox.hh * 2) / 512) * 100}%`,
+                        left: `${((hoverBox.x - hoverBox.hw) / cw) * 100}%`,
+                        top: `${((hoverBox.y - hoverBox.hh) / ch) * 100}%`,
+                        width: `${((hoverBox.hw * 2) / cw) * 100}%`,
+                        height: `${((hoverBox.hh * 2) / ch) * 100}%`,
                       }}
                     />
-                  )}
-                  {selBox && !dragBox && (
-                    <>
-                      <button
-                        className="anchorbtn"
-                        title="앵커 포인트 조절"
-                        style={{
-                          left: `${((selBox.x + selBox.hw) / 512) * 100}%`,
-                          top: `${((selBox.y - selBox.hh) / 512) * 100}%`,
-                          transform: `translate(4px, -100%) scale(${1 / zoom})`,
-                        }}
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setAnchorPop((v) => !v)
-                        }}
-                      >
-                        ⌖
-                      </button>
-                      {anchorPop &&
-                        (() => {
-                          // 포털 + 화면 좌표 — 캔버스 overflow에 안 잘리고 항상 전부 보이게
-                          const rect = wrapRef.current?.getBoundingClientRect()
-                          if (!rect) return null
-                          const W = 292
-                          const H = 220
-                          let px = rect.left + ((selBox.x + selBox.hw) / 512) * rect.width + 8
-                          let py = rect.top + ((selBox.y - selBox.hh) / 512) * rect.height + 26
-                          px = Math.max(8, Math.min(window.innerWidth - W - 8, px))
-                          py = Math.max(8, Math.min(window.innerHeight - H - 8, py))
-                          return createPortal(
-                            <div
-                              className="anchorpop anchorpop--fixed"
-                              style={{ left: px, top: py }}
-                              onPointerDown={(e) => e.stopPropagation()}
-                            >
-                              <AnchorControls />
-                            </div>,
-                            document.body,
-                          )
-                        })()}
-                    </>
                   )}
                   {!previewing &&
                     customIdxs
@@ -901,10 +1396,10 @@ export default function Preview() {
                             key={`m${i}`}
                             className="selbox selbox--multi"
                             style={{
-                              left: `${((b[0] + ox2 - hw2) / 512) * 100}%`,
-                              top: `${((b[1] + oy2 - hh2) / 512) * 100}%`,
-                              width: `${((hw2 * 2) / 512) * 100}%`,
-                              height: `${((hh2 * 2) / 512) * 100}%`,
+                              left: `${((b[0] + ox2 - hw2) / cw) * 100}%`,
+                              top: `${((b[1] + oy2 - hh2) / ch) * 100}%`,
+                              width: `${((hw2 * 2) / cw) * 100}%`,
+                              height: `${((hh2 * 2) / ch) * 100}%`,
                               borderColor: mc,
                             }}
                           />
@@ -914,10 +1409,10 @@ export default function Preview() {
                     <div
                       className="selbox"
                       style={{
-                        left: `${((selBox.x - selBox.hw) / 512) * 100}%`,
-                        top: `${((selBox.y - selBox.hh) / 512) * 100}%`,
-                        width: `${((selBox.hw * 2) / 512) * 100}%`,
-                        height: `${((selBox.hh * 2) / 512) * 100}%`,
+                        left: `${((selBox.x - selBox.hw) / cw) * 100}%`,
+                        top: `${((selBox.y - selBox.hh) / ch) * 100}%`,
+                        width: `${((selBox.hw * 2) / cw) * 100}%`,
+                        height: `${((selBox.hh * 2) / ch) * 100}%`,
                         borderColor: primaryColor,
                         boxShadow: `0 0 0 1px ${tint(primaryColor, 0.35)}`,
                       }}
@@ -951,15 +1446,15 @@ export default function Preview() {
                                 selBox.y + sy * selBox.hh,
                               ]
                               resizeDrag.current = {
-                                f: 512 / rect.width,
+                                f: cw / rect.width,
                                 bx: b[0], by: b[1],
                                 startSize,
                                 ox: opp[0] - b[0], oy: opp[1] - b[1],
                                 startDist: Math.max(
                                   8,
                                   Math.hypot(
-                                    (e.clientX - rect.left) * (512 / rect.width) - b[0],
-                                    (e.clientY - rect.top) * (512 / rect.width) - b[1],
+                                    (e.clientX - rect.left) * (cw / rect.width) - b[0],
+                                    (e.clientY - rect.top) * (cw / rect.width) - b[1],
                                   ),
                                 ),
                               }
@@ -1015,32 +1510,49 @@ export default function Preview() {
                           key={i}
                           className="allbox"
                           style={{
-                            left: `${((b[0] + cox - hw) / 512) * 100}%`,
-                            top: `${((b[1] + coy - hh) / 512) * 100}%`,
-                            width: `${((hw * 2) / 512) * 100}%`,
-                            height: `${((hh * 2) / 512) * 100}%`,
+                            left: `${((b[0] + cox - hw) / cw) * 100}%`,
+                            top: `${((b[1] + coy - hh) / ch) * 100}%`,
+                            width: `${((hw * 2) / cw) * 100}%`,
+                            height: `${((hh * 2) / ch) * 100}%`,
                           }}
                         />
                       )
                     })}
-                  {!handActive && (
+                  {!handActive && !drawTool && (
                     <div
                       className={`customdrag ${hoverIdx !== null || dragBox ? 'customdrag--overlayer' : ''}`}
-                      title="드래그: 이동 · Shift: 축 잠금 · Alt+드래그: 복제 · ⌘: 스냅 해제 · Esc: 취소"
+                      onDoubleClick={(e) => {
+                        // 씬 레이어 더블클릭 = 씬 편집 진입 (AE 프리컴프 더블클릭)
+                        const rect = wrapRef.current?.getBoundingClientRect()
+                        if (!rect) return
+                        const f = cw / rect.width
+                        const hit = pickLayer((e.clientX - rect.left) * f, (e.clientY - rect.top) * f)
+                        if (hit === null) return
+                        const lr = useEditor.getState().sourceData?.layers[hit] as
+                          | Record<string, unknown>
+                          | undefined
+                        if (Number(lr?.ty) === 0 && lr?.refId) {
+                          const assets = (useEditor.getState().sourceData?.assets ?? []) as Record<
+                            string,
+                            unknown
+                          >[]
+                          if (assets.some((a) => a.id === lr.refId && a.xscene === true))
+                            useEditor.getState().switchScene(String(lr.refId))
+                        }
+                      }}
+                      title={t('드래그: 이동 · 빈 곳 드래그: 마키 다중 선택 (⇧ 추가) · Shift: 축 잠금 · Alt+드래그: 복제 · ⌘: 스냅 해제 · Esc: 취소')}
                       onPointerDown={(e) => {
                         const rect = wrapRef.current?.getBoundingClientRect()
                         if (!rect) return
-                        const f = 512 / rect.width
+                        const f = cw / rect.width
                         const px = (e.clientX - rect.left) * f
                         const py = (e.clientY - rect.top) * f
-                        setAnchorPop(false)
                         // 프리뷰 중 클릭 → 편집 모드로 복귀 (정지 + 박스 표시)
                         if (useEditor.getState().playing) setPlaying(false)
                         let hit = pickLayer(px, py)
                         if (hit === null) {
-                          // 빈 곳 클릭 = 선택 해제 + 누르고 있는 동안 전체 영역 표시
-                          useEditor.getState().deselectCustom()
-                          setShowAllBoxes(true)
+                          // 빈 곳 = 마키 다중 선택 시작 (⇧ = 기존 선택 유지·추가) — 클릭만이면 해제
+                          marqueeBegin(px, py, e.shiftKey || e.metaKey || e.ctrlKey)
                           e.currentTarget.setPointerCapture(e.pointerId)
                           return
                         }
@@ -1076,11 +1588,16 @@ export default function Preview() {
                       }}
                       onPointerMove={(e) => {
                         const d = dragStart.current
+                        // 마키 진행 — 박스 갱신 + 겹치는 레이어 라이브 선택
+                        if (selMarquee.current && !d) {
+                          marqueeMove(e.clientX, e.clientY)
+                          return
+                        }
                         if (!d) {
                           // 호버 하이라이트 — 선택될 레이어 미리 표시
                           const rect = wrapRef.current?.getBoundingClientRect()
                           if (!rect) return
-                          const f = 512 / rect.width
+                          const f = cw / rect.width
                           const hits = hitLayers(
                             (e.clientX - rect.left) * f,
                             (e.clientY - rect.top) * f,
@@ -1102,7 +1619,7 @@ export default function Preview() {
                           const snapDist = 10 * d.f
                           const sx = snapAxis(tx + d.ox, d.hw, snapDist)
                           if (sx) { tx += sx.shift; gv = sx.guide }
-                          const sy = snapAxis(ty + d.oy, d.hh, snapDist)
+                          const sy = snapAxis(ty + d.oy, d.hh, snapDist, ch)
                           if (sy) { ty += sy.shift; gh = sy.guide }
                         }
                         setGuides({ v: gv, h: gh })
@@ -1119,6 +1636,7 @@ export default function Preview() {
                       }}
                       onPointerUp={(e) => {
                         setShowAllBoxes(false)
+                        marqueeEnd()
                         const d = dragStart.current
                         const last = dragLast.current
                         dragStart.current = null
@@ -1139,6 +1657,7 @@ export default function Preview() {
                       onPointerCancel={() => {
                         // 제스처 중단 — 스턱 드래그 방지, 진행분은 커밋
                         setShowAllBoxes(false)
+                        marqueeEnd()
                         dragStart.current = null
                         dragLast.current = null
                         setGuides({ v: null, h: null })
@@ -1162,14 +1681,14 @@ export default function Preview() {
             const empty =
               appMode === 'custom'
                 ? {
-                    title: '그래픽을 끌어다 놓아 커스텀을 시작하세요',
-                    sub: 'SVG/PNG/JPG/WebP · 왼쪽 커스텀 패널에서도 업로드 가능 · 프로젝트 파일(.lmproj.json) 드롭 시 복원',
-                    btn: '파일 열기',
+                    title: t('그래픽을 끌어다 놓아 커스텀을 시작하세요'),
+                    sub: t('SVG/PNG/JPG/WebP · 왼쪽 커스텀 패널에서도 업로드 가능 · 프로젝트 파일(.lmproj.json) 드롭 시 복원'),
+                    btn: t('파일 열기'),
                   }
                 : {
-                    title: '왼쪽에서 템플릿을 선택하세요',
-                    sub: '로티 JSON · 프로젝트 파일(.lmproj.json)을 끌어다 놓아도 열립니다',
-                    btn: 'JSON 파일 열기',
+                    title: t('왼쪽에서 템플릿을 선택하세요'),
+                    sub: t('로티 JSON · 프로젝트 파일(.lmproj.json)을 끌어다 놓아도 열립니다'),
+                    btn: t('JSON 파일 열기'),
                   }
             return (
               <div className="preview__empty">
@@ -1219,12 +1738,12 @@ export default function Preview() {
           <button
             className="btn btn--icon playbar__play"
             onClick={() => setPlaying(!playing)}
-            title={playing ? '일시정지 (Space)' : '재생 (Space)'}
+            title={playing ? t('일시정지 (Space)') : t('재생 (Space)')}
           >
-            {playing ? '❚❚' : '▶'}
+            {playing ? <PauseIcon /> : <PlayIcon />}
           </button>
-          <button className="btn btn--icon" onClick={replay} title="처음부터 재생 (루프 끄면 1회 재생)">
-            ⟲
+          <button className="btn btn--icon" onClick={replay} title={t('처음부터 재생 (루프 끄면 1회 재생)')}>
+            <ReplayIcon />
           </button>
 
           {mode === 'canvas' ? (
@@ -1266,7 +1785,7 @@ export default function Preview() {
           </div>
 
           <button className={`chip ${loop ? 'chip--on' : ''}`} onClick={() => setLoop(!loop)}>
-            루프
+            {t('루프')}
           </button>
 
           {mode === 'canvas' && (
@@ -1276,7 +1795,7 @@ export default function Preview() {
                   key={b}
                   className={`bgdot bgdot--${b} ${bg === b ? 'bgdot--on' : ''}`}
                   onClick={() => setBg(b)}
-                  title={`배경: ${b}`}
+                  title={t('배경: {b}').replace('{b}', b)}
                 />
               ))}
             </div>
@@ -1284,6 +1803,27 @@ export default function Preview() {
         </div>
       )}
 
+      {/* 씬 탭 — 프리컴프 임포트 시 컴포지션 전환 (LottieFiles Creator 방식) */}
+      {templateId === '__custom' && mode === 'canvas' && animationData && sceneTabs.length > 0 && (
+        <div className="scenetabs">
+          <button
+            className={`scenetab ${activeScene === null ? 'scenetab--on' : ''}`}
+            onClick={() => useEditor.getState().switchScene(null)}
+          >
+            <SceneIcon /> {t('메인 씬')}
+          </button>
+          {sceneTabs.map((sc) => (
+            <button
+              key={sc.id}
+              className={`scenetab ${activeScene === sc.id ? 'scenetab--on' : ''}`}
+              title={t('씬 편집 — 캔버스에서 씬 레이어 더블클릭으로도 진입')}
+              onClick={() => useEditor.getState().switchScene(sc.id)}
+            >
+              <SceneIcon /> {sc.name}
+            </button>
+          ))}
+        </div>
+      )}
       {templateId === '__custom' && mode === 'canvas' && animationData && (
         <Timeline
           // 랩 직전 frame이 total을 살짝 넘을 수 있음 — 플레이헤드가 트랙 밖으로 못 나가게 클램프

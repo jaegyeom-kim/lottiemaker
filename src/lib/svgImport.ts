@@ -2,6 +2,7 @@
 // 지원: path(M/L/H/V/C/S/Q/T/A/Z), rect/circle/ellipse/polygon/polyline/line, g,
 //       transform(translate/scale/rotate/matrix), 단색 fill/stroke, opacity.
 // 미지원: 그라디언트(첫 스톱 색으로 대체), 텍스트(아웃라인 필요), 이미지/필터/마스크.
+import { t } from './i18n'
 
 export interface ImportedGraphic {
   /** 로티 셰이프 아이템 배열 (gr 제외 — 호출부가 감싼다) */
@@ -25,11 +26,11 @@ export interface ImportedImage {
 export function readImageFile(file: File): Promise<ImportedImage> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
-    reader.onerror = () => reject(new Error('파일을 읽을 수 없습니다'))
+    reader.onerror = () => reject(new Error(t('파일을 읽을 수 없습니다')))
     reader.onload = () => {
       const dataUri = reader.result as string
       const img = new Image()
-      img.onerror = () => reject(new Error('이미지를 해석할 수 없습니다'))
+      img.onerror = () => reject(new Error(t('이미지를 해석할 수 없습니다')))
       img.onload = () => resolve({ dataUri, w: img.naturalWidth, h: img.naturalHeight })
       img.src = dataUri
     }
@@ -320,7 +321,7 @@ function parsePath(d: string): Bez[] {
 export function svgToLottie(svgText: string): ImportedGraphic {
   const doc = new DOMParser().parseFromString(svgText, 'image/svg+xml')
   const svg = doc.querySelector('svg')
-  if (!svg || doc.querySelector('parsererror')) throw new Error('SVG 파싱 실패')
+  if (!svg || doc.querySelector('parsererror')) throw new Error(t('SVG 파싱 실패'))
 
   const items: unknown[] = []
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
@@ -435,14 +436,14 @@ export function svgToLottie(svgText: string): ImportedGraphic {
         return
       }
       case 'text':
-        throw new Error('텍스트는 아웃라인(패스)으로 변환해서 내보내주세요.')
+        throw new Error(t('텍스트는 아웃라인(패스)으로 변환해서 내보내주세요.'))
       default:
         for (const child of Array.from(el.children)) visit(child, m2, f2, s2)
     }
   }
 
   visit(svg, ID, null, null)
-  if (!items.length || minX === Infinity) throw new Error('변환 가능한 도형이 없습니다 (path/도형 요소 필요).')
+  if (!items.length || minX === Infinity) throw new Error(t('변환 가능한 도형이 없습니다 (path/도형 요소 필요).'))
   return { items, bbox: { x: minX, y: minY, w: maxX - minX, h: maxY - minY }, svgText }
 }
 

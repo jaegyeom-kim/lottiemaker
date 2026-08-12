@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { evalNumExpr } from '../lib/num'
+import { t } from '../lib/i18n'
 import { useEditor } from '../store'
 import { rgbArrayToHex, type ColorGroup, type ColorRef } from '../lib/lottieColors'
 
@@ -45,9 +46,8 @@ export default function ColorEditor() {
 
   return (
     <div className="panel__section">
-      <h3 className="panel__label">색상</h3>
       {colorGroups.length === 0 ? (
-        <p className="panel__hint">편집 가능한 단색 fill/stroke가 없습니다.</p>
+        <p className="panel__hint">{t('편집 가능한 단색 fill/stroke가 없습니다.')}</p>
       ) : (
         <div className="colors">
           {colorGroups.map((g, i) => {
@@ -55,7 +55,7 @@ export default function ColorEditor() {
             const changed = byOrig ? [...byOrig.keys()].some((oh) => oh !== g.hex) : false
             return (
               // key는 인덱스 — hex를 key로 쓰면 드래그 중 리마운트로 네이티브 피커가 닫힌다
-              <div key={i} className="colors__item" title={`${g.refs.length}곳에서 사용`}>
+              <div key={i} className="colors__item" title={t('{n}곳에서 사용').replace('{n}', String(g.refs.length))}>
                 <input
                   type="color"
                   value={g.hex}
@@ -73,7 +73,7 @@ export default function ColorEditor() {
                 {changed && (
                   <button
                     className="colors__reset"
-                    title="원래 색으로 되돌리기"
+                    title={t('원래 색으로 되돌리기')}
                     onClick={() => resetGroup(g)}
                   >
                     ↺
@@ -85,7 +85,7 @@ export default function ColorEditor() {
         </div>
       )}
 
-      <h3 className="panel__label">크기</h3>
+      <h3 className="panel__label">{t('크기')}</h3>
       <div className="sizerow">
         <SizeInput value={animationData.w} onCommit={(v) => setSize(v, animationData.h)} />
         <span>×</span>
@@ -157,7 +157,7 @@ function SizeInput({ value, onCommit }: { value: number; onCommit: (v: number) =
     <input
       type="text"
       inputMode="decimal"
-      title="산술 입력 가능 — 512+128, /2"
+      title={t('산술 입력 가능 — 512+128, /2')}
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}

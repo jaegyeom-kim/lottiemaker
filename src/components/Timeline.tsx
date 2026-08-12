@@ -2,6 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useEditor } from '../store'
 import { setDragCursor } from '../lib/cursor'
+import GraphEditor from './GraphEditor'
+import {
+  MatteIcon, ParentIcon, SoloIcon, EyeIcon, EyeOffIcon, LockIcon, LockOpenIcon,
+  TloffIcon, GraphIcon, ChevronRightIcon, ExpandMoreIcon,
+} from './icons'
+import { t } from '../lib/i18n'
 import { loadEaseTokens, saveEaseTokens, type EaseToken } from '../lib/easeTokens'
 import {
   animSpans, normSel, normKf, kfValueAt, kfChannelKeys, segEaseOf, layerColor, tint,
@@ -11,6 +17,19 @@ import {
 
 // 타임라인 바디 높이 — 드래그 리사이즈, 저장/복원
 const TL_H_KEY = 'lottiemaker.timeline.h'
+const TL_W_KEY = 'lottiemaker.timeline.labelw'
+const TL_W_DEF = 150
+const TL_W_MIN = 80
+const TL_W_MAX = 320
+
+function loadLabelW(): number {
+  try {
+    const v = Number(localStorage.getItem(TL_W_KEY))
+    return Number.isFinite(v) && v >= TL_W_MIN && v <= TL_W_MAX ? v : TL_W_DEF
+  } catch {
+    return TL_W_DEF
+  }
+}
 const TL_H_DEF = 210
 const TL_H_MIN = 120
 const TL_H_MAX = 480
@@ -23,6 +42,9 @@ function loadTlHeight(): number {
     return TL_H_DEF
   }
 }
+
+/** 트랙 매트 종류 라벨 — tt 값 인덱스. */
+const MATTE_LABELS = ['없음', '알파', '알파 반전', '루마', '루마 반전']
 
 /** 키프레임 레이어 트리의 프로퍼티 행 (Figma Motion 방식). */
 const KF_CHANNELS = KF_CHANNEL_DEFS
@@ -47,9 +69,22 @@ export default function Timeline({
   const {
     setCustomChannelsLive, commitEdit, setPlaying, setCustomIdx,
     moveKfClipLive, removeKfChannel, setKfChannel,
-    setKfSegEase, setKfSegEaseLive, bakeSpringSegEase,
-    setKfSel, moveKfKeysLive,
+    setKfSegEase, setKfSegEaseLive, bakeSpringSegEase, bakeBounceSegEase,
+    setKfSel, moveKfKeysLive, reverseKfSel, toggleCustomSel, setCustomSelList,
+    revealChannels,
   } = useEditor()
+  const tlReveal = useEditor((s) => s.tlReveal)
+  const switchScene = useEditor((s) => s.switchScene)
+  const tlHideOff = useEditor((s) => s.tlHideOff)
+  const {
+    setTlHideOff, toggleLayerHide, toggleLayerLock, toggleLayerTloff,
+    toggleLayerSolo, setLayerMatte, setLayerParent,
+  } = useEditor()
+  const [graphOpen, setGraphOpen] = useState(false)
+  // 부모 선택 팝오버 — {li, x, y}
+  const [parentPop, setParentPop] = useState<{ li: number; x: number; y: number } | null>(null)
+  // 매트 팝오버
+  const [mattePop, setMattePop] = useState<{ li: number; x: number; y: number } | null>(null)
   const curFrame = useEditor((s) => s.curFrame)
   const kfSel = useEditor((s) => s.kfSel)
   const sourceData = useEditor((s) => s.sourceData)
@@ -80,10 +115,30 @@ export default function Timeline({
   const [marqueeBox, setMarqueeBox] = useState<{ x: number; y: number; w: number; h: number } | null>(
     null,
   )
-  // 키프레임 레이어는 기본 펼침 — 접은 것만 기억
-  const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
   // 바디 높이 — 상단 핸들 드래그로 조절
   const [bodyH, setBodyH] = useState(loadTlHeight)
+  // 라벨 열 너비 — 세로 핸들 드래그로 조절, 영속
+  const [labelW, setLabelW] = useState(loadLabelW)
+  const labelDrag = useRef<{ x: number; w: number } | null>(null)
+  const beginLabelResize = (e: React.PointerEvent) => {
+    labelDrag.current = { x: e.clientX, w: labelW }
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  }
+  const moveLabelResize = (e: React.PointerEvent) => {
+    if (!labelDrag.current) return
+    const w = Math.round(
+      Math.max(TL_W_MIN, Math.min(TL_W_MAX, labelDrag.current.w + (e.clientX - labelDrag.current.x))),
+    )
+    setLabelW(w)
+    try {
+      localStorage.setItem(TL_W_KEY, String(w))
+    } catch {
+      // 저장 불가 — 무시
+    }
+  }
+  const endLabelResize = () => {
+    labelDrag.current = null
+  }
   const beginHResize = (e: React.PointerEvent) => {
     e.preventDefault()
     setDragCursor('row')
@@ -117,6 +172,48 @@ export default function Timeline({
       // 무시
     }
   }
+  // 인라인 리네임 (AE Enter/더블클릭)
+  const [renameLi, setRenameLi] = useState<number | null>(null)
+  const [renameVal, setRenameVal] = useState('')
+  const renameLayer = useEditor((s) => s.renameLayer)
+  const beginRename = (li: number, cur: string) => {
+    setRenameVal(cur)
+    setRenameLi(li)
+  }
+  const commitRename = () => {
+    if (renameLi !== null && renameVal.trim()) renameLayer(renameLi, renameVal)
+    setRenameLi(null)
+  }
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null
+      const typing =
+        !!el &&
+        (el.tagName === 'TEXTAREA' ||
+          el.isContentEditable ||
+          (el.tagName === 'INPUT' && !['range', 'checkbox'].includes((el as HTMLInputElement).type)))
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.key === 'F2') {
+        e.preventDefault()
+        const st = useEditor.getState()
+        const lr = st.sourceData?.layers[st.customIdx] as Record<string, unknown> | undefined
+        if (lr) beginRename(st.customIdx, String(lr.nm ?? ''))
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // 씬 트리 펼침 (AE 프리컴프 트월) — 경로 키: "li" / "li/childIdx" ...
+  const [sceneOpen, setSceneOpen] = useState<Set<string>>(new Set())
+  const toggleSceneOpen = (key: string) =>
+    setSceneOpen((prev) => {
+      const n = new Set(prev)
+      if (n.has(key)) n.delete(key)
+      else n.add(key)
+      return n
+    })
+
   // 이징 팝업 — 구간(키 fromT → 다음 키)의 채널 이징 편집
   const [easePop, setEasePop] = useState<{
     li: number
@@ -153,8 +250,106 @@ export default function Timeline({
   const selOf = (li: number): CustomSel =>
     normSel((layers[li] as Record<string, unknown>).xsel as Partial<CustomSel> | undefined, OP)
 
+  // ── 씬 트리 (AE 프리컴프 펼침) ──
+  const sceneAssets = new Map<string, Record<string, unknown>>()
+  for (const a of (sourceData.assets as Record<string, unknown>[] | undefined) ?? [])
+    if (a.xscene === true && a.id !== '__main') sceneAssets.set(String(a.id), a)
+  const isSceneRef = (lr: Record<string, unknown>) =>
+    Number(lr.ty) === 0 && sceneAssets.has(String(lr.refId))
+
+  /** 씬 내부 레이어 행들 (라벨/트랙 공용 구조) — 재귀, 깊이 4 제한. */
+  const sceneRows = (
+    sceneId: string,
+    path: string,
+    stOff: number,
+    depth: number,
+    side: 'label' | 'track',
+  ): React.ReactNode[] => {
+    if (depth > 4) return []
+    const asset = sceneAssets.get(sceneId)
+    const inner = (asset?.layers as Record<string, unknown>[] | undefined) ?? []
+    const out: React.ReactNode[] = []
+    inner.forEach((cl, ci) => {
+      const key = `${path}/${ci}`
+      const nested = isSceneRef(cl)
+      const childOpen = nested && sceneOpen.has(key)
+      const color = layerColor(cl, ci)
+      const clipA = Math.max(0, Math.min(OP, Number(cl.ip ?? 0) + stOff))
+      const clipB = Math.max(clipA, Math.min(OP, Number(cl.op ?? OP) + stOff))
+      const enter = () => {
+        switchScene(sceneId)
+        useEditor.getState().setCustomIdx(ci)
+      }
+      if (side === 'label') {
+        out.push(
+          <div
+            key={key}
+            className="timeline__label timeline__label--prop timeline__label--scene"
+            style={{ paddingLeft: 14 + depth * 10 }}
+            title={t('클릭 = 씬 진입 후 이 레이어 선택')}
+            onClick={enter}
+          >
+            {nested ? (
+              <button
+                className="timeline__twirl"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  toggleSceneOpen(key)
+                }}
+              >
+                {childOpen ? <ExpandMoreIcon /> : <ChevronRightIcon />}
+              </button>
+            ) : (
+              <span className="colordot colordot--sm" style={{ background: color }} />
+            )}
+            {String(cl.nm ?? ci + 1)}
+          </div>,
+        )
+      } else {
+        out.push(
+          <div key={key} className="timeline__track timeline__track--prop timeline__track--scene">
+            <div
+              className="timeline__subclip"
+              style={{
+                left: pct(clipA),
+                width: pct(Math.max(1, clipB - clipA)),
+                background: tint(color, 0.55),
+                borderColor: tint(color, 0.9),
+              }}
+              title={t('클릭 = 씬 진입 후 이 레이어 선택')}
+              onClick={enter}
+            />
+          </div>,
+        )
+      }
+      if (childOpen) {
+        // 중첩 씬 — 자식 컴프 오프셋(st) 누적
+        out.push(...sceneRows(String(cl.refId), key, stOff + Number(cl.st ?? 0), depth + 1, side))
+      }
+    })
+    return out
+  }
+
+  /** AE식 수정자 선택 — ⇧ = 주 선택→li 범위, ⌘ = 개별 토글. 처리했으면 true. */
+  const modSelect = (e: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }, li: number) => {
+    if (e.shiftKey) {
+      const anchor = useEditor.getState().customIdx
+      const [a, b] = anchor <= li ? [anchor, li] : [li, anchor]
+      setCustomSelList(Array.from({ length: b - a + 1 }, (_, n) => a + n))
+      return true
+    }
+    if (e.metaKey || e.ctrlKey) {
+      toggleCustomSel(li)
+      return true
+    }
+    return false
+  }
+
   const beginDrag = (e: React.PointerEvent, li: number, mode: DragMode) => {
+    if ((layers[li] as Record<string, unknown> | undefined)?.xlock === true) return
     e.stopPropagation()
+    // ⇧/⌘ 클릭 = 다중 선택 — 드래그 시작 안 함 (AE)
+    if (modSelect(e, li)) return
     const rect = trackRef.current?.getBoundingClientRect()
     if (!rect) return
     setPlaying(false) // 편집은 파킹 프레임 기준 (AE 방식)
@@ -210,7 +405,7 @@ export default function Timeline({
         // 풀 길이 클립 — 몸통 드래그를 시작 지연으로 해석 (끝 고정)
         let a = Math.max(0, Math.min(OP - 8, d.clipA + df))
         a = Math.max(0, Math.min(OP - 8, snap(a)))
-        setDragInfo(`시작 ${sec(a)}s (끝 고정)`)
+        setDragInfo(t('시작 {s}s (끝 고정)').replace('{s}', sec(a)))
         if (kfMove) {
           moveKfClipLive(Math.round(a * 10) / 10, OP, a - d.clipA)
           return
@@ -222,7 +417,7 @@ export default function Timeline({
         const s2 = snap(a + len) - len
         a = Math.abs(s1 - a) <= Math.abs(s2 - a) ? s1 : s2
         a = Math.max(0, Math.min(OP - len, a))
-        setDragInfo(`클립 ${sec(a)}s ~ ${sec(a + len)}s`)
+        setDragInfo(t('클립 {a}s ~ {b}s').replace('{a}', sec(a)).replace('{b}', sec(a + len)))
         if (kfMove) {
           moveKfClipLive(Math.round(a * 10) / 10, Math.round((a + len) * 10) / 10, a - d.clipA)
           return
@@ -233,20 +428,20 @@ export default function Timeline({
       let a = Math.max(0, Math.min(d.clipB - 8, d.clipA + df))
       a = Math.max(0, Math.min(d.clipB - 8, snap(a)))
       next.clip = [Math.round(a * 10) / 10, d.clipB]
-      setDragInfo(`시작 ${sec(a)}s`)
+      setDragInfo(t('시작 {s}s').replace('{s}', sec(a)))
     } else if (d.mode === 'right') {
       let b = Math.min(OP, Math.max(d.clipA + 8, d.clipB + df))
       b = Math.min(OP, Math.max(d.clipA + 8, snap(b)))
       next.clip = [d.clipA, Math.round(b * 10) / 10]
-      setDragInfo(`끝 ${sec(b)}s`)
+      setDragInfo(t('끝 {s}s').replace('{s}', sec(b)))
     } else if (d.mode === 'in-edge') {
       const dur = Math.max(4, Math.min(d.clipB - d.outDur - d.clipA, d.inDur + df))
       next.in = { ...cur.in, dur: Math.round(dur * 10) / 10 }
-      setDragInfo(`등장 길이 ${sec(dur)}s`)
+      setDragInfo(t('등장 길이 {s}s').replace('{s}', sec(dur)))
     } else {
       const dur = Math.max(4, Math.min(d.clipB - d.clipA - d.inDur, d.outDur - df))
       next.out = { ...cur.out, dur: Math.round(dur * 10) / 10 }
-      setDragInfo(`퇴장 길이 ${sec(dur)}s`)
+      setDragInfo(t('퇴장 길이 {s}s').replace('{s}', sec(dur)))
     }
     setCustomChannelsLive(next)
   }
@@ -369,8 +564,10 @@ export default function Timeline({
       if (applied !== null) d.lastDt = applied // 실제 적용된 오프셋만 신뢰
       setDragInfo(
         d.items.length > 1
-          ? `키 ${d.items.length}개 이동`
-          : `${label} 키 ${sec(Math.max(0, Math.min(OP, grabT + (applied ?? d.lastDt))))}s`,
+          ? t('키 {n}개 이동').replace('{n}', String(d.items.length))
+          : t('{ch} 키 {s}s')
+              .replace('{ch}', t(label))
+              .replace('{s}', sec(Math.max(0, Math.min(OP, grabT + (applied ?? d.lastDt))))),
       )
     }
     const up = () => {
@@ -436,11 +633,11 @@ export default function Timeline({
   // 마키 — 트랙 영역 빈 곳(행 배경·아래 여백) 어디서든 드래그로 키 선택 (AE 방식)
   const marqueeHandlers = {
     onPointerDown: (e: React.PointerEvent) => {
-      const t = e.target as HTMLElement
+      const tgt = e.target as HTMLElement
       const empty =
-        t === e.currentTarget ||
-        t.classList.contains('timeline__track') ||
-        t.classList.contains('timeline__trackgroup')
+        tgt === e.currentTarget ||
+        tgt.classList.contains('timeline__track') ||
+        tgt.classList.contains('timeline__trackgroup')
       if (!empty) return
       // ⇧ 마키 = 기존 선택에 추가 — 시작할 때 지우지 않는다
       if (!e.shiftKey && useEditor.getState().kfSel.length) setKfSel([])
@@ -482,69 +679,199 @@ export default function Timeline({
       {/* 높이 조절 핸들 — 위로 끌면 타임라인이 커진다 */}
       <div
         className="timeline__hresize"
-        title="드래그: 타임라인 높이 · 더블클릭: 초기화"
+        title={t('드래그: 타임라인 높이 · 더블클릭: 초기화')}
         onPointerDown={beginHResize}
         onDoubleClick={resetH}
       />
       <div className="timeline__head">
-        <span className="timeline__title">타임라인</span>
+        <span className="timeline__title">{t('타임라인')}</span>
         <span className="timeline__time">
-          {String(Math.round(frameFrac * totalMs)).padStart(4, '0')} /{' '}
-          {Math.round(totalMs)} ms
+          {(frameFrac * totalSec).toFixed(2)} / {totalSec.toFixed(2)} s
         </span>
+        <button
+          className={`tlbtn ${tlHideOff ? '' : 'tlbtn--on'}`}
+          title={t("'타임라인에서 끄기' 표시한 레이어 숨김/표시")}
+          onClick={() => setTlHideOff(!tlHideOff)}
+        >
+          <TloffIcon />
+        </button>
+        <button className="tlbtn" title={t('그래프 에디터')} onClick={() => setGraphOpen(true)}>
+          <GraphIcon />
+        </button>
         {kfSel.length > 0 && (
-          <span className="timeline__selbadge">키 {kfSel.length}개 선택 — 드래그 이동 · Delete 삭제</span>
+          <span className="timeline__selbadge">
+            {t('키 {n}개 선택 — 드래그 이동 · Delete 삭제').replace('{n}', String(kfSel.length))}
+            {kfSel.length >= 2 && (
+              <button
+                className="timeline__selact"
+                title={t('선택 키 시간 반전 (미러) — 이징도 함께 뒤집힘')}
+                onClick={reverseKfSel}
+              >
+                {t('⇄ 반전')}
+              </button>
+            )}
+          </span>
         )}
         <span className="timeline__hint">
           {dragInfo ??
-            '빈 곳 드래그: 키 선택 · 눈금자: 스크럽 (⇧ 스냅) · 클립: 이동/트림 · ◇ 더블클릭: 삭제'}
+            t('빈 곳 드래그: 키 선택 · 눈금자: 스크럽 (⇧ 스냅) · 클립: 이동/트림 · ◇ 더블클릭: 삭제')}
         </span>
       </div>
       <div className="timeline__body timeline__body--multi" style={{ height: bodyH }}>
-        <div className="timeline__labels">
+        <div className="timeline__labels" style={{ width: labelW }}>
           <div className="timeline__label timeline__label--ruler" />
           {layers.map((l, li) => {
             const lr = l as Record<string, unknown>
             const xkfL = normKf(lr.xkf as Partial<CustomKf> | undefined)
-            const open = xkfL.on && !collapsed.has(li)
+            const hasTrimKeys = xkfL.keys.some((k) => k.ts !== undefined || k.te !== undefined)
+            const shownChs = (tlReveal[li] ?? []).filter(
+              (c) => xkfL.on || c === 'ts' || c === 'te',
+            )
+            const open = shownChs.length > 0
+            const isRef = isSceneRef(lr)
+            const treeOpen = isRef && sceneOpen.has(String(li))
+            const isLocked = lr.xlock === true
+            const isTloff = lr.xtloff === true
+            const isHd = lr.hd === true
+            const isSolo = lr.xsolo === true
+            const matteType = Number(lr.tt ?? 0)
+            const hasParent = typeof lr.parent === 'number'
+            if (isTloff && tlHideOff) return null
             return (
               <div key={li} className="timeline__labelgroup">
                 <div
                   className={`timeline__label timeline__label--row ${
                     li === idx && customIdxs.includes(li) ? 'timeline__label--on' : ''
-                  } ${li !== idx && customIdxs.includes(li) ? 'timeline__label--multi' : ''}`}
+                  } ${li !== idx && customIdxs.includes(li) ? 'timeline__label--multi' : ''} ${
+                    isLocked ? 'timeline__label--locked' : ''
+                  }`}
                   style={
                     customIdxs.includes(li)
                       ? { boxShadow: `inset 2.5px 0 0 ${layerColor(lr, li)}` }
                       : undefined
                   }
-                  title={String(l.nm ?? '')}
-                  onClick={() => setCustomIdx(li)}
+                  title={isRef ? t('더블클릭 = 컴프 진입') : t('더블클릭 = 이름 변경')}
+                  onClick={(e) => {
+                    if (!modSelect(e, li)) setCustomIdx(li)
+                  }}
+                  onDoubleClick={() => {
+                    if (isRef) switchScene(String(lr.refId))
+                    else if (!isLocked) beginRename(li, String(l.nm ?? ''))
+                  }}
                 >
-                  {xkfL.on ? (
+                  <span className="colordot" style={{ background: layerColor(lr, li) }} />
+                  {renameLi === li ? (
+                    <input
+                      className="timeline__rename"
+                      value={renameVal}
+                      autoFocus
+                      onFocus={(e) => e.currentTarget.select()}
+                      onChange={(e) => setRenameVal(e.target.value)}
+                      onBlur={commitRename}
+                      onKeyDown={(e) => {
+                        e.stopPropagation()
+                        if (e.key === 'Enter') commitRename()
+                        else if (e.key === 'Escape') setRenameLi(null)
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      onDoubleClick={(e) => e.stopPropagation()}
+                    />
+                  ) : (
+                    <span className="timeline__lname">
+                      {l.nm ?? t('레이어 {n}').replace('{n}', String(li + 1))}
+                    </span>
+                  )}
+                  <span className="timeline__lbtns">
                     <button
-                      className="timeline__twirl"
-                      title={open ? '프로퍼티 접기' : '프로퍼티 펼치기'}
+                      onDoubleClick={(e) => e.stopPropagation()}
+                      className={`timeline__lbtn ${matteType > 0 ? 'timeline__lbtn--on' : ''}`}
+                      title={`${t('트랙 매트')}: ${t(MATTE_LABELS[matteType] ?? '없음')}`}
                       onClick={(e) => {
                         e.stopPropagation()
-                        setCollapsed((prev) => {
-                          const n = new Set(prev)
-                          if (n.has(li)) n.delete(li)
-                          else n.add(li)
-                          return n
-                        })
+                        setMattePop({ li, x: e.clientX, y: e.clientY })
                       }}
                     >
-                      {open ? '▾' : '▸'}
+                      <MatteIcon />
                     </button>
-                  ) : (
-                    <span className="timeline__twirl timeline__twirl--none" />
-                  )}
-                  <span className="colordot" style={{ background: layerColor(lr, li) }} />
-                  {l.nm ?? `레이어 ${li + 1}`}
+                    <button
+                      onDoubleClick={(e) => e.stopPropagation()}
+                      className={`timeline__lbtn ${hasParent ? 'timeline__lbtn--on' : ''}`}
+                      title={t('부모 설정')}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setParentPop({ li, x: e.clientX, y: e.clientY })
+                      }}
+                    >
+                      <ParentIcon />
+                    </button>
+                    <button
+                      onDoubleClick={(e) => e.stopPropagation()}
+                      className={`timeline__lbtn ${isSolo ? 'timeline__lbtn--on' : ''}`}
+                      title={t('솔로 — 켜진 레이어만 렌더')}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        toggleLayerSolo(li)
+                      }}
+                    >
+                      <SoloIcon />
+                    </button>
+                    <button
+                      onDoubleClick={(e) => e.stopPropagation()}
+                      className={`timeline__lbtn ${isHd ? 'timeline__lbtn--on' : ''}`}
+                      title={isHd ? t('보이기') : t('숨기기')}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        toggleLayerHide(li)
+                      }}
+                    >
+                      {isHd ? <EyeOffIcon /> : <EyeIcon />}
+                    </button>
+                    <button
+                      onDoubleClick={(e) => e.stopPropagation()}
+                      className={`timeline__lbtn ${isLocked ? 'timeline__lbtn--on' : ''}`}
+                      title={isLocked ? t('잠금 해제') : t('잠금')}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        toggleLayerLock(li)
+                      }}
+                    >
+                      {isLocked ? <LockIcon /> : <LockOpenIcon />}
+                    </button>
+                    <button
+                      onDoubleClick={(e) => e.stopPropagation()}
+                      className={`timeline__lbtn ${isTloff ? 'timeline__lbtn--on' : ''}`}
+                      title={t('타임라인에서 끄기')}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        toggleLayerTloff(li)
+                      }}
+                    >
+                      <TloffIcon />
+                    </button>
+                  </span>
+                  {xkfL.on || isRef || hasTrimKeys || Number(lr.ty) === 4 ? (
+                    <button
+                      className="timeline__twirl timeline__twirl--end"
+                      title={open || treeOpen ? t('프로퍼티 접기') : t('프로퍼티 펼치기')}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        const anyOpen = open || treeOpen
+                        revealChannels([li], anyOpen ? 'none' : 'all')
+                        if (isRef && treeOpen !== !anyOpen) toggleSceneOpen(String(li))
+                      }}
+                    >
+                      {open || treeOpen ? <ExpandMoreIcon /> : <ChevronRightIcon />}
+                    </button>
+                  ) : null}
                 </div>
                 {open &&
-                  KF_CHANNELS.filter(({ ch }) => kfChannelKeys(xkfL, ch).length > 0).map(
+                  KF_CHANNELS.filter(
+                    ({ ch }) =>
+                      shownChs.includes(ch) &&
+                      (!(ch === 'ts' || ch === 'te') ||
+                        Number(lr.ty) === 4 ||
+                        kfChannelKeys(xkfL, ch).length > 0),
+                  ).map(
                     ({ ch, label }) => {
                     const keys = kfChannelKeys(xkfL, ch)
                     const hasAt = keys.some((k) => Math.abs(k.t - curFrame) < 0.5)
@@ -552,7 +879,7 @@ export default function Timeline({
                       <div key={ch} className="timeline__label timeline__label--prop">
                         <button
                           className={`timeline__propkey ${hasAt ? 'timeline__propkey--on' : ''}`}
-                          title={hasAt ? '재생헤드의 키 제거' : '재생헤드에 키 추가'}
+                          title={hasAt ? t('재생헤드의 키 제거') : t('재생헤드에 키 추가')}
                           onClick={(e) => {
                             e.stopPropagation()
                             setCustomIdx(li)
@@ -569,23 +896,44 @@ export default function Timeline({
                         >
                           ◆
                         </button>
-                        {label}
+                        {t(label)}
                         {keys.length > 0 && <em className="timeline__propcount">{keys.length}</em>}
                       </div>
                     )
                   })}
+                {treeOpen && sceneRows(String(lr.refId), String(li), Number(lr.st ?? 0), 1, 'label')}
               </div>
             )
           })}
         </div>
+        <div
+          className="timeline__vresize"
+          title={t('드래그: 라벨 너비 조절 · 더블클릭: 초기화')}
+          onPointerDown={beginLabelResize}
+          onPointerMove={moveLabelResize}
+          onPointerUp={endLabelResize}
+          onPointerCancel={endLabelResize}
+          onDoubleClick={() => {
+            setLabelW(TL_W_DEF)
+            try {
+              localStorage.setItem(TL_W_KEY, String(TL_W_DEF))
+            } catch {
+              // 무시
+            }
+          }}
+        />
         <div className="timeline__tracks" ref={trackRef} {...marqueeHandlers}>
           {/* 눈금자 줄 — 스크럽 전용, ms 눈금 (Figma Motion 방식) */}
           <div className="timeline__ruler" {...scrubHandlers}>
             {ticks.map((m) => (
               <span key={m} className="timeline__ticklabel" style={{ left: `${(m / totalMs) * 100}%` }}>
-                {m}
+                {m % 1000 === 0 ? `${m / 1000}s` : `${(m / 1000).toFixed(m % 100 === 0 ? 1 : 2)}s`}
               </span>
             ))}
+            {/* 프레임 칩 — 눈금자와 함께 상단 고정 (스크롤에도 안 잘림) */}
+            <div className="timeline__playhead-chip" style={{ left: `${frameFrac * 100}%` }}>
+              {Math.round(frameFrac * OP)}
+            </div>
           </div>
           {ticks.slice(1).map((m) => (
             <div key={m} className="timeline__tick" style={{ left: `${(m / totalMs) * 100}%` }} />
@@ -603,7 +951,6 @@ export default function Timeline({
             onPointerUp={scrubHandlers.onPointerUp}
             onPointerCancel={scrubHandlers.onPointerCancel}
           >
-            <div className="timeline__playhead-head" />
           </div>
 
           {/* 마키 선택 박스 */}
@@ -636,7 +983,11 @@ export default function Timeline({
             const color = layerColor(l as Record<string, unknown>, li)
             const isPrimary = li === idx && customIdxs.includes(li)
             const isMulti = li !== idx && customIdxs.includes(li)
-            const open = kfOn && !collapsed.has(li)
+            const shownChs = (tlReveal[li] ?? []).filter((c) => kfOn || c === 'ts' || c === 'te')
+            const open = shownChs.length > 0
+            const lrT = l as Record<string, unknown>
+            const treeOpenT = isSceneRef(lrT) && sceneOpen.has(String(li))
+            if (lrT.xtloff === true && tlHideOff) return null
             return (
               <div key={li} className="timeline__trackgroup">
               <div
@@ -648,12 +999,17 @@ export default function Timeline({
                   className={`timeline__clip ${isPrimary ? 'timeline__clip--on' : ''} ${
                     isMulti ? 'timeline__clip--multi' : ''
                   }`}
+                  onDoubleClick={() => {
+                    if (isSceneRef(lrT)) switchScene(String(lrT.refId))
+                  }}
                   style={{
                     left: pct(spans.clipA),
                     width: pct(clipLen),
-                    background: tint(color, isPrimary ? 0.55 : isMulti ? 0.4 : 0.22),
-                    borderColor: isPrimary ? '#fff' : tint(color, isMulti ? 0.95 : 0.6),
-                    boxShadow: isPrimary ? `0 0 0 1.5px ${tint(color, 0.65)}, 0 0 10px ${tint(color, 0.5)}` : undefined,
+                    background: tint(color, isPrimary ? 0.92 : isMulti ? 0.78 : 0.6),
+                    borderColor: isPrimary ? '#fff' : tint(color, isMulti ? 1 : 0.9),
+                    boxShadow: isPrimary
+                      ? `0 0 0 1.5px ${tint(color, 0.8)}, 0 0 10px ${tint(color, 0.55)}`
+                      : `inset 0 1px 0 rgb(255 255 255 / 0.18)`,
                   }}
                   onPointerDown={(e) => beginDrag(e, li, 'move')}
                   onPointerMove={moveDrag}
@@ -663,14 +1019,14 @@ export default function Timeline({
                   {inOn && (
                     <div
                       className="timeline__seg timeline__seg--in timeline__seg--drag"
-                      title="드래그: 등장 길이"
+                      title={t('드래그: 등장 길이')}
                       style={{ left: 0, width: segPct(inW) }}
                       onPointerDown={(e) => beginDrag(e, li, 'in-edge')}
                       onPointerMove={moveDrag}
                       onPointerUp={endDrag}
                       onPointerCancel={cancelDrag}
                     >
-                      <span className="timeline__barlabel">등장</span>
+                      <span className="timeline__barlabel">{t('등장')}</span>
                     </div>
                   )}
                   {loopOn && spans.outStart - spans.inEnd > 4 && (
@@ -681,29 +1037,32 @@ export default function Timeline({
                         width: segPct(spans.outStart - spans.inEnd),
                       }}
                     >
-                      <span className="timeline__barlabel">루프</span>
+                      <span className="timeline__barlabel">{t('루프')}</span>
                     </div>
                   )}
                   {outOn && (
                     <div
                       className="timeline__seg timeline__seg--out timeline__seg--drag"
-                      title="드래그: 퇴장 길이"
+                      title={t('드래그: 퇴장 길이')}
                       style={{ left: segPct(spans.outStart - spans.clipA), width: segPct(outW) }}
                       onPointerDown={(e) => beginDrag(e, li, 'out-edge')}
                       onPointerMove={moveDrag}
                       onPointerUp={endDrag}
                       onPointerCancel={cancelDrag}
                     >
-                      <span className="timeline__barlabel">퇴장</span>
+                      <span className="timeline__barlabel">{t('퇴장')}</span>
                     </div>
                   )}
                   {!inOn && !loopOn && !outOn && (
                     <span className="timeline__barlabel timeline__barlabel--dim">
                       {kfOn
                         ? xkf.keys.length
-                          ? `키 ${xkf.keys.length}개${open ? '' : ' — ▸ 펼쳐서 편집'}`
-                          : '키프레임 없음'
-                        : (l.nm ?? `레이어 ${li + 1}`)}
+                          ? t(open ? '키 {n}개' : '키 {n}개 — ▸ 펼쳐서 편집').replace(
+                              '{n}',
+                              String(xkf.keys.length),
+                            )
+                          : t('키프레임 없음')
+                        : (l.nm ?? t('레이어 {n}').replace('{n}', String(li + 1)))}
                     </span>
                   )}
                   <div
@@ -724,7 +1083,13 @@ export default function Timeline({
               </div>
               {/* 프로퍼티 레인 — 키가 있는 채널만 (AE 'U' 방식). 라벨 쪽과 같은 필터로 행 정렬 유지 */}
               {open &&
-                KF_CHANNELS.filter(({ ch }) => kfChannelKeys(xkf, ch).length > 0).map(
+                KF_CHANNELS.filter(
+                  ({ ch }) =>
+                    shownChs.includes(ch) &&
+                    (!(ch === 'ts' || ch === 'te') ||
+                      Number(lrT.ty) === 4 ||
+                      kfChannelKeys(xkf, ch).length > 0),
+                ).map(
                   ({ ch, label }) => {
                   const keys = kfChannelKeys(xkf, ch)
                   const first = keys[0]
@@ -749,7 +1114,9 @@ export default function Timeline({
                           <button
                             key={`e${k.t}`}
                             className="timeline__ease"
-                            title={`${label} 이징 (${bez.join(', ')}) — 클릭해서 커브 편집`}
+                            title={t('{ch} 이징 ({v}) — 클릭해서 커브 편집')
+                              .replace('{ch}', t(label))
+                              .replace('{v}', bez.join(', '))}
                             style={{ left: pct(mid) }}
                             onPointerDown={(e) => e.stopPropagation()}
                             onClick={(e) => {
@@ -772,7 +1139,11 @@ export default function Timeline({
                             key={`${ch}${k.t}`}
                             data-kfd={`${li}|${ch}|${k.t}`}
                             className={`timeline__kf timeline__kf--prop ${isSel ? 'timeline__kf--sel' : ''}`}
-                            title={`${label} · ${sec(k.t)}s — 드래그: 이동 (선택은 그룹째) · ⇧클릭: 선택 토글 · 더블클릭: 삭제`}
+                            title={t(
+                              '{ch} · {s}s — 드래그: 이동 (선택은 그룹째) · ⇧클릭: 선택 토글 · 더블클릭: 삭제',
+                            )
+                              .replace('{ch}', t(label))
+                              .replace('{s}', sec(k.t))}
                             style={{ left: pct(k.t) }}
                             onDoubleClick={(e) => {
                               e.stopPropagation()
@@ -805,11 +1176,134 @@ export default function Timeline({
                     </div>
                   )
                 })}
+              {treeOpenT && sceneRows(String(lrT.refId), String(li), Number(lrT.st ?? 0), 1, 'track')}
               </div>
             )
           })}
         </div>
       </div>
+
+      {graphOpen && <GraphEditor onClose={() => setGraphOpen(false)} />}
+
+      {/* 매트 팝오버 — 타입 탭 + 반전 + 소스 레이어 */}
+      {mattePop &&
+        (() => {
+          const target = layers[mattePop.li] as Record<string, unknown> | undefined
+          if (!target) return null
+          const tt = Number(target.tt ?? 0)
+          const curType: 'none' | 'alpha' | 'luma' = tt === 0 ? 'none' : tt <= 2 ? 'alpha' : 'luma'
+          const curInvert = tt === 2 || tt === 4
+          const curSrcLi = layers.findIndex(
+            (pl) => (pl as Record<string, unknown>).ind === target.tp,
+          )
+          const apply = (type: 'none' | 'alpha' | 'luma', invert: boolean, sourceLi: number | null) =>
+            setLayerMatte(mattePop.li, {
+              type,
+              invert,
+              // 타입만 고른 상태에서 소스 미지정이면 바로 위 레이어를 기본값으로
+              sourceLi:
+                sourceLi ?? (curSrcLi >= 0 ? curSrcLi : mattePop.li > 0 ? mattePop.li - 1 : null),
+            })
+          return createPortal(
+            <div className="parentpop__scrim" onClick={() => setMattePop(null)}>
+              <div
+                className="parentpop mattepop"
+                style={{
+                  left: Math.min(mattePop.x, window.innerWidth - 210),
+                  top: Math.min(mattePop.y + 6, window.innerHeight - 280),
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="mattepop__tabs">
+                  {(['none', 'alpha', 'luma'] as const).map((ty) => (
+                    <button
+                      key={ty}
+                      className={`mattepop__tab ${curType === ty ? 'mattepop__tab--on' : ''}`}
+                      onClick={() => apply(ty, curInvert, curSrcLi >= 0 ? curSrcLi : null)}
+                    >
+                      {t(ty === 'none' ? '없음' : ty === 'alpha' ? '알파' : '루마')}
+                    </button>
+                  ))}
+                </div>
+                <label className={`mattepop__invert ${curType === 'none' ? 'mattepop__invert--off' : ''}`}>
+                  <input
+                    type="checkbox"
+                    checked={curInvert}
+                    disabled={curType === 'none'}
+                    onChange={(e) => apply(curType, e.target.checked, curSrcLi >= 0 ? curSrcLi : null)}
+                  />
+                  {t('반전')}
+                </label>
+                <div className="mattepop__list">
+                  {layers.map((pl, pi) => {
+                    if (pi === mattePop.li) return null
+                    const rec = pl as Record<string, unknown>
+                    return (
+                      <button
+                        key={pi}
+                        className={`parentpop__item ${pi === curSrcLi ? 'parentpop__item--on' : ''}`}
+                        onClick={() => apply(curType === 'none' ? 'alpha' : curType, curInvert, pi)}
+                      >
+                        <span
+                          className="colordot colordot--sm"
+                          style={{ background: layerColor(rec, pi) }}
+                        />
+                        {String(rec.nm ?? pi + 1)}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        })()}
+
+      {/* 부모 선택 팝오버 */}
+      {parentPop &&
+        createPortal(
+          <div className="parentpop__scrim" onClick={() => setParentPop(null)}>
+            <div
+              className="parentpop"
+              style={{ left: Math.min(parentPop.x, window.innerWidth - 190), top: Math.min(parentPop.y + 6, window.innerHeight - 240) }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="parentpop__title">{t('부모 설정')}</div>
+              <button
+                className="parentpop__item"
+                onClick={() => {
+                  setLayerParent(parentPop.li, null)
+                  setParentPop(null)
+                }}
+              >
+                {t('없음')}
+              </button>
+              {layers.map((pl, pi) => {
+                if (pi === parentPop.li) return null
+                const rec = pl as Record<string, unknown>
+                return (
+                  <button
+                    key={pi}
+                    className={`parentpop__item ${
+                      typeof (layers[parentPop.li] as Record<string, unknown>).parent === 'number' &&
+                      (layers[parentPop.li] as Record<string, unknown>).parent === rec.ind
+                        ? 'parentpop__item--on'
+                        : ''
+                    }`}
+                    onClick={() => {
+                      setLayerParent(parentPop.li, pi)
+                      setParentPop(null)
+                    }}
+                  >
+                    <span className="colordot colordot--sm" style={{ background: layerColor(rec, pi) }} />
+                    {String(rec.nm ?? pi + 1)}
+                  </button>
+                )
+              })}
+            </div>
+          </div>,
+          document.body,
+        )}
 
       {/* 이징 커브 팝업 — 포털 (타임라인 overflow에 안 잘리게) */}
       {easePop &&
@@ -835,6 +1329,10 @@ export default function Timeline({
                 bakeSpringSegEase(easePop.ch, easePop.fromT, i)
                 setEasePop(null) // 구간이 여러 키로 쪼개짐 — 팝업 대상이 사라진다
               }}
+              onBounce={() => {
+                bakeBounceSegEase(easePop.ch, easePop.fromT)
+                setEasePop(null)
+              }}
               onClose={() => setEasePop(null)}
             />,
             document.body,
@@ -854,6 +1352,7 @@ function EasingPopover({
   onDragEnd,
   onPreset,
   onSpring,
+  onBounce,
   onClose,
 }: {
   bez: Bezier4
@@ -864,6 +1363,7 @@ function EasingPopover({
   onDragEnd: () => void
   onPreset: (b: Bezier4) => void
   onSpring: (presetIdx: number) => void
+  onBounce: () => void
   onClose: () => void
 }) {
   const W = 248
@@ -901,7 +1401,7 @@ function EasingPopover({
   const [tokens, setTokens] = useState<EaseToken[]>(loadEaseTokens)
   const [naming, setNaming] = useState<string | null>(null)
   const commitToken = (raw: string) => {
-    const name = raw.trim() || `토큰 ${tokens.length + 1}`
+    const name = raw.trim() || t('토큰 {n}').replace('{n}', String(tokens.length + 1))
     const next = [...tokens.filter((t) => t.name !== name), { name, bez: [...bez] as Bezier4 }]
     setTokens(next)
     saveEaseTokens(next)
@@ -936,7 +1436,7 @@ function EasingPopover({
       <div className="easepop__backdrop" onClick={onClose} />
       <div className="easepop" style={{ left, top, width: W }}>
         <div className="easepop__head">
-          <span>이징 · {chLabel}</span>
+          <span>{t('이징')} · {t(chLabel)}</span>
           <button className="easepop__close" onClick={onClose}>
             ×
           </button>
@@ -948,7 +1448,7 @@ function EasingPopover({
               className={`chip ${isPreset(p.bez) ? 'chip--on' : ''}`}
               onClick={() => onPreset(p.bez)}
             >
-              {p.label}
+              {t(p.label)}
             </button>
           ))}
         </div>
@@ -1028,26 +1528,26 @@ function EasingPopover({
           }}
           spellCheck={false}
         />
-        <p className="knob__note">핸들을 끌거나 cubic-bezier 값 직접 입력. 이 구간에만 적용.</p>
+        <p className="knob__note">{t('핸들을 끌거나 cubic-bezier 값 직접 입력. 이 구간에만 적용.')}</p>
         {/* 이징 토큰 — 내 커브 저장·재사용, 프로젝트를 넘어 유지 */}
         <div className="knob__head" style={{ marginTop: 8 }}>
-          <span className="knob__name">내 토큰</span>
+          <span className="knob__name">{t('내 토큰')}</span>
         </div>
         <div className="knob__chips">
-          {tokens.map((t) => (
+          {tokens.map((tok) => (
             <button
-              key={t.name}
-              className={`chip easetoken ${isPreset(t.bez) ? 'chip--on' : ''}`}
-              title={t.bez.map((v) => Math.round(v * 100) / 100).join(', ')}
-              onClick={() => onPreset(t.bez)}
+              key={tok.name}
+              className={`chip easetoken ${isPreset(tok.bez) ? 'chip--on' : ''}`}
+              title={tok.bez.map((v) => Math.round(v * 100) / 100).join(', ')}
+              onClick={() => onPreset(tok.bez)}
             >
-              {t.name}
+              {tok.name}
               <span
                 className="easetoken__x"
-                title="토큰 삭제"
+                title={t('토큰 삭제')}
                 onClick={(e) => {
                   e.stopPropagation()
-                  removeToken(t.name)
+                  removeToken(tok.name)
                 }}
               >
                 ×
@@ -1056,14 +1556,14 @@ function EasingPopover({
           ))}
           {naming === null ? (
             <button className="chip" onClick={() => setNaming('')}>
-              ＋ 저장
+              {t('＋ 저장')}
             </button>
           ) : (
             <input
               className="easetoken__name"
               autoFocus
               value={naming}
-              placeholder={`토큰 ${tokens.length + 1}`}
+              placeholder={t('토큰 {n}').replace('{n}', String(tokens.length + 1))}
               onChange={(e) => setNaming(e.target.value)}
               onBlur={() => setNaming(null)}
               onKeyDown={(e) => {
@@ -1077,18 +1577,21 @@ function EasingPopover({
             />
           )}
         </div>
-        {/* 스프링 — 단일 베지어로 불가능한 감쇠 진동을 구간 키로 굽는다 (Creator 2.0 벤치) */}
+        {/* 스프링/물리 — 단일 베지어로 불가능한 곡선을 구간 키로 굽는다 */}
         <div className="knob__head" style={{ marginTop: 8 }}>
-          <span className="knob__name">스프링으로 굽기</span>
+          <span className="knob__name">{t('스프링·물리로 굽기')}</span>
         </div>
         <div className="knob__chips">
           {SPRING_PRESETS.map((p, i) => (
             <button key={p.label} className="chip" onClick={() => onSpring(i)}>
-              {p.label}
+              {t(p.label)}
             </button>
           ))}
+          <button className="chip" title={t('물리 낙하+튕김 (easeOutBounce)')} onClick={onBounce}>
+            {t('낙하 바운스')}
+          </button>
         </div>
-        <p className="knob__note">이 구간을 스프링 모션 키들로 대체합니다 — 되돌리기는 ⌘Z.</p>
+        <p className="knob__note">{t('이 구간을 곡선 샘플 키들로 대체합니다 — 되돌리기는 ⌘Z.')}</p>
       </div>
     </>
   )

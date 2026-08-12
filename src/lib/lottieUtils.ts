@@ -1,4 +1,5 @@
 // Lottie JSON 구조 유틸리티: 검증, 레이어 조작, 크기/속도 변경.
+import { t } from './i18n'
 
 export interface LottieJson {
   v: string
@@ -42,10 +43,10 @@ export function parseLottie(text: string): LottieJson {
   try {
     parsed = JSON.parse(text)
   } catch {
-    throw new Error('JSON 파싱 실패 — 올바른 JSON 파일이 아닙니다.')
+    throw new Error(t('JSON 파싱 실패 — 올바른 JSON 파일이 아닙니다.'))
   }
   if (!isLottieJson(parsed)) {
-    throw new Error('로티 형식이 아닙니다 — v, fr, ip, op, layers 필드가 필요합니다.')
+    throw new Error(t('로티 형식이 아닙니다 — v, fr, ip, op, layers 필드가 필요합니다.'))
   }
   return parsed
 }

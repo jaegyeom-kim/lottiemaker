@@ -4,13 +4,16 @@ import { extractColorGroups, replaceColor, type ColorGroup } from './lib/lottieC
 import { toggleLayer as toggleLayerUtil, resize as resizeUtil } from './lib/lottieUtils'
 import { applyKnobs, type TemplateKnob } from './lib/lottieKnobs'
 import type { AiMotionPlan } from './lib/ai'
+import { convertLottieToCustom, convertLottieToScenes, hasPrecomps } from './lib/lottieImport'
+import { t } from './lib/i18n'
 import {
   buildAnimKs, buildCustomDoc, buildCustomLayer, animSpans, normSel,
   layerHalfOf, layerCenterOffsetOf, normKf, buildKfKs, kfValueAt,
-  springValue, SPRING_PRESETS,
+  springValue, SPRING_PRESETS, bounceValue,
   CUSTOM_ASSET_PREFIX, DEFAULT_SEL,
   type CustomSel, type CustomPayload, type CustomKf, type KfChannel, type Bezier4,
   type KfSelItem,
+  kfChannelKeys, applyTrimChannels, extractTrimToKf,
 } from './lib/customBuilder'
 
 const HISTORY_CAP = 50
@@ -40,6 +43,8 @@ export interface SavedSession {
   knobValues: Record<string, number | string>
   fileName: string
   customIdx: number
+  /** 편집 중이던 씬 (comp 에셋 id) — null = 메인. */
+  activeScene?: string | null
 }
 
 export type SaveKind = 'template' | 'custom'
@@ -64,6 +69,7 @@ interface Workspace {
   customIdx: number
   customIdxs: number[]
   loop: boolean
+  activeScene: string | null
 }
 const modeStash: Record<SaveKind, Workspace | null> = { template: null, custom: null }
 
@@ -142,6 +148,10 @@ interface EditorState {
   load: (data: LottieJson, fileName: string) => void
   /** 모드 전환 — 현재 작업공간을 보관하고 대상 모드의 작업공간(스태시 → 저장 슬롯 순)으로 스왑. */
   setMode: (m: SaveKind) => void
+  /** 편집 중인 씬 (comp 에셋 id) — null = 메인 씬. */
+  activeScene: string | null
+  /** 씬 전환 — 레이어 배열을 물리 스왑 (히스토리 초기화, LottieFiles Creator 방식). */
+  switchScene: (id: string | null) => void
   /** 자동 저장된 세션 복원 — 앱 시작 시 1회. */
   restoreSession: (s: SavedSession) => void
   setColorLive: (group: ColorGroup, hex: string) => void
@@ -166,12 +176,24 @@ interface EditorState {
   setCustomIdx: (i: number) => void
   /** Shift/⌘ 클릭 — 선택 토글. */
   toggleCustomSel: (i: number) => void
+  /** 다중 선택을 통째로 설정 — 마키/범위 선택용 (빈 배열 = 해제). */
+  setCustomSelList: (idxs: number[]) => void
+  /** 타임라인 채널 공개 (AE P/S/R/T/U) — 레이어 인덱스 → 보이는 채널. 기본 접힘. */
+  tlReveal: Record<number, KfChannel[]>
+  /** AE식 채널 공개 — spec: 채널 솔로 / 'u' 키 있는 채널 / 'all' / 'none'. additive = ⇧ (토글 추가). */
+  revealChannels: (lis: number[], spec: KfChannel | 'u' | 'all' | 'none', additive?: boolean) => void
   /** 빈 곳 클릭 — 선택 해제. */
   deselectCustom: () => void
   /** 다중 레이어 삭제 (인덱스 목록). */
   removeCustomLayers: (idxs: number[]) => void
   /** 커스텀 빌더: 그래픽 추가 — 세션 없으면 새 문서, 있으면 맨 위 레이어로. at = 배치 좌표. */
-  addCustomLayer: (payload: CustomPayload, name: string, at?: [number, number]) => void
+  addCustomLayer: (payload: CustomPayload, name: string, at?: [number, number], size?: number) => void
+  /** 선택 레이어의 그래픽을 통째 교체 (라이브) — 펜 드로잉 진행 중 갱신. 모션·이름·라벨 유지, commitEdit로 확정. */
+  replaceCustomGraphicLive: (payload: CustomPayload, at: [number, number], size: number) => void
+  /** 로티 문서를 커스텀 레이어로 가져오기 — 트랜스폼 키프레임을 xkf로 변환. */
+  importLottieLayers: (
+    doc: LottieJson,
+  ) => { added: number; warnings: string[]; skipped: number; scenes: number }
   /** 커스텀 빌더: 레이어 삭제 (에셋 포함). 마지막 레이어면 편집기 비움. */
   removeCustomLayer: (i: number) => void
   /** 커스텀 빌더: 선택 레이어의 프리셋 채널 교체 — 위치는 유지. */
@@ -244,8 +266,44 @@ interface EditorState {
   setKfSegEase: (ch: KfChannel, fromT: number, bez: Bezier4) => void
   /** fromT→다음 키 구간을 스프링 모션 키로 굽기 (SPRING_PRESETS 인덱스). */
   bakeSpringSegEase: (ch: KfChannel, fromT: number, preset: number) => void
-  /** 선택 레이어 패턴 복제 — count개, 간격/회전/시간차 누적 오프셋 (Duplicator 벤치). */
-  duplicatePattern: (count: number, dx: number, dy: number, drot: number, dt: number) => void
+  /** fromT→다음 키 구간을 낙하 바운스(물리) 키로 굽기. */
+  bakeBounceSegEase: (ch: KfChannel, fromT: number) => void
+  /** 선택 레이어 패턴 복제 — count개, 간격/회전/크기/불투명도/시간차 누적 오프셋. */
+  duplicatePattern: (
+    count: number,
+    dx: number,
+    dy: number,
+    drot: number,
+    dt: number,
+    ds: number,
+    dop: number,
+  ) => void
+  /** 선택 키프레임 시간 반전(미러) — 선택 구간 창 기준, 이징도 뒤집힘. */
+  reverseKfSel: () => void
+  /** 선택 레이어 블렌드 모드 (Lottie bm — 0 표준). */
+  setLayerBlend: (bm: number) => void
+  /** 레이어 이름 변경 (AE Enter/더블클릭 리네임). */
+  renameLayer: (li: number, name: string) => void
+  /** 레이어 잠금 토글 (AE Lock) — 잠기면 캔버스/타임라인에서 선택·드래그 불가. */
+  toggleLayerLock: (li: number) => void
+  /** 수동 숨김 토글 (커스텀 모드) — 솔로와 조합해 최종 hd 계산. */
+  toggleLayerHide: (li: number) => void
+  /** 솔로 토글 (AE Solo/Creator Focus) — 켜진 레이어만 렌더. */
+  toggleLayerSolo: (li: number) => void
+  /** 트랙 매트 설정 — 소스는 임의 레이어(tp), 타입 none/alpha/luma + 반전. */
+  setLayerMatte: (
+    li: number,
+    opts: { type: 'none' | 'alpha' | 'luma'; invert: boolean; sourceLi: number | null },
+  ) => void
+  /** 부모 설정 (AE Parent) — targetLi = 부모 레이어 인덱스, null = 해제. */
+  setLayerParent: (li: number, targetLi: number | null) => void
+  /** '타임라인에서 끄기' 토글 (Creator Turn off in Timeline). */
+  toggleLayerTloff: (li: number) => void
+  /** 타임라인에서 끈 레이어들 숨김 여부 (헤더 토글). */
+  tlHideOff: boolean
+  setTlHideOff: (v: boolean) => void
+  /** 선택 레이어 위치 모션 패스 곡선 보간 토글. */
+  setKfSmooth: (v: boolean) => void
   /** AI 모션 플랜 적용 — 대상 레이어를 키프레임 모드로 전환하고 키 통째 교체, 언두 1칸. */
   applyAiMotion: (plan: AiMotionPlan) => void
   /** 커브 핸들 드래그용 라이브 버전 — commitEdit로 확정. */
@@ -269,6 +327,15 @@ export const useEditor = create<EditorState>((set, get) => {
       customIdx, customIdxs: get().customIdxs, templateId,
     }
   }
+
+  /**
+   * 라이브 편집용 문서 클론 — 레이어만 깊복사, 에셋 배열(대용량 base64)은 공유.
+   * 트랜스폼 편집은 에셋을 건드리지 않으므로 안전. 에셋을 만지는 경로는 structuredClone 유지.
+   */
+  const cloneForLive = (d: LottieJson): LottieJson => ({
+    ...d,
+    layers: structuredClone(d.layers),
+  })
 
   /** 현재 상태를 past에 올리고 next 필드를 반영한다. 드래그 세션이 열려 있으면 먼저 커밋. */
   const push = (next: Partial<EditorState>) => {
@@ -303,6 +370,7 @@ export const useEditor = create<EditorState>((set, get) => {
           customIdx: s.customIdx,
           customIdxs: s.customIdxs,
           loop: s.loop,
+          activeScene: s.activeScene,
         }
       : null
   }
@@ -364,14 +432,16 @@ export const useEditor = create<EditorState>((set, get) => {
     }
   }
 
-  /** 선택 레이어의 애니메이션(등장/루프/퇴장 + 회전/불투명도)을 sel로 재구성. */
+  /** 선택 레이어의 애니메이션(등장/루프/퇴장 + 회전/불투명도)을 sel로 재구성.
+   *  live = 드래그 틱 — 에셋 공유 클론 + 색 재추출 생략 (트랜스폼은 색을 못 바꾼다). */
   const withCustomChannels = (
     st: EditorState,
     sel: CustomSel,
+    live = false,
   ): Pick<EditorState, 'animationData' | 'sourceData' | 'colorGroups'> | null => {
     const { sourceData, templateKnobs, knobValues, customIdx } = st
     if (!sourceData) return null
-    const src = structuredClone(sourceData)
+    const src = live ? cloneForLive(sourceData) : structuredClone(sourceData)
     ensureLayerColors(src)
     const li = Math.min(customIdx, src.layers.length - 1)
     const layer = src.layers[li] as Record<string, unknown> | undefined
@@ -381,19 +451,15 @@ export const useEditor = create<EditorState>((set, get) => {
     // 채널·클립 재생성은 editKfLayerIn 한 곳에서 — 프리셋/키프레임 분기 포함
     if (!editKfLayerIn(src, li, () => {})) return null
     const applied = applyKnobs(src, templateKnobs, knobValues)
-    return { animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) }
+    return {
+      animationData: applied,
+      sourceData: src,
+      colorGroups: live ? st.colorGroups : extractColorGroups(applied),
+    }
   }
 
-  /** 선택 레이어 크기 변경 (긴 변 px) — 래스터는 에셋, SVG는 래퍼 스케일. */
-  const withCustomSize = (
-    st: EditorState,
-    px: number,
-  ): Pick<EditorState, 'animationData' | 'sourceData' | 'colorGroups'> | null => {
-    const { sourceData, templateKnobs, knobValues, customIdx } = st
-    if (!sourceData) return null
-    const src = structuredClone(sourceData)
-    const layer = src.layers[Math.min(customIdx, src.layers.length - 1)] as Record<string, unknown>
-    if (!layer) return null
+  /** 레이어 크기(긴 변 px) 적용 — 래스터는 에셋 w/h, SVG는 그룹 스케일 (+앵커 비례). */
+  const applyLayerSize = (src: LottieJson, layer: Record<string, unknown>, px: number) => {
     const asset = (src.assets as Record<string, unknown>[] | undefined)?.find(
       (a) => a.id === layer.refId,
     )
@@ -421,6 +487,19 @@ export const useEditor = create<EditorState>((set, get) => {
     }
     const xsel = { ...DEFAULT_SEL, ...((layer.xsel as Partial<CustomSel>) ?? {}) }
     layer.xsel = { ...xsel, size: px }
+  }
+
+  /** 선택 레이어 크기 변경 (긴 변 px) — 래스터는 에셋, SVG는 래퍼 스케일. */
+  const withCustomSize = (
+    st: EditorState,
+    px: number,
+  ): Pick<EditorState, 'animationData' | 'sourceData' | 'colorGroups'> | null => {
+    const { sourceData, templateKnobs, knobValues, customIdx } = st
+    if (!sourceData) return null
+    const src = structuredClone(sourceData)
+    const layer = src.layers[Math.min(customIdx, src.layers.length - 1)] as Record<string, unknown>
+    if (!layer) return null
+    applyLayerSize(src, layer, px)
     const applied = applyKnobs(src, templateKnobs, knobValues)
     return { animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) }
   }
@@ -441,7 +520,10 @@ export const useEditor = create<EditorState>((set, get) => {
       (a) => a.id === layer.refId,
     )
     let newA: number[]
-    if (asset) {
+    if (Number(layer.ty) === 0 && typeof layer.w === 'number') {
+      // 씬 참조(프리컴프) — 뷰포트(레이어 w/h)가 앵커 좌표계
+      newA = [(layer.w as number) * fx, Number(layer.h ?? layer.w) * fy, 0]
+    } else if (asset && typeof asset.w === 'number' && !asset.layers) {
       newA = [(asset.w as number) * fx, (asset.h as number) * fy, 0]
     } else {
       const g = (layer.shapes as Record<string, unknown>[] | undefined)?.[0]
@@ -484,31 +566,56 @@ export const useEditor = create<EditorState>((set, get) => {
       : [256, 256]
     const ks = layer.ks as Record<string, unknown>
     const anim = xkf.on ? buildKfKs(xkf, full, base) : buildAnimKs(full, base, src.op)
+    // 로티는 키 시각과 프레임 양쪽에서 st(offsetTime)를 빼므로 상쇄된다 —
+    // 트랜스폼 키는 comp 시간 그대로 쓰는 게 맞다 (st는 자식 컴프 내용만 시프트)
     ks.p = anim.p
     ks.s = anim.s
     ks.o = anim.o
     ks.r = anim.r
+    // 트림 패스 채널(ts/te) — ks 밖(shapes의 tm)에 반영, 키 있을 때만
+    applyTrimChannels(layer, xkf)
     const { clipA, clipB } = animSpans(full, src.op)
     layer.ip = clipA
     layer.op = clipB
     return true
   }
 
-  /** 선택 레이어의 xkf를 변형하고 채널·클립을 재생성 — 키프레임 모드 편집의 공통 경로. */
+  /** 선택 레이어의 xkf를 변형하고 채널·클립을 재생성 — 키프레임 모드 편집의 공통 경로.
+   *  live = 드래그 틱 (에셋 공유 클론 + 색 재추출 생략). */
   const withKfEdit = (
     st: EditorState,
     mutate: (xkf: CustomKf, layer: Record<string, unknown>) => void,
+    live = false,
   ): Pick<EditorState, 'animationData' | 'sourceData' | 'colorGroups'> | null => {
     const { sourceData, templateKnobs, knobValues, customIdx } = st
     if (!sourceData) return null
-    const src = structuredClone(sourceData)
+    const src = live ? cloneForLive(sourceData) : structuredClone(sourceData)
     ensureLayerColors(src)
     if (!editKfLayerIn(src, Math.min(customIdx, src.layers.length - 1), mutate)) return null
     const applied = applyKnobs(src, templateKnobs, knobValues)
-    return { animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) }
+    return {
+      animationData: applied,
+      sourceData: src,
+      colorGroups: live ? st.colorGroups : extractColorGroups(applied),
+    }
   }
 
   /** xkf.keys에서 frame(±0.5f)의 키에 채널 값(+구간 이징) 업서트. */
+  /** ind를 1..n으로 재할당하면서 tp(매트)·parent 참조를 함께 리매핑. */
+  const reindexLayers = (layersArr: Record<string, unknown>[]) => {
+    const oldToNew = new Map<number, number>()
+    layersArr.forEach((l, i) => {
+      if (typeof l.ind === 'number') oldToNew.set(l.ind as number, i + 1)
+    })
+    layersArr.forEach((l, i) => (l.ind = i + 1))
+    layersArr.forEach((l) => {
+      if (typeof l.tp === 'number' && oldToNew.has(l.tp as number))
+        l.tp = oldToNew.get(l.tp as number)
+      if (typeof l.parent === 'number' && oldToNew.has(l.parent as number))
+        l.parent = oldToNew.get(l.parent as number)
+    })
+  }
+
   const upsertKey = (
     xkf: CustomKf,
     ch: KfChannel,
@@ -526,6 +633,48 @@ export const useEditor = create<EditorState>((set, get) => {
       ? [Math.round(value[0] * 10) / 10, Math.round(value[1] * 10) / 10]
       : Math.round(value * 10) / 10
     if (ease) k.e = { ...(k.e ?? {}), [ch]: ease }
+  }
+
+  /** fromT→다음 키 구간을 진행 곡선 fn(u∈[0,1]→0..1) 샘플 키로 굽는다 — 스프링/바운스 공용. */
+  const bakeCurveSegEase = (ch: KfChannel, fromT: number, fn: (u: number) => number) => {
+    const next = withKfEdit(get(), (xkf) => {
+      const chKeys = xkf.keys
+        .filter((k) => k[ch] !== undefined)
+        .sort((a, b) => a.t - b.t)
+      const i1 = chKeys.findIndex((k) => Math.abs(k.t - fromT) < 0.5)
+      if (i1 < 0 || i1 >= chKeys.length - 1) return
+      const k1 = chKeys[i1]
+      const k2 = chKeys[i1 + 1]
+      const D = k2.t - k1.t
+      if (D < 6) return // 너무 짧으면 샘플 의미 없음
+      const v1 = k1[ch] as number | [number, number]
+      const v2 = k2[ch] as number | [number, number]
+      const lin: Bezier4 = [0, 0, 1, 1]
+      // 사이 기존 키 정리 (해당 채널만)
+      for (const k of xkf.keys) {
+        if (k.t > k1.t + 0.5 && k.t < k2.t - 0.5 && k[ch] !== undefined) {
+          delete k[ch]
+          if (k.e) delete k.e[ch]
+        }
+      }
+      xkf.keys = xkf.keys.filter(
+        (k) => k.p !== undefined || k.s !== undefined || k.r !== undefined || k.o !== undefined,
+      )
+      // 곡선 샘플 — 세그먼트당 최대 14키, 최소 2f 간격
+      const steps = Math.max(4, Math.min(14, Math.floor(D / 2)))
+      const mix = (u: number): number | [number, number] => {
+        const f = fn(u)
+        if (Array.isArray(v1) && Array.isArray(v2))
+          return [v1[0] + (v2[0] - v1[0]) * f, v1[1] + (v2[1] - v1[1]) * f]
+        return (v1 as number) + ((v2 as number) - (v1 as number)) * f
+      }
+      for (let i = 1; i < steps; i++) {
+        upsertKey(xkf, ch, k1.t + (D * i) / steps, mix(i / steps), lin)
+      }
+      // 굽힌 구간은 샘플을 따라가야 하므로 선형 이징
+      k1.e = { ...(k1.e ?? {}), [ch]: lin }
+    })
+    if (next) push(next)
   }
 
   return {
@@ -546,6 +695,9 @@ export const useEditor = create<EditorState>((set, get) => {
 
     customIdx: 0,
     customIdxs: [0],
+    activeScene: null,
+    tlReveal: {},
+    tlHideOff: true,
 
     curFrame: 0,
     jumpToken: null,
@@ -576,6 +728,7 @@ export const useEditor = create<EditorState>((set, get) => {
         past: [],
         future: [],
         editBaseline: null,
+        activeScene: null,
         playing: true,
       })
     },
@@ -648,6 +801,14 @@ export const useEditor = create<EditorState>((set, get) => {
         // 구버전 세션의 timeStretch 노브 제거 — 커스텀은 컴프 길이 방식
         s.templateKnobs = []
         s.knobValues = {}
+        // 구버전 세션 마이그레이션 — tm 애니메이션을 편집 가능한 트림 채널로 추출
+        const allLayers = [
+          ...(s.sourceData.layers as Record<string, unknown>[]),
+          ...(((s.sourceData.assets as Record<string, unknown>[] | undefined) ?? [])
+            .filter((a) => a.xscene === true)
+            .flatMap((a) => (a.layers as Record<string, unknown>[] | undefined) ?? [])),
+        ]
+        for (const lr of allLayers) if (Number(lr.ty) === 4) extractTrimToKf(lr)
       }
       const applied = applyKnobs(s.sourceData, s.templateKnobs, s.knobValues)
       set({
@@ -665,6 +826,7 @@ export const useEditor = create<EditorState>((set, get) => {
         past: [],
         future: [],
         editBaseline: null,
+        activeScene: s.activeScene ?? null,
         playing: false,
         loop: m === 'template',
       })
@@ -898,6 +1060,55 @@ export const useEditor = create<EditorState>((set, get) => {
 
     deselectCustom: () => set({ customIdxs: [] }),
 
+    revealChannels: (lis, spec, additive = false) => {
+      const src = get().sourceData
+      if (!src) return
+      const ALL: KfChannel[] = ['p', 's', 'r', 'o', 'ts', 'te']
+      const next = { ...get().tlReveal }
+      for (const li of lis) {
+        const layer = src.layers[li] as Record<string, unknown> | undefined
+        if (!layer) continue
+        const xkf = normKf(layer.xkf as Partial<CustomKf> | undefined)
+        // 트림 채널(ts/te)은 kf 모드와 무관하게 동작 — on 아닐 땐 트림만 공개 가능
+        const eligible = (c: KfChannel) => xkf.on || c === 'ts' || c === 'te'
+        if (
+          !xkf.on &&
+          Number(layer.ty) !== 4 &&
+          !xkf.keys.some((k) => k.ts !== undefined || k.te !== undefined)
+        )
+          continue
+        const cur = next[li] ?? []
+        if (additive && spec !== 'u' && spec !== 'all' && spec !== 'none') {
+          // ⇧ = 현재 공개 목록에 채널 토글 추가/제거 (AE ⇧P/⇧S…)
+          next[li] = cur.includes(spec) ? cur.filter((c) => c !== spec) : [...cur, spec]
+          continue
+        }
+        let chs: KfChannel[]
+        const trimOk = (c: KfChannel) =>
+          (c !== 'ts' && c !== 'te') ||
+          Number(layer.ty) === 4 ||
+          kfChannelKeys(xkf, c).length > 0
+        if (spec === 'u') chs = ALL.filter((c) => eligible(c) && kfChannelKeys(xkf, c).length > 0)
+        else if (spec === 'all') chs = ALL.filter((c) => trimOk(c) && eligible(c))
+        else if (spec === 'none') chs = []
+        else chs = [spec].filter(eligible)
+        // 같은 상태에서 같은 키 = 접기 (AE 토글)
+        const same = cur.length === chs.length && chs.every((c) => cur.includes(c))
+        next[li] = same ? [] : chs
+      }
+      set({ tlReveal: next })
+    },
+
+    setCustomSelList: (idxs) => {
+      const n = get().sourceData?.layers.length ?? 0
+      const uniq = [...new Set(idxs)].filter((i) => i >= 0 && i < n)
+      if (!uniq.length) {
+        set({ customIdxs: [] })
+        return
+      }
+      set({ customIdxs: uniq, customIdx: uniq[uniq.length - 1] })
+    },
+
     toggleCustomSel: (i) => {
       const cur = get().customIdxs
       let next = cur.includes(i) ? cur.filter((x) => x !== i) : [...cur, i]
@@ -905,11 +1116,13 @@ export const useEditor = create<EditorState>((set, get) => {
       set({ customIdxs: next, customIdx: next[next.length - 1] })
     },
 
-    addCustomLayer: (payload, name, at) => {
+    addCustomLayer: (payload, name, at, size) => {
       const { templateId, sourceData, templateKnobs, knobValues } = get()
       const base: [number, number] = at ?? [256, 256]
+      // 드로잉 툴은 그린 크기 그대로 생성 (기본은 240px)
+      const sel = { ...DEFAULT_SEL, ...(size ? { size: Math.max(4, Math.round(size)) } : {}) }
       if (templateId !== '__custom' || !sourceData) {
-        const doc = buildCustomDoc(payload, { ...DEFAULT_SEL }, base, name)
+        const doc = buildCustomDoc(payload, sel, base, name)
         ;(doc.layers[0] as Record<string, unknown>).xci = 0
         // 커스텀은 timeStretch 노브 없음 — 컴포지션 길이는 setCompLength로 (절대 시간 유지)
         get().loadTemplate(doc, '__custom', [])
@@ -921,13 +1134,13 @@ export const useEditor = create<EditorState>((set, get) => {
       ensureLayerColors(src)
       const assets = (src.assets as Record<string, unknown>[] | undefined) ?? []
       const { layer, asset } = buildCustomLayer(
-        payload, { ...DEFAULT_SEL }, base, name, nextAssetId(assets), src.op,
+        payload, sel, base, name, nextAssetId(assets), src.op,
       )
       layer.xci = nextXci(src)
       if (asset) assets.push(asset)
       src.assets = assets
       src.layers = [layer as never, ...src.layers]
-      src.layers.forEach((l, i) => (l.ind = i + 1))
+      reindexLayers(src.layers as Record<string, unknown>[])
       const applied = applyKnobs(src, templateKnobs, knobValues)
       push({
         animationData: applied,
@@ -937,6 +1150,228 @@ export const useEditor = create<EditorState>((set, get) => {
         customIdx: 0,
         customIdxs: [0],
       })
+    },
+
+    replaceCustomGraphicLive: (payload, at, size) => {
+      const st = get()
+      const baseline = st.editBaseline ?? snap()
+      const baseSrc = baseline.source
+      if (!baseSrc?.layers.length) return
+      const src = cloneForLive(baseSrc)
+      ensureLayerColors(src)
+      const li = Math.min(st.customIdx, src.layers.length - 1)
+      const old = src.layers[li] as Record<string, unknown>
+      const sel = normSel(old.xsel as Partial<CustomSel> | undefined, src.op)
+      // 에셋 추가 가능성 — 공유 배열 오염 방지 (copy-on-write)
+      const assets = [...((src.assets as Record<string, unknown>[] | undefined) ?? [])]
+      const { layer, asset } = buildCustomLayer(
+        payload,
+        { ...sel, size: Math.max(4, Math.round(size)) },
+        at,
+        String(old.nm ?? '패스'),
+        nextAssetId(assets),
+        src.op,
+      )
+      layer.xci = old.xci
+      layer.ind = old.ind
+      if (old.xkf) layer.xkf = structuredClone(old.xkf)
+      if (asset) {
+        assets.push(asset)
+      }
+      src.assets = assets
+      src.layers[li] = layer as never
+      editKfLayerIn(src, li, () => {})
+      const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
+      set({
+        animationData: applied,
+        sourceData: src,
+        colorGroups: st.colorGroups, // 펜 라이브 — 색 고정, 재추출 생략
+        editBaseline: baseline,
+        future: [],
+      })
+    },
+
+    switchScene: (id) => {
+      const st = get()
+      if (st.templateId !== '__custom' || !st.sourceData) return
+      if (id === st.activeScene) return
+      get().commitEdit()
+      const src = structuredClone(get().sourceData!)
+      const assets = ((src.assets as Record<string, unknown>[] | undefined) ?? []).slice()
+      // 현재 뷰 레이어를 제자리(씬 에셋 또는 __main 홀더)에 반납
+      const holderId = st.activeScene ?? '__main'
+      let holder = assets.find((a) => a.id === holderId)
+      if (!holder) {
+        holder = { id: holderId, xscene: true, nm: holderId === '__main' ? 'Main' : holderId }
+        assets.push(holder)
+      }
+      holder.layers = src.layers
+      // 현재 캔버스 크기·길이 반납 — 컴프마다 뷰포트/타임라인이 다르다 (AE 방식)
+      holder.xw = src.w
+      holder.xh = src.h
+      holder.xop = src.op
+      // 타깃 레이어 꺼내기 — 편집 중 씬 에셋은 비워서 이중 표시/발산 방지
+      const targetId = id ?? '__main'
+      const target = assets.find((a) => a.id === targetId)
+      src.layers = ((target?.layers as never[] | undefined) ?? []) as never
+      if (target) target.layers = []
+      // 타깃 뷰포트/길이로 전환 (작업물은 그대로 — 보는 창만 바뀐다)
+      ;(src as unknown as Record<string, unknown>).w = Number(target?.xw ?? 512)
+      ;(src as unknown as Record<string, unknown>).h = Number(target?.xh ?? 512)
+      ;(src as unknown as Record<string, unknown>).op = Number(target?.xop ?? src.op)
+      // 메인 복귀 시 홀더 정리
+      src.assets = (targetId === '__main' ? assets.filter((a) => a !== target) : assets) as never
+      ensureLayerColors(src)
+      const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
+      set({
+        sourceData: src,
+        animationData: applied,
+        colorGroups: extractColorGroups(applied),
+        activeScene: id,
+        past: [],
+        future: [],
+        editBaseline: null,
+        kfSel: [],
+        customIdx: 0,
+        customIdxs: src.layers.length ? [0] : [],
+        playing: false,
+      })
+    },
+
+    importLottieLayers: (doc) => {
+      // 프리컴프 문서 → 씬 보존 모드 (LottieFiles Creator 방식)
+      if (hasPrecomps(doc)) {
+        const sc = convertLottieToScenes(doc)
+        const totalLayers = sc.main.length + sc.scenes.reduce((n, x) => n + x.layers.length, 0)
+        if (!totalLayers) return { added: 0, warnings: sc.warnings, skipped: sc.skipped, scenes: 0 }
+        // 채널 재생성 — 메인/씬 레이어 전부 (씬은 가짜 문서 래퍼로)
+        const rebuild = (layersArr: Record<string, unknown>[], scopeOp: number) => {
+          const fake = { op: scopeOp, layers: layersArr } as unknown as LottieJson
+          layersArr.forEach((_, i) => editKfLayerIn(fake, i, () => {}))
+          reindexLayers(layersArr)
+        }
+        rebuild(sc.main, sc.op)
+        sc.scenes.forEach((x) => rebuild(x.layers, x.op))
+        const sceneAssets = sc.scenes.map((x) => ({
+          id: x.id,
+          nm: x.name,
+          xscene: true,
+          xw: x.w,
+          xh: x.h,
+          xop: x.op,
+          layers: x.layers,
+        }))
+        const { templateId, sourceData, templateKnobs, knobValues } = get()
+        if (templateId !== '__custom' || !sourceData) {
+          const newDoc = {
+            v: '5.7.0', fr: 60, ip: 0, op: sc.op, w: 512, h: 512, nm: 'imported',
+            assets: [...sc.assets, ...sceneAssets], layers: sc.main,
+          } as unknown as LottieJson
+          ensureLayerColors(newDoc)
+          get().loadTemplate(newDoc, '__custom', [])
+          set({ customIdx: 0, customIdxs: sc.main.length ? [0] : [], loop: false, playing: false })
+          return { added: totalLayers, warnings: sc.warnings, skipped: sc.skipped, scenes: sc.scenes.length }
+        }
+        // 기존 세션에 추가 — 씬 id 충돌 회피 (xsc_ 번호 오프셋) + 이미지 에셋 remap
+        const src = structuredClone(sourceData)
+        ensureLayerColors(src)
+        const assets = ((src.assets as Record<string, unknown>[] | undefined) ?? []).slice()
+        const sceneOff = assets.filter((a) => a.xscene === true).length
+        const sceneMap = new Map<string, string>()
+        sc.scenes.forEach((x, i) => sceneMap.set(x.id, `xsc_${sceneOff + i + 1}`))
+        const imgMap = new Map<string, string>()
+        for (const a of sc.assets) {
+          const newId = nextAssetId(assets)
+          imgMap.set(String(a.id), newId)
+          assets.push({ ...a, id: newId })
+        }
+        const remapLayers = (layersArr: Record<string, unknown>[]) => {
+          for (const l of layersArr) {
+            const rid = String(l.refId ?? '')
+            if (sceneMap.has(rid)) l.refId = sceneMap.get(rid)
+            else if (imgMap.has(rid)) l.refId = imgMap.get(rid)
+          }
+        }
+        remapLayers(sc.main)
+        sc.scenes.forEach((x) => remapLayers(x.layers))
+        for (const x of sc.scenes)
+          assets.push({ id: sceneMap.get(x.id)!, nm: x.name, xscene: true, layers: x.layers })
+        const baseXci = nextXci(src)
+        sc.main.forEach((l, i) => (l.xci = baseXci + i))
+        src.assets = assets as never
+        src.layers = [...(sc.main as never[]), ...src.layers]
+        reindexLayers(src.layers as Record<string, unknown>[])
+        const applied = applyKnobs(src, templateKnobs, knobValues)
+        push({
+          animationData: applied,
+          sourceData: src,
+          colorGroups: extractColorGroups(applied),
+          kfSel: [],
+          customIdx: 0,
+          customIdxs: [0],
+        })
+        return { added: totalLayers, warnings: sc.warnings, skipped: sc.skipped, scenes: sc.scenes.length }
+      }
+      const conv = convertLottieToCustom(doc)
+      if (!conv.layers.length)
+        return { added: 0, warnings: conv.warnings, skipped: conv.skipped, scenes: 0 }
+      const { templateId, sourceData, templateKnobs, knobValues } = get()
+      // 빈 작업공간 → 새 커스텀 세션으로
+      if (templateId !== '__custom' || !sourceData) {
+        const newDoc = {
+          v: '5.7.0', fr: 60, ip: 0, op: conv.op, w: 512, h: 512, nm: 'imported',
+          assets: conv.assets, layers: conv.layers,
+        } as unknown as LottieJson
+        ensureLayerColors(newDoc)
+        newDoc.layers.forEach((_, i) => editKfLayerIn(newDoc, i, () => {}))
+        newDoc.layers.forEach((l, i) => (l.ind = i + 1))
+        get().loadTemplate(newDoc, '__custom', [])
+        set({ customIdx: 0, customIdxs: [0], loop: false, playing: false })
+        return { added: conv.layers.length, warnings: conv.warnings, skipped: conv.skipped, scenes: 0 }
+      }
+      // 기존 세션에 추가 — 에셋 id 충돌은 우리 프리픽스로 재부여
+      const src = structuredClone(sourceData)
+      ensureLayerColors(src)
+      const assets = (src.assets as Record<string, unknown>[] | undefined) ?? []
+      const idMap = new Map<string, string>()
+      for (const a of conv.assets) {
+        const newId = nextAssetId(assets)
+        idMap.set(String(a.id), newId)
+        assets.push({ ...a, id: newId })
+      }
+      const baseXci = nextXci(src)
+      conv.layers.forEach((l, i) => {
+        if (l.refId && idMap.has(String(l.refId))) l.refId = idMap.get(String(l.refId))
+        l.xci = baseXci + i
+        // 기존 컴프 길이에 맞춰 클립·키 클램프
+        const xsel = l.xsel as CustomSel
+        xsel.clip = [
+          Math.max(0, Math.min(src.op, xsel.clip[0])),
+          Math.max(1, Math.min(src.op, xsel.clip[1])),
+        ]
+        const xkf = l.xkf as CustomKf
+        xkf.keys = xkf.keys.filter(
+          (k, ki, arr2) =>
+            k.t <= src.op &&
+            arr2.findIndex((m) => Math.abs(m.t - k.t) < 0.5) === ki,
+        )
+      })
+      if (conv.op > src.op)
+        conv.warnings = [...conv.warnings, '가져온 애니메이션이 현재 컴프보다 김 — 재생 길이를 늘려보세요']
+      src.assets = assets
+      src.layers = [...(conv.layers as never[]), ...src.layers]
+      src.layers.forEach((l, i) => (l.ind = i + 1))
+      for (let i = 0; i < conv.layers.length; i++) editKfLayerIn(src, i, () => {})
+      const applied = applyKnobs(src, templateKnobs, knobValues)
+      push({
+        animationData: applied,
+        sourceData: src,
+        colorGroups: extractColorGroups(applied),
+        kfSel: [],
+        customIdx: 0,
+        customIdxs: [0],
+      })
+      return { added: conv.layers.length, warnings: conv.warnings, skipped: conv.skipped, scenes: 0 }
     },
 
     removeCustomLayers: (idxs) => {
@@ -993,7 +1428,7 @@ export const useEditor = create<EditorState>((set, get) => {
 
     setCustomChannelsLive: (sel) => {
       const st = get()
-      const next = withCustomChannels(st, sel)
+      const next = withCustomChannels(st, sel, true)
       if (!next) return
       set({ ...next, editBaseline: st.editBaseline ?? snap(), future: [] })
     },
@@ -1026,11 +1461,15 @@ export const useEditor = create<EditorState>((set, get) => {
       ensureLayerColors(src)
       const copy = structuredClone(src.layers[i]) as Record<string, unknown>
       // 이름: '복사 복사' 증식 방지 — 기본 이름 + 번호
-      const baseName = String(copy.nm ?? '레이어').replace(/ 복사( \d+)?$/, '')
+      const copySuffix = t('복사')
+      const baseName = String(copy.nm ?? t('레이어')).replace(
+        new RegExp(` ${copySuffix}( \\d+)?$`),
+        '',
+      )
       const taken = new Set(src.layers.map((l) => String(l.nm ?? '')))
       let n = 1
-      while (taken.has(`${baseName} 복사${n > 1 ? ` ${n}` : ''}`)) n++
-      copy.nm = `${baseName} 복사${n > 1 ? ` ${n}` : ''}`
+      while (taken.has(`${baseName} ${copySuffix}${n > 1 ? ` ${n}` : ''}`)) n++
+      copy.nm = `${baseName} ${copySuffix}${n > 1 ? ` ${n}` : ''}`
       // 이미지 에셋 분리 — 공유하면 한쪽 삭제/크기 조절이 다른 복제본을 깨뜨린다
       if (copy.refId && Array.isArray(src.assets)) {
         const assets = src.assets as Record<string, unknown>[]
@@ -1118,7 +1557,7 @@ export const useEditor = create<EditorState>((set, get) => {
           return
         }
       }
-      const src = structuredClone(sourceData)
+      const src = cloneForLive(sourceData)
       const primary = Math.min(customIdx, src.layers.length - 1)
       const layer = src.layers[primary] as Record<string, unknown>
       if (!layer || !Array.isArray(layer.xbase)) return
@@ -1138,7 +1577,7 @@ export const useEditor = create<EditorState>((set, get) => {
       set({
         animationData: applied,
         sourceData: src,
-        colorGroups: extractColorGroups(applied),
+        colorGroups: st.colorGroups, // 이동은 색을 못 바꾼다 — 라이브 재추출 생략
         editBaseline: st.editBaseline ?? snap(),
         future: [],
       })
@@ -1225,7 +1664,7 @@ export const useEditor = create<EditorState>((set, get) => {
       const baseline = st.editBaseline ?? snap()
       const baseSrc = baseline.source ?? st.sourceData
       if (!baseSrc) return
-      const src = structuredClone(baseSrc)
+      const src = cloneForLive(baseSrc)
       ensureLayerColors(src)
       src.op = Math.max(30, Math.min(600, Math.round(sec * 60)))
       // 줄어든 범위 밖 키프레임은 클램프 + 겹침 정리 — 보이지도 지울 수도 없는 유령 키 방지
@@ -1247,7 +1686,7 @@ export const useEditor = create<EditorState>((set, get) => {
       set({
         animationData: applied,
         sourceData: src,
-        colorGroups: extractColorGroups(applied),
+        colorGroups: st.colorGroups, // 길이 변경은 색 불변
         editBaseline: baseline,
         future: [],
       })
@@ -1298,7 +1737,7 @@ export const useEditor = create<EditorState>((set, get) => {
 
     setKfChannelLive: (ch, frame, value) => {
       const st = get()
-      const next = withKfEdit(st, (xkf) => upsertKey(xkf, ch, frame, value))
+      const next = withKfEdit(st, (xkf) => upsertKey(xkf, ch, frame, value), true)
       if (!next) return
       set({ ...next, editBaseline: st.editBaseline ?? snap(), future: [] })
     },
@@ -1358,7 +1797,7 @@ export const useEditor = create<EditorState>((set, get) => {
       const baseline = st.editBaseline ?? snap()
       const baseSrc = baseline.source ?? st.sourceData
       if (!baseSrc) return null
-      const src = structuredClone(baseSrc)
+      const src = cloneForLive(baseSrc)
       ensureLayerColors(src)
       const op = src.op
       // 그룹 클램프 — 전체가 [0, op] 안에 머무는 dt
@@ -1415,7 +1854,7 @@ export const useEditor = create<EditorState>((set, get) => {
       set({
         animationData: applied,
         sourceData: src,
-        colorGroups: extractColorGroups(applied),
+        colorGroups: st.colorGroups, // 키 이동은 색 불변 — 라이브 재추출 생략
         editBaseline: baseline,
         future: [],
       })
@@ -1429,6 +1868,225 @@ export const useEditor = create<EditorState>((set, get) => {
       get().commitEdit()
       if (d === null || d === 0) return
       set({ kfSel: items.map((it) => ({ ...it, t: it.t + d })) })
+    },
+
+    reverseKfSel: () => {
+      const st = get()
+      const items = st.kfSel
+      if (items.length < 2 || !st.sourceData) return
+      const src = structuredClone(st.sourceData)
+      ensureLayerColors(src)
+      // 전체 선택 구간 창 기준 미러 (AE 시간 반전) — 레이어 넘어 스태거도 뒤집힌다
+      const tmin = Math.min(...items.map((i) => i.t))
+      const tmax = Math.max(...items.map((i) => i.t))
+      if (tmax - tmin < 1) return
+      const mirror = (t: number) => Math.round((tmin + tmax - t) * 10) / 10
+      const byLayer = new Map<number, KfSelItem[]>()
+      for (const it of items) {
+        const arr = byLayer.get(it.li) ?? []
+        arr.push(it)
+        byLayer.set(it.li, arr)
+      }
+      // 충돌 사전 검사 — 목적지에 비선택 키(같은 레이어·채널)가 있으면 통째로 중단
+      for (const [li, its] of byLayer) {
+        const layer = src.layers[li] as Record<string, unknown> | undefined
+        if (!layer) return
+        const xkf = normKf(layer.xkf as Partial<CustomKf> | undefined)
+        for (const it of its) {
+          const others = xkf.keys.filter(
+            (k) =>
+              k[it.ch] !== undefined &&
+              !its.some((s) => s.ch === it.ch && Math.abs(s.t - k.t) < 0.5),
+          )
+          if (others.some((k) => Math.abs(k.t - mirror(it.t)) < 0.5)) return
+        }
+      }
+      const flip = (b?: Bezier4): Bezier4 | undefined =>
+        b ? [1 - b[2], 1 - b[3], 1 - b[0], 1 - b[1]] : undefined
+      const newSel: KfSelItem[] = []
+      for (const [li, its] of byLayer) {
+        editKfLayerIn(src, li, (xkf) => {
+          const byCh = new Map<KfChannel, number[]>()
+          for (const it of its) {
+            const arr = byCh.get(it.ch) ?? []
+            arr.push(it.t)
+            byCh.set(it.ch, arr)
+          }
+          for (const [ch, ts] of byCh) {
+            const sorted = [...ts].sort((a, b) => a - b)
+            // 값+이징 걷어내기
+            const recs: { t: number; v: number | [number, number]; e?: Bezier4 }[] = []
+            for (const t of sorted) {
+              const k = xkf.keys.find((x) => Math.abs(x.t - t) < 0.5 && x[ch] !== undefined)
+              if (!k) continue
+              recs.push({ t, v: k[ch] as number | [number, number], e: k.e?.[ch] })
+              delete k[ch]
+              if (k.e) delete k.e[ch]
+            }
+            xkf.keys = xkf.keys.filter(
+              (k) =>
+                k.p !== undefined || k.s !== undefined || k.r !== undefined || k.o !== undefined,
+            )
+            const n = recs.length
+            // 역순 재배치 — new_m = old_{n-1-m}, 나가는 이징 = flip(old_{n-2-m}의 이징)
+            for (let m = 0; m < n; m++) {
+              const rec = recs[n - 1 - m]
+              const nt = mirror(rec.t)
+              const e = m < n - 1 ? flip(recs[n - 2 - m].e) : undefined
+              upsertKey(xkf, ch, nt, rec.v, e)
+              newSel.push({ li, ch, t: Math.max(0, Math.round(nt)) })
+            }
+          }
+        })
+      }
+      const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
+      push({
+        animationData: applied,
+        sourceData: src,
+        colorGroups: extractColorGroups(applied),
+        kfSel: newSel,
+      })
+    },
+
+    setLayerBlend: (bm) => {
+      const { sourceData, templateKnobs, knobValues, customIdx } = get()
+      if (!sourceData?.layers.length) return
+      const src = structuredClone(sourceData)
+      ensureLayerColors(src)
+      const layer = src.layers[Math.min(customIdx, src.layers.length - 1)] as Record<
+        string,
+        unknown
+      >
+      if (!layer) return
+      if (bm > 0) layer.bm = bm
+      else delete layer.bm
+      const applied = applyKnobs(src, templateKnobs, knobValues)
+      push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
+    },
+
+    toggleLayerHide: (li) => {
+      const { sourceData, templateKnobs, knobValues } = get()
+      if (!sourceData?.layers[li]) return
+      const src = structuredClone(sourceData)
+      const layer = src.layers[li] as Record<string, unknown>
+      if (layer.hd === true) delete layer.hd
+      else layer.hd = true
+      const applied = applyKnobs(src, templateKnobs, knobValues)
+      push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
+    },
+
+    toggleLayerSolo: (li) => {
+      // 솔로는 플래그만 — 실제 숨김은 프리뷰(LottiePlayer)에서 적용, 내보내기엔 안 실림
+      const { sourceData, templateKnobs, knobValues } = get()
+      if (!sourceData?.layers[li]) return
+      const src = structuredClone(sourceData)
+      const layer = src.layers[li] as Record<string, unknown>
+      if (layer.xsolo === true) delete layer.xsolo
+      else layer.xsolo = true
+      const applied = applyKnobs(src, templateKnobs, knobValues)
+      push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
+    },
+
+    setLayerMatte: (li, opts) => {
+      const { sourceData, templateKnobs, knobValues } = get()
+      if (!sourceData?.layers[li]) return
+      const src = structuredClone(sourceData)
+      const layers = src.layers as Record<string, unknown>[]
+      // ind 보장 — tp 참조용
+      let maxInd = 0
+      for (const l of layers) if (typeof l.ind === 'number') maxInd = Math.max(maxInd, l.ind as number)
+      for (const l of layers) if (typeof l.ind !== 'number') l.ind = ++maxInd
+      const layer = layers[li]
+      if (opts.type === 'none' || opts.sourceLi === null || opts.sourceLi === li) {
+        delete layer.tt
+        delete layer.tp
+      } else {
+        const source = layers[opts.sourceLi]
+        if (!source) return
+        layer.tt = (opts.type === 'alpha' ? 1 : 3) + (opts.invert ? 1 : 0)
+        layer.tp = source.ind as number
+      }
+      // td 재계산 — 실제 소비되는 소스에만 부여 (tp 우선, 없으면 인접 규칙)
+      const byInd = new Map(layers.map((l) => [l.ind as number, l]))
+      for (const l of layers) delete l.td
+      layers.forEach((l, i) => {
+        if (l.tt === undefined) return
+        const sourceL =
+          typeof l.tp === 'number' ? byInd.get(l.tp as number) : i > 0 ? layers[i - 1] : undefined
+        if (sourceL) sourceL.td = 1
+      })
+      const applied = applyKnobs(src, templateKnobs, knobValues)
+      push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
+    },
+
+    setLayerParent: (li, targetLi) => {
+      const { sourceData, templateKnobs, knobValues } = get()
+      if (!sourceData?.layers[li]) return
+      const src = structuredClone(sourceData)
+      const layers = src.layers as Record<string, unknown>[]
+      // ind 보장 — 없는 레이어에 순차 부여 (그린 도형 등)
+      let maxInd = 0
+      for (const l of layers) if (typeof l.ind === 'number') maxInd = Math.max(maxInd, l.ind as number)
+      for (const l of layers) if (typeof l.ind !== 'number') l.ind = ++maxInd
+      const layer = layers[li]
+      if (targetLi === null) {
+        delete layer.parent
+      } else {
+        const target = layers[targetLi]
+        if (!target || target === layer) return
+        // 순환 가드 — 대상의 부모 체인에 자신이 있으면 거부
+        const byInd = new Map(layers.map((l) => [l.ind as number, l]))
+        let cur: Record<string, unknown> | undefined = target
+        let hop = 0
+        while (cur && hop++ < 64) {
+          if (cur === layer) return
+          cur = typeof cur.parent === 'number' ? byInd.get(cur.parent as number) : undefined
+        }
+        layer.parent = target.ind as number
+      }
+      const applied = applyKnobs(src, templateKnobs, knobValues)
+      push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
+    },
+
+    toggleLayerLock: (li) => {
+      const { sourceData, templateKnobs, knobValues } = get()
+      if (!sourceData?.layers[li]) return
+      const src = structuredClone(sourceData)
+      const layer = src.layers[li] as Record<string, unknown>
+      if (layer.xlock === true) delete layer.xlock
+      else layer.xlock = true
+      const applied = applyKnobs(src, templateKnobs, knobValues)
+      push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
+    },
+
+    toggleLayerTloff: (li) => {
+      const { sourceData, templateKnobs, knobValues } = get()
+      if (!sourceData?.layers[li]) return
+      const src = structuredClone(sourceData)
+      const layer = src.layers[li] as Record<string, unknown>
+      if (layer.xtloff === true) delete layer.xtloff
+      else layer.xtloff = true
+      const applied = applyKnobs(src, templateKnobs, knobValues)
+      push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
+    },
+
+    setTlHideOff: (v) => set({ tlHideOff: v }),
+
+    renameLayer: (li, name) => {
+      const { sourceData, templateKnobs, knobValues } = get()
+      const nm = name.trim()
+      if (!sourceData?.layers[li] || !nm) return
+      const src = structuredClone(sourceData)
+      ;(src.layers[li] as Record<string, unknown>).nm = nm
+      const applied = applyKnobs(src, templateKnobs, knobValues)
+      push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
+    },
+
+    setKfSmooth: (v) => {
+      const next = withKfEdit(get(), (xkf) => {
+        xkf.smooth = v
+      })
+      if (next) push(next)
     },
 
     copyKfSel: () => {
@@ -1506,7 +2164,7 @@ export const useEditor = create<EditorState>((set, get) => {
         xkf.keys = moved
         const full = normSel(layer.xsel as Partial<CustomSel> | undefined, op)
         layer.xsel = { ...full, clip: [clipA, clipB] }
-      })
+      }, true)
       if (!next) return
       set({ ...next, editBaseline: baseline, future: [] })
     },
@@ -1523,47 +2181,14 @@ export const useEditor = create<EditorState>((set, get) => {
     bakeSpringSegEase: (ch, fromT, preset) => {
       const sp = SPRING_PRESETS[preset]
       if (!sp) return
-      const next = withKfEdit(get(), (xkf) => {
-        const chKeys = xkf.keys
-          .filter((k) => k[ch] !== undefined)
-          .sort((a, b) => a.t - b.t)
-        const i1 = chKeys.findIndex((k) => Math.abs(k.t - fromT) < 0.5)
-        if (i1 < 0 || i1 >= chKeys.length - 1) return
-        const k1 = chKeys[i1]
-        const k2 = chKeys[i1 + 1]
-        const D = k2.t - k1.t
-        if (D < 6) return // 너무 짧으면 스프링 샘플 의미 없음
-        const v1 = k1[ch] as number | [number, number]
-        const v2 = k2[ch] as number | [number, number]
-        const lin: Bezier4 = [0, 0, 1, 1]
-        // 사이 기존 키 정리 (해당 채널만)
-        for (const k of xkf.keys) {
-          if (k.t > k1.t + 0.5 && k.t < k2.t - 0.5 && k[ch] !== undefined) {
-            delete k[ch]
-            if (k.e) delete k.e[ch]
-          }
-        }
-        xkf.keys = xkf.keys.filter(
-          (k) => k.p !== undefined || k.s !== undefined || k.r !== undefined || k.o !== undefined,
-        )
-        // 감쇠 진동 샘플 — 세그먼트당 최대 14키, 최소 2f 간격
-        const steps = Math.max(4, Math.min(14, Math.floor(D / 2)))
-        const mix = (u: number): number | [number, number] => {
-          const f = springValue(u, sp.zeta, sp.cycles)
-          if (Array.isArray(v1) && Array.isArray(v2))
-            return [v1[0] + (v2[0] - v1[0]) * f, v1[1] + (v2[1] - v1[1]) * f]
-          return (v1 as number) + ((v2 as number) - (v1 as number)) * f
-        }
-        for (let i = 1; i < steps; i++) {
-          upsertKey(xkf, ch, k1.t + (D * i) / steps, mix(i / steps), lin)
-        }
-        // 굽힌 구간은 샘플을 따라가야 하므로 선형 이징
-        k1.e = { ...(k1.e ?? {}), [ch]: lin }
-      })
-      if (next) push(next)
+      bakeCurveSegEase(ch, fromT, (u) => springValue(u, sp.zeta, sp.cycles))
     },
 
-    duplicatePattern: (count, dx, dy, drot, dt) => {
+    bakeBounceSegEase: (ch, fromT) => {
+      bakeCurveSegEase(ch, fromT, bounceValue)
+    },
+
+    duplicatePattern: (count, dx, dy, drot, dt, ds, dop) => {
       const { sourceData, templateKnobs, knobValues, customIdx } = get()
       if (!sourceData?.layers.length) return
       const n = Math.max(2, Math.min(12, Math.round(count)))
@@ -1575,11 +2200,28 @@ export const useEditor = create<EditorState>((set, get) => {
       const copies: Record<string, unknown>[] = []
       for (let i = 1; i < n; i++) {
         const copy = structuredClone(orig)
-        copy.nm = `${String(orig.nm ?? '레이어')} ${i + 1}`
+        copy.nm = `${String(orig.nm ?? t('레이어'))} ${i + 1}`
         copy.xci = baseXci + i - 1
         shiftLayer(copy, dx * i, dy * i)
+        // 크기 오프셋 — 래스터는 에셋 사본을 떠서 스케일 (공유 에셋 오염 방지)
+        if (ds) {
+          const size0 = normSel(copy.xsel as Partial<CustomSel> | undefined, src.op).size
+          const px = Math.max(4, Math.round(size0 * (1 + (ds / 100) * i)))
+          if (copy.refId) {
+            const assets = (src.assets ?? []) as Record<string, unknown>[]
+            const srcAsset = assets.find((a) => a.id === copy.refId)
+            if (srcAsset) {
+              const dup = structuredClone(srcAsset)
+              dup.id = nextAssetId(assets)
+              assets.push(dup)
+              copy.refId = dup.id
+            }
+          }
+          applyLayerSize(src, copy, px)
+        }
         const xsel = normSel(copy.xsel as Partial<CustomSel> | undefined, src.op)
         xsel.rotation = xsel.rotation + drot * i
+        if (dop) xsel.opacity = Math.max(0, Math.min(100, xsel.opacity + dop * i))
         if (dt) {
           const off = Math.round(dt * i)
           xsel.clip = [
@@ -1649,7 +2291,7 @@ export const useEditor = create<EditorState>((set, get) => {
         const k = xkf.keys.find((x) => Math.abs(x.t - fromT) < 0.5 && x[ch] !== undefined)
         if (!k) return
         k.e = { ...(k.e ?? {}), [ch]: bez }
-      })
+      }, true)
       if (!next) return
       set({ ...next, editBaseline: st.editBaseline ?? snap(), future: [] })
     },
@@ -1780,6 +2422,7 @@ export function sessionPayload(): SavedSession | null {
     knobValues: s.knobValues,
     fileName: s.fileName,
     customIdx: s.customIdx,
+    activeScene: s.activeScene,
   }
 }
 
