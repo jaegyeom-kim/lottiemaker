@@ -21,8 +21,23 @@ export default function AnchorControls() {
   const asset = layer.refId
     ? ((sourceData.assets as Record<string, unknown>[] | undefined)?.find(
         (a) => a.id === layer.refId,
-      ) as { p?: string; w?: number; h?: number } | undefined)
+      ) as { p?: string; w?: number; h?: number; layers?: unknown } | undefined)
     : undefined
+
+  // 패드 소스 — 이미지는 썸네일, 컴프/씬은 뷰포트 비율, SVG는 셰이프 bbox 비율
+  let padUri: string | undefined
+  let padAspect: number | null = null
+  if (asset?.p && asset.w && asset.h && !asset.layers) {
+    padUri = asset.p
+    padAspect = asset.w / asset.h
+  } else if (Number(layer.ty) === 0 && typeof layer.w === 'number' && Number(layer.h)) {
+    padAspect = (layer.w as number) / (layer.h as number)
+  } else {
+    const g = (layer.shapes as Record<string, unknown>[] | undefined)?.[0]
+    const bw = Number(g?.bboxW)
+    const bh = Number(g?.bboxH)
+    if (bw > 0 && bh > 0) padAspect = bw / bh
+  }
 
   return (
     <div>
@@ -49,17 +64,17 @@ export default function AnchorControls() {
           )}
         </div>
         <div className="anchorcell">
-          {asset?.p && asset.w && asset.h ? (
+          {padAspect ? (
             <AnchorPad
-              dataUri={asset.p}
-              aspect={asset.w / asset.h}
+              dataUri={padUri}
+              aspect={padAspect}
               frac={anchor}
               onLive={setCustomAnchorLive}
               onCommit={commitEdit}
               maxH={116}
             />
           ) : (
-            <span className="anchorcell__empty">◇<br />{t('SVG는 그리드로')}</span>
+            <span className="anchorcell__empty">◇<br />{t('그리드로 지정')}</span>
           )}
         </div>
       </div>

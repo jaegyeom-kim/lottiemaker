@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 
-/** 앵커 직접 조작 패드 — 이미지 위에서 클릭/드래그로 기준점 지정. */
+/** 앵커 직접 조작 패드 — 이미지(또는 비율 박스) 위에서 클릭/드래그로 기준점 지정. */
 export default function AnchorPad({
   dataUri,
   aspect,
@@ -9,7 +9,8 @@ export default function AnchorPad({
   onCommit,
   maxH = 180,
 }: {
-  dataUri: string
+  /** 미리보기 이미지 — 없으면 비율만 가진 빈 패드 (컴프/씬/SVG). */
+  dataUri?: string
   aspect: number
   frac: [number, number]
   onLive: (fx: number, fy: number) => void
@@ -31,7 +32,7 @@ export default function AnchorPad({
   return (
     <div
       ref={ref}
-      className="anchorpad"
+      className={`anchorpad ${dataUri ? '' : 'anchorpad--empty'}`}
       // 세로로 긴 이미지는 maxH 기준으로 폭 축소 — 레터박스 없이 패드 = 이미지 영역
       style={{ aspectRatio: String(aspect), width: `min(100%, ${Math.round(maxH * aspect)}px)`, maxHeight: maxH }}
       onPointerDown={(e) => {
@@ -52,7 +53,7 @@ export default function AnchorPad({
         onCommit()
       }}
     >
-      <img src={dataUri} alt="" draggable={false} />
+      {dataUri && <img src={dataUri} alt="" draggable={false} />}
       <div className="anchorpad__hline" style={{ top: `${frac[1] * 100}%` }} />
       <div className="anchorpad__vline" style={{ left: `${frac[0] * 100}%` }} />
       <div

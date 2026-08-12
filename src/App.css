@@ -3898,3 +3898,10 @@ body.drag-cross * { cursor: crosshair !important; }
 .gepanel__handles line {
   pointer-events: none;
 }
+
+/* 이미지 없는 앵커 패드 (컴프/씬/SVG) — 영역 윤곽만 */
+.anchorpad--empty {
+  background: color-mix(in srgb, var(--bg-raise) 60%, transparent);
+  outline: 1px dashed var(--line);
+  outline-offset: -1px;
+}

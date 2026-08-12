@@ -217,6 +217,7 @@ const DICT: Record<string, string> = {
   '이 키로는 {model} 모델을 사용할 수 없습니다 — 워크스페이스 모델 설정을 확인하세요': 'This key cannot use the {model} model — check workspace model settings',
   '키 확인 실패': 'Key verification failed',
   '확인 중…': 'Checking…',
+  '그리드로 지정': 'Use the grid',
   '휠: 줌 (⇧시간·⌥값) · 드래그: 키 선택 · F: 선택 맞춤 · H: 전체': 'Wheel: zoom (⇧ time · ⌥ value) · drag: select keys · F: frame selected · H: frame all',
   '프리셋/붙여넣기가 선택한 {n}개 구간에 적용됩니다': 'Presets/paste apply to {n} selected segments',
   '드래그 또는 클릭으로 키를 선택하세요': 'Drag or click to select keys',
