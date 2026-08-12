@@ -1,5 +1,5 @@
 // 그래프 에디터 — 마키 키 선택, 팬 제거, 휠 줌/H/F 프레이밍
-import { launchApp, checker, sessionSource, ARTIFACTS, FIXTURES } from './_helpers.mjs'
+import { launchApp, checker, sessionSource, ARTIFACTS } from './_helpers.mjs'
 
 const { browser, page } = await launchApp()
 const { ok, done } = checker('MARQUEE')

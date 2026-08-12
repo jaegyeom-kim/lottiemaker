@@ -108,21 +108,21 @@ function parseColor(str: string | null): [number, number, number, number] | null
   const s = str.trim()
   if (s.startsWith('#')) {
     let h = s.slice(1)
-    if (h.length === 3) h = h.split('').map((c) => c + c).join('')
+    if (h.length === 3 || h.length === 4) h = h.split('').map((c) => c + c).join('')
     if (h.length >= 6) {
       return [
         parseInt(h.slice(0, 2), 16) / 255,
         parseInt(h.slice(2, 4), 16) / 255,
         parseInt(h.slice(4, 6), 16) / 255,
-        1,
+        h.length >= 8 ? parseInt(h.slice(6, 8), 16) / 255 : 1,
       ]
     }
     return null
   }
   const rgb = s.match(/rgba?\(([^)]*)\)/)
   if (rgb) {
-    const p = rgb[1].split(/[\s,]+/).map(Number)
-    return [p[0] / 255, p[1] / 255, p[2] / 255, 1]
+    const p = rgb[1].split(/[\s,/]+/).filter(Boolean).map(Number)
+    return [p[0] / 255, p[1] / 255, p[2] / 255, Number.isFinite(p[3]) ? Math.max(0, Math.min(1, p[3])) : 1]
   }
   const NAMED: Record<string, [number, number, number, number]> = {
     black: [0, 0, 0, 1], white: [1, 1, 1, 1], red: [1, 0, 0, 1],
@@ -359,14 +359,17 @@ export function svgToLottie(svgText: string): ImportedGraphic {
     const strokeStr = styleOf(el, 'stroke') ?? inheritStroke
     const fill = parseColor(fillStr)
     const stroke = parseColor(strokeStr)
-    const op = Number(styleOf(el, 'opacity') ?? 1) * Number(styleOf(el, 'fill-opacity') ?? 1)
+    const baseOp = Number(styleOf(el, 'opacity') ?? 1)
+    const fillOp = baseOp * Number(styleOf(el, 'fill-opacity') ?? 1)
+    const strokeOp = baseOp * Number(styleOf(el, 'stroke-opacity') ?? 1)
     const painters: unknown[] = []
     if (stroke) {
       const w = Number(styleOf(el, 'stroke-width') ?? 1)
       const scale = Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) || 1
-      painters.push({ ty: 'st', c: stv(stroke), o: stv(100), w: stv(w * scale), lc: 2, lj: 2 })
+      // 색상 알파(rgba/#rrggbbaa) × stroke-opacity — 이전엔 항상 100으로 뭉갬
+      painters.push({ ty: 'st', c: stv(stroke), o: stv(Math.round(strokeOp * stroke[3] * 100)), w: stv(w * scale), lc: 2, lj: 2 })
     }
-    if (fill) painters.push({ ty: 'fl', c: stv(fill), o: stv(Math.round(op * 100)), r: 1 })
+    if (fill) painters.push({ ty: 'fl', c: stv(fill), o: stv(Math.round(fillOp * fill[3] * 100)), r: 1 })
     if (!painters.length) return
     items.push({ ty: 'gr', nm: el.tagName, it: [...paths, ...painters, trItem()] })
   }

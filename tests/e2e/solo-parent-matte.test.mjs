@@ -1,5 +1,5 @@
 // 솔로(프리뷰 전용)/부모(순환 가드)/매트 팝오버(알파·해제)
-import { launchApp, checker, sessionSource, ARTIFACTS, FIXTURES } from './_helpers.mjs'
+import { launchApp, checker, sessionSource } from './_helpers.mjs'
 
 const { browser, page } = await launchApp()
 const { ok, done } = checker('SPM')

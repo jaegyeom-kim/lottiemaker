@@ -1,5 +1,5 @@
 // 타임라인 레이어 아이콘(눈/잠금/타임라인 끄기) + 그래프 에디터 기본 동작
-import { launchApp, checker, sessionSource, ARTIFACTS, FIXTURES } from './_helpers.mjs'
+import { launchApp, checker, sessionSource, ARTIFACTS } from './_helpers.mjs'
 
 const { browser, page } = await launchApp()
 const { ok, done } = checker('TIMELINE-ICONS')

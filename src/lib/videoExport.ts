@@ -43,8 +43,9 @@ export function exportWebM(
     holder.appendChild(canvasA)
     holder.appendChild(canvasB)
     document.body.appendChild(holder)
+    const ctxA = canvasA.getContext('2d')
     const ctxB = canvasB.getContext('2d')
-    if (!ctxB) {
+    if (!ctxA || !ctxB) {
       holder.remove()
       reject(new Error(t('캔버스 컨텍스트 생성 실패')))
       return
@@ -56,7 +57,7 @@ export function exportWebM(
       autoplay: false,
       animationData: structuredClone(anim),
       rendererSettings: {
-        context: canvasA.getContext('2d') as CanvasRenderingContext2D,
+        context: ctxA,
         clearCanvas: true,
         preserveAspectRatio: 'xMidYMid meet',
       },

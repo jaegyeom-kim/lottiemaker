@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test:e2e": "node tests/e2e/run.mjs"
+    "test:e2e": "node tests/e2e/run.mjs",
+    "test:unit": "node tests/unit/store.test.mjs",
+    "test": "npm run test:unit && npm run test:e2e"
   },
   "dependencies": {
     "lottie-web": "^5.13.0",

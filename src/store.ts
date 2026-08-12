@@ -602,6 +602,34 @@ export const useEditor = create<EditorState>((set, get) => {
 
   /** xkf.keys에서 frame(±0.5f)의 키에 채널 값(+구간 이징) 업서트. */
   /** ind를 1..n으로 재할당하면서 tp(매트)·parent 참조를 함께 리매핑. */
+  /**
+   * ind 공간이 겹치는 여러 그룹(임포트 병합·패턴 복제)용 재색인.
+   * 전체 배열 순서대로 ind를 재부여하되, tp/parent는 각 그룹의 옛 ind 맵으로만
+   * 재매핑한다 — 서로 다른 소스의 동일 ind가 충돌하는 것을 막는다.
+   * mapFrom을 주면 그 레이어들로 맵을 만든다 (복제본이 원본 참조로 폴백할 때,
+   * 뒤에 오는 항목이 우선).
+   */
+  const reindexLayerGroups = (
+    layersArr: Record<string, unknown>[],
+    groups: { members: Record<string, unknown>[]; mapFrom?: Record<string, unknown>[] }[],
+  ) => {
+    const oldInd = new Map<Record<string, unknown>, number>()
+    for (const l of layersArr) if (typeof l.ind === 'number') oldInd.set(l, l.ind as number)
+    layersArr.forEach((l, i) => (l.ind = i + 1))
+    for (const g of groups) {
+      const map = new Map<number, number>()
+      for (const l of g.mapFrom ?? g.members) {
+        const o = oldInd.get(l)
+        if (o !== undefined) map.set(o, l.ind as number)
+      }
+      for (const l of g.members) {
+        if (typeof l.tp === 'number' && map.has(l.tp as number)) l.tp = map.get(l.tp as number)
+        if (typeof l.parent === 'number' && map.has(l.parent as number))
+          l.parent = map.get(l.parent as number)
+      }
+    }
+  }
+
   const reindexLayers = (layersArr: Record<string, unknown>[]) => {
     const oldToNew = new Map<number, number>()
     layersArr.forEach((l, i) => {
@@ -1359,8 +1387,13 @@ export const useEditor = create<EditorState>((set, get) => {
       if (conv.op > src.op)
         conv.warnings = [...conv.warnings, '가져온 애니메이션이 현재 컴프보다 김 — 재생 길이를 늘려보세요']
       src.assets = assets
+      const existingLayers = [...src.layers] as Record<string, unknown>[]
       src.layers = [...(conv.layers as never[]), ...src.layers]
-      src.layers.forEach((l, i) => (l.ind = i + 1))
+      // 임포트 그룹과 기존 그룹의 ind 공간이 겹침 — 그룹별로 tp/parent 재매핑
+      reindexLayerGroups(src.layers as Record<string, unknown>[], [
+        { members: conv.layers as Record<string, unknown>[] },
+        { members: existingLayers },
+      ])
       for (let i = 0; i < conv.layers.length; i++) editKfLayerIn(src, i, () => {})
       const applied = applyKnobs(src, templateKnobs, knobValues)
       push({
@@ -1675,7 +1708,15 @@ export const useEditor = create<EditorState>((set, get) => {
           const kept: typeof xkf.keys = []
           for (const k of xkf.keys) {
             const t = Math.max(0, Math.min(src.op, k.t))
-            if (kept.some((m) => Math.abs(m.t - t) < 0.5)) continue
+            const dup = kept.find((m) => Math.abs(m.t - t) < 0.5)
+            if (dup) {
+              // 같은 프레임으로 클램프된 키 — 채널 값을 버리지 않고 빈 채널에 병합
+              for (const ch of ['p', 's', 'r', 'o', 'ts', 'te'] as const)
+                if (dup[ch] === undefined && k[ch] !== undefined)
+                  (dup[ch] as unknown) = k[ch]
+              if (k.e) dup.e = { ...k.e, ...(dup.e ?? {}) }
+              continue
+            }
             k.t = t
             kept.push(k)
           }
@@ -2244,8 +2285,16 @@ export const useEditor = create<EditorState>((set, get) => {
         copies.push(copy)
       }
       // 원본 뒤(아래)에 순서대로 — 에셋은 공유 (삭제는 참조 카운트로 보호됨)
+      const originals = (src.layers as Record<string, unknown>[]).slice()
       src.layers.splice(li + 1, 0, ...(copies as never[]))
-      src.layers.forEach((l, i2) => (l.ind = i2 + 1))
+      // 복제본의 tp/parent는 복제본 그룹 우선, 미복제 대상은 원본으로 폴백
+      reindexLayerGroups(src.layers as Record<string, unknown>[], [
+        { members: originals },
+        {
+          members: copies as Record<string, unknown>[],
+          mapFrom: [...originals, ...(copies as Record<string, unknown>[])],
+        },
+      ])
       for (let i = li + 1; i <= li + copies.length; i++) editKfLayerIn(src, i, () => {})
       const applied = applyKnobs(src, templateKnobs, knobValues)
       push({
