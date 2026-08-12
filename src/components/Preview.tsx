@@ -836,7 +836,7 @@ export default function Preview() {
     if (layer.xlock === true) return
     const xsel = normSel(layer.xsel as Partial<CustomSel> | undefined, st.sourceData.op)
     const base = layerBaseOf(st.sourceData, li, Math.round(frameRef.current))
-    const [hw, hh] = layerHalfOf(st.sourceData, li)
+    const [hw, hh] = layerHalfOf(st.sourceData, li, Math.round(frameRef.current))
     if (!base || hw < 0.5 || hh < 0.5) return
     // 앵커 월드 = base — 커서와의 차를 무회전 로컬로 돌려 분율 증분
     const rot = ((xsel.rotation ?? 0) * Math.PI) / 180
@@ -855,8 +855,8 @@ export default function Preview() {
     const i = Math.min(customIdx, sourceData.layers.length - 1)
     const b = layerBaseOf(sourceData, i, Math.round(frame))
     if (b) {
-      const [hw, hh] = layerHalfOf(sourceData, i)
-      const [ox, oy] = layerCenterOffsetOf(sourceData, i)
+      const [hw, hh] = layerHalfOf(sourceData, i, Math.round(frame))
+      const [ox, oy] = layerCenterOffsetOf(sourceData, i, Math.round(frame))
       selBox = { x: b[0] + ox, y: b[1] + oy, hw, hh }
       anchorPt = b // 앵커 월드 좌표 = 레이어 포지션
     }
@@ -921,7 +921,7 @@ export default function Preview() {
 
   const layerHalf = (i: number): [number, number] => {
     const s = useEditor.getState()
-    return s.sourceData ? layerHalfOf(s.sourceData, i) : [60, 60]
+    return s.sourceData ? layerHalfOf(s.sourceData, i, Math.round(frameRef.current)) : [60, 60]
   }
 
   /** 포인터 아래 모든 레이어 — 위(배열 앞)→아래 순. */
@@ -940,7 +940,7 @@ export default function Preview() {
       const b = layerBase(i)
       if (!b || !s.sourceData) continue
       const [hw, hh] = layerHalf(i)
-      const [ox, oy] = layerCenterOffsetOf(s.sourceData, i)
+      const [ox, oy] = layerCenterOffsetOf(s.sourceData, i, Math.round(frameRef.current))
       if (Math.abs(px - b[0] - ox) <= hw && Math.abs(py - b[1] - oy) <= hh) hits.push(i)
     }
     return hits
@@ -1756,8 +1756,8 @@ export default function Preview() {
                       .map((i) => {
                         const b = layerBaseOf(sourceData!, i, Math.round(frame))
                         if (!b) return null
-                        const [hw2, hh2] = layerHalfOf(sourceData!, i)
-                        const [ox2, oy2] = layerCenterOffsetOf(sourceData!, i)
+                        const [hw2, hh2] = layerHalfOf(sourceData!, i, Math.round(frame))
+                        const [ox2, oy2] = layerCenterOffsetOf(sourceData!, i, Math.round(frame))
                         return (
                           <div
                             key={`m${i}`}

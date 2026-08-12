@@ -679,7 +679,29 @@ export function extractTrimToKf(layer: Record<string, unknown>): boolean {
 }
 
 /** 레이어 i의 반폭/반높이 — 이미지는 에셋 크기, SVG는 bbox×스케일. */
-export function layerHalfOf(doc: LottieJson, i: number): [number, number] {
+/**
+ * 유효 레이어 스케일 (ks.s 정착값) — frame 주면 s 키 보간값, 없으면 정적(xsel.scale).
+ * 박스/히트/앵커 보정이 공유 — 스케일 100 가정으로 어긋나던 버그의 단일 소스.
+ */
+export function layerScaleOf(doc: LottieJson, i: number, frame?: number): number {
+  const layer = doc.layers[i] as Record<string, unknown> | undefined
+  if (!layer) return 1
+  const xsel = normSel(layer.xsel as Partial<CustomSel> | undefined, doc.op)
+  const xkf = normKf(layer.xkf as Partial<CustomKf> | undefined)
+  const v =
+    xkf.on && frame !== undefined
+      ? (kfValueAt(xkf, 's', frame, xsel.scale ?? 100) as number)
+      : (xsel.scale ?? 100)
+  return Math.max(0.01, v / 100)
+}
+
+export function layerHalfOf(doc: LottieJson, i: number, frame?: number): [number, number] {
+  const [hw, hh] = layerHalfRawOf(doc, i)
+  const sc = layerScaleOf(doc, i, frame)
+  return [hw * sc, hh * sc]
+}
+
+function layerHalfRawOf(doc: LottieJson, i: number): [number, number] {
   const layer = doc.layers[i] as Record<string, unknown> | undefined
   if (!layer) return [60, 60]
   // 씬 참조(프리컴프) 레이어 — 뷰포트 크기가 곧 박스
@@ -700,19 +722,20 @@ export function layerHalfOf(doc: LottieJson, i: number): [number, number] {
 }
 
 /** 앵커 오프셋 — 시각적 중심 = 기준위치(xbase) + 이 값. (회전은 근사 무시) */
-export function layerCenterOffsetOf(doc: LottieJson, i: number): [number, number] {
+export function layerCenterOffsetOf(doc: LottieJson, i: number, frame?: number): [number, number] {
   const layer = doc.layers[i] as Record<string, unknown> | undefined
   if (!layer) return [0, 0]
+  const sc = layerScaleOf(doc, i, frame)
   const a = (((layer.ks as Record<string, unknown>)?.a as { k?: number[] })?.k as number[]) ?? [0, 0]
-  // 씬 참조(프리컴프) — 뷰포트(레이어 w/h) 기준 중심
+  // 씬 참조(프리컴프) — 뷰포트(레이어 w/h) 기준 중심 (회전은 근사 무시, 스케일은 반영)
   if (Number(layer.ty) === 0 && typeof layer.w === 'number')
-    return [(layer.w as number) / 2 - a[0], Number(layer.h ?? layer.w) / 2 - a[1]]
+    return [((layer.w as number) / 2 - a[0]) * sc, (Number(layer.h ?? layer.w) / 2 - a[1]) * sc]
   const asset = (doc.assets as Record<string, unknown>[] | undefined)?.find(
     (x) => x.id === layer.refId,
   )
   if (asset && typeof asset.w === 'number' && !asset.layers)
-    return [(asset.w as number) / 2 - a[0], (asset.h as number) / 2 - a[1]]
-  return [-a[0], -a[1]]
+    return [((asset.w as number) / 2 - a[0]) * sc, ((asset.h as number) / 2 - a[1]) * sc]
+  return [-a[0] * sc, -a[1] * sc]
 }
 
 export type CustomPayload =

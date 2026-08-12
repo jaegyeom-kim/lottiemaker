@@ -67,9 +67,53 @@ await page.keyboard.press('v')
 await page.waitForTimeout(200)
 ok((await page.locator('.anchorpoint--active').count()) === 0, 'V → 앵커 툴 해제')
 ok((await page.locator('.anchorpoint').count()) === 1, '마커는 유지 (정보성)')
+// ── 스케일 200에서도 그래픽 제자리 (스케일 100 가정 버그 회귀) ──
+// 스케일 200 입력 (kf 모드 레이어 — s키 없음 → 정적 xsel.scale)
+const xform = page.locator('.knob', { hasText: /^스케일/ }).first()
+await xform.locator('.posinput input').nth(0).fill('200')
+await xform.locator('.posinput input').nth(0).press('Enter')
+await page.waitForTimeout(1300)
+await page.keyboard.press('y')
+await page.waitForTimeout(200)
+const boxS = await page.$eval('.selbox', (e) => {
+  const r = e.getBoundingClientRect()
+  return { x: r.x, y: r.y, w: r.width }
+})
+// 레이어0은 임포트된 s키(109.1)가 있어 기준이 109.1 → 200/109.1 ≈ 1.83배
+ok(Math.abs(boxS.w / boxBefore.w - 200 / 109.1) < 0.1, `스케일 200 → 박스 비율 (${(boxS.w / boxBefore.w).toFixed(2)}x)`)
+// 앵커 드래그 — 그래픽 제자리 유지돼야
+const d2 = await sessionSource(page)
+const b2 = d2.layers[0].xbase
+await page.mouse.move(...tc(b2[0], b2[1]))
+await page.mouse.down()
+await page.mouse.move(...tc(b2[0] + 120, b2[1] + 80), { steps: 6 })
+await page.mouse.up()
+await page.waitForTimeout(1300)
+const boxS2 = await page.$eval('.selbox', (e) => {
+  const r = e.getBoundingClientRect()
+  return { x: r.x, y: r.y, w: r.width }
+})
+ok(
+  Math.abs(boxS2.x - boxS.x) < 2 && Math.abs(boxS2.y - boxS.y) < 2,
+  `스케일 200 앵커 드래그 → 그래픽 제자리 (Δ=${(boxS2.x - boxS.x).toFixed(1)},${(boxS2.y - boxS.y).toFixed(1)})`,
+)
+// 마커가 커서 위치 추적
+const d3 = await sessionSource(page)
+const mk2 = await page.$eval('.anchorpoint', (e) => {
+  const r = e.getBoundingClientRect()
+  return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+})
+const [ex2, ey2] = tc(d3.layers[0].xbase[0], d3.layers[0].xbase[1])
+ok(Math.hypot(mk2.x - ex2, mk2.y - ey2) < 4, `스케일 200 마커 정합 (Δ${Math.hypot(mk2.x - ex2, mk2.y - ey2).toFixed(1)}px)`)
+await page.keyboard.press('v')
+await page.waitForTimeout(200)
+
 // 언두 1회 = 앵커 드래그 전
 await page.keyboard.press('Meta+z')
 await page.waitForTimeout(1300)
 const undone = await sessionSource(page)
-ok(Math.abs(undone.layers[0].xbase[0] - base0[0]) < 0.5, '⌘Z → 앵커 복원')
+ok(
+  Math.abs((undone.layers[0].xsel.anchor?.[0] ?? 0.5) - (d2.layers[0].xsel.anchor?.[0] ?? 0.5)) < 0.01,
+  '⌘Z 1회 → 마지막 앵커 드래그만 복원',
+)
 await done(browser)

@@ -14,7 +14,7 @@ import {
   CUSTOM_ASSET_PREFIX, DEFAULT_SEL,
   type CustomSel, type CustomPayload, type CustomKf, type KfChannel, type Bezier4,
   type KfSelItem,
-  kfChannelKeys, applyTrimChannels, extractTrimToKf,
+  kfChannelKeys, applyTrimChannels, extractTrimToKf, layerScaleOf,
 } from './lib/customBuilder'
 
 const HISTORY_CAP = 50
@@ -553,9 +553,12 @@ export const useEditor = create<EditorState>((set, get) => {
     }
     const oldA = ((ks.a as { k?: number[] })?.k as number[]) ?? [0, 0, 0]
     const xsel = { ...DEFAULT_SEL, ...((layer.xsel as Partial<CustomSel>) ?? {}) }
-    // 팬비하인드 — 앵커 이동분에 정착 회전 반영해 포지션 보정 (스케일은 항상 100으로 정착)
+    // 팬비하인드 — 앵커 이동분에 정착 회전·스케일 반영해 포지션 보정.
+    // 스케일 100 가정이면 스케일≠100에서 그래픽이 밀린다 — 유효 ks.s 곱 필수
+    const li2 = Math.min(customIdx, src.layers.length - 1)
+    const eff = layerScaleOf(src, li2, st.curFrame)
     const rad = ((xsel.rotation ?? 0) * Math.PI) / 180
-    const da = [newA[0] - oldA[0], newA[1] - oldA[1]]
+    const da = [(newA[0] - oldA[0]) * eff, (newA[1] - oldA[1]) * eff]
     const dx = da[0] * Math.cos(rad) - da[1] * Math.sin(rad)
     const dy = da[0] * Math.sin(rad) + da[1] * Math.cos(rad)
     ks.a = { a: 0, k: newA }
