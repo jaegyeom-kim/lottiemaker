@@ -42,6 +42,7 @@ export async function verifyAiKey(key: string): Promise<{ ok: boolean; msg?: str
     return { ok: false, msg: t('키 형식이 아닙니다 — sk-ant-로 시작하는 API 키를 넣어주세요') }
   try {
     const res = await fetch('https://api.anthropic.com/v1/models?limit=100', {
+      signal: AbortSignal.timeout(8000), // 행 걸리면 저장 버튼이 영원히 '확인 중' — 8s 컷
       headers: {
         'x-api-key': key,
         'anthropic-version': '2023-06-01',
@@ -54,8 +55,9 @@ export async function verifyAiKey(key: string): Promise<{ ok: boolean; msg?: str
         msg: t('API 키가 유효하지 않습니다 — console.anthropic.com › API Keys에서 발급한 키인지(클로드 앱 구독과 별개), 전체가 빠짐없이 복사됐는지 확인하세요'),
       }
     if (!res.ok) return { ok: true } // 기타 오류는 저장은 허용 — 실행 시 상세 에러로 안내
-    const j = (await res.json()) as { data?: { id: string }[] }
-    if (Array.isArray(j.data) && !j.data.some((m) => m.id.startsWith(MODEL)))
+    const j = (await res.json()) as { data?: { id: string }[]; has_more?: boolean }
+    // 첫 페이지에 없어도 다음 페이지가 있으면 통과 — 유효 키 오탐 방지
+    if (Array.isArray(j.data) && !j.data.some((m) => m.id.startsWith(MODEL)) && j.has_more !== true)
       return { ok: false, msg: t('이 키로는 {model} 모델을 사용할 수 없습니다 — 워크스페이스 모델 설정을 확인하세요').replace('{model}', MODEL) }
     return { ok: true }
   } catch {

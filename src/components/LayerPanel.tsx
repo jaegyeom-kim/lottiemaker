@@ -116,7 +116,10 @@ function CustomLayerPanel() {
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-                    if (e.key === 'Escape') setEditingIdx(null)
+                    if (e.key === 'Escape') {
+                      e.stopPropagation() // 입력 취소만 — 그래프 에디터 등 닫힘 방지
+                      setEditingIdx(null)
+                    }
                   }}
                   onClick={(e) => e.stopPropagation()}
                 />

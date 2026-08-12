@@ -425,11 +425,15 @@ function AiMotionPanel() {
   useEffect(() => () => abortRef.current?.abort(), [])
 
   const [keyChecking, setKeyChecking] = useState(false)
+  const keyCheckingRef = useRef(false) // Enter 연타 — 리렌더 전 중복 제출 가드
   const saveKey = async () => {
+    if (keyCheckingRef.current) return
+    keyCheckingRef.current = true
     // 콘솔에서 복사 시 줄바꿈/공백 섞임 방지 — 키에 공백은 없다
     const k = keyDraft.replace(/\s+/g, '')
     setKeyChecking(true)
     const v = await verifyAiKey(k)
+    keyCheckingRef.current = false
     setKeyChecking(false)
     if (!v.ok) {
       setMsg({ kind: 'err', text: v.msg ?? t('키 확인 실패') })
@@ -454,11 +458,15 @@ function AiMotionPanel() {
     try {
       const doc = summarizeDoc(sourceData, customIdxs, curFrame)
       const plan = await generateMotion({ apiKey, prompt: req, doc, signal: ac.signal })
-      applyAiMotion(plan)
-      setMsg({
-        kind: 'ok',
-        text: t('{note} — ⌘Z로 되돌릴 수 있어요').replace('{note}', plan.note ?? t('모션 적용됨')),
-      })
+      const applied = applyAiMotion(plan)
+      if (applied === 0) {
+        setMsg({ kind: 'err', text: t('적용된 레이어가 없습니다 — 대상 레이어가 잠겨 있는지 확인하세요') })
+      } else {
+        setMsg({
+          kind: 'ok',
+          text: t('{note} — ⌘Z로 되돌릴 수 있어요').replace('{note}', plan.note ?? t('모션 적용됨')),
+        })
+      }
     } catch (e) {
       if ((e as Error).name !== 'AbortError') setMsg({ kind: 'err', text: (e as Error).message })
     } finally {

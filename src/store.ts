@@ -305,7 +305,8 @@ interface EditorState {
   /** 선택 레이어 위치 모션 패스 곡선 보간 토글. */
   setKfSmooth: (v: boolean) => void
   /** AI 모션 플랜 적용 — 대상 레이어를 키프레임 모드로 전환하고 키 통째 교체, 언두 1칸. */
-  applyAiMotion: (plan: AiMotionPlan) => void
+  /** 반환 = 실제 적용된 레이어 수 (잠긴 레이어는 스킵). */
+  applyAiMotion: (plan: AiMotionPlan) => number
   /** 커브 핸들 드래그용 라이브 버전 — commitEdit로 확정. */
   setKfSegEaseLive: (ch: KfChannel, fromT: number, bez: Bezier4) => void
   undo: () => void
@@ -634,9 +635,18 @@ export const useEditor = create<EditorState>((set, get) => {
         if (o !== undefined) map.set(o, l.ind as number)
       }
       for (const l of g.members) {
-        if (typeof l.tp === 'number' && map.has(l.tp as number)) l.tp = map.get(l.tp as number)
-        if (typeof l.parent === 'number' && map.has(l.parent as number))
-          l.parent = map.get(l.parent as number)
+        if (typeof l.tp === 'number') {
+          if (map.has(l.tp as number)) l.tp = map.get(l.tp as number)
+          else {
+            // 그룹 밖 참조 — 재번호 뒤 다른 레이어를 가리키는 것보다 매트 해제가 안전
+            delete l.tp
+            delete l.tt
+          }
+        }
+        if (typeof l.parent === 'number') {
+          if (map.has(l.parent as number)) l.parent = map.get(l.parent as number)
+          else delete l.parent
+        }
       }
     }
   }
@@ -1338,8 +1348,13 @@ export const useEditor = create<EditorState>((set, get) => {
         const baseXci = nextXci(src)
         sc.main.forEach((l, i) => (l.xci = baseXci + i))
         src.assets = assets as never
+        const prevLayers = [...src.layers] as Record<string, unknown>[]
         src.layers = [...(sc.main as never[]), ...src.layers]
-        reindexLayers(src.layers as Record<string, unknown>[])
+        // 임포트/기존 그룹의 ind 공간이 겹칠 수 있음 — 그룹별 tp/parent 재매핑
+        reindexLayerGroups(src.layers as Record<string, unknown>[], [
+          { members: sc.main as Record<string, unknown>[] },
+          { members: prevLayers },
+        ])
         const applied = applyKnobs(src, templateKnobs, knobValues)
         push({
           animationData: applied,
@@ -1608,6 +1623,9 @@ export const useEditor = create<EditorState>((set, get) => {
       }
       const src = cloneForLive(sourceData)
       const primary = Math.min(customIdx, src.layers.length - 1)
+      // 주 선택이 잠겨 있으면 드래그 무시 — xbase만 갱신되고 ks.p는 안 움직여
+      // 기록 위치가 실제 트랜스폼과 어긋나는 오염을 막는다
+      if (lockedAt(src, primary)) return
       const layer = src.layers[primary] as Record<string, unknown>
       if (!layer || !Array.isArray(layer.xbase)) return
       const xb = layer.xbase as number[]
@@ -2065,6 +2083,8 @@ export const useEditor = create<EditorState>((set, get) => {
         delete layer.tt
         delete layer.tp
       } else {
+        // 잠긴 레이어는 소스 지정 불가 — td 부여가 렌더에서 숨기는 뮤테이션이라 차단
+        if (lockedAt(src, opts.sourceLi)) return
         const source = layers[opts.sourceLi]
         if (!source) return
         layer.tt = (opts.type === 'alpha' ? 1 : 3) + (opts.invert ? 1 : 0)
@@ -2330,7 +2350,7 @@ export const useEditor = create<EditorState>((set, get) => {
 
     applyAiMotion: (plan) => {
       const { sourceData, templateKnobs, knobValues } = get()
-      if (!sourceData?.layers.length) return
+      if (!sourceData?.layers.length) return 0
       const src = structuredClone(sourceData)
       ensureLayerColors(src)
       let touched = 0
@@ -2347,7 +2367,7 @@ export const useEditor = create<EditorState>((set, get) => {
         })
         if (ok) touched++
       }
-      if (!touched) return
+      if (!touched) return 0
       const applied = applyKnobs(src, templateKnobs, knobValues)
       push({
         animationData: applied,
@@ -2355,6 +2375,7 @@ export const useEditor = create<EditorState>((set, get) => {
         colorGroups: extractColorGroups(applied),
         kfSel: [],
       })
+      return touched
     },
 
     setKfSegEaseLive: (ch, fromT, bez) => {

@@ -24,8 +24,12 @@ const bundle = await rolldown({
 const { output } = await bundle.generate({ format: 'esm' })
 const tmp = path.join(os.tmpdir(), `lm-store-${process.pid}.mjs`)
 fs.writeFileSync(tmp, output[0].code)
-const { useEditor } = await import(tmp)
-fs.unlinkSync(tmp)
+let useEditor
+try {
+  ;({ useEditor } = await import(tmp))
+} finally {
+  fs.unlinkSync(tmp)
+}
 
 let failed = 0
 const ok = (c, m) => {
@@ -142,6 +146,41 @@ S().importLottieLayers(matteDoc('B'))
   ok(S().sourceData.layers[li].xlock !== true, '잠금 해제')
   S().renameLayer(li, '해제후변경')
   ok(S().sourceData.layers[li].nm === '해제후변경', '해제 후 rename 동작')
+}
+
+// ── 5) 적대 리뷰에서 확정된 회귀 케이스 ──
+{
+  // 5a) 잠긴 주 선택 드래그 — xbase 오염 금지
+  const li = 0
+  S().toggleLayerLock(li)
+  useEditor.setState({ customIdx: li, customIdxs: [li, 1] })
+  const xb0 = [...S().sourceData.layers[li].xbase]
+  S().setCustomBaseLive(400, 400)
+  S().commitEdit()
+  const xb1 = S().sourceData.layers[li].xbase
+  ok(xb1[0] === xb0[0] && xb1[1] === xb0[1], '잠긴 주 선택 드래그 → xbase 불변')
+
+  // 5b) 잠긴 레이어를 매트 소스로 지정 불가 — 액션 통째 no-op
+  // (임포트 레이어는 이미 td/tt 보유 — 매트 없는 소스 레이어(2)를 잠그고 소비자(0)에 지정 시도)
+  S().toggleLayerLock(li) // 0 해제
+  S().toggleLayerLock(2)
+  const tt0 = S().sourceData.layers[0].tt
+  const td2 = S().sourceData.layers[2].td
+  S().setLayerMatte(0, { type: 'alpha', invert: false, sourceLi: 2 })
+  ok(S().sourceData.layers[0].tt === tt0, '잠긴 소스 → 소비자 tt 불변')
+  ok(S().sourceData.layers[2].td === td2, '잠긴 소스 → 소스 td 불변')
+  S().toggleLayerLock(2)
+  S().setLayerMatte(0, { type: 'alpha', invert: false, sourceLi: 2 })
+  ok(S().sourceData.layers[0].tt === 1, '해제 후 매트 설정 동작')
+  S().setLayerMatte(0, { type: 'none', invert: false, sourceLi: null })
+
+  // 5c) AI 플랜 — 전부 잠기면 0 반환
+  S().toggleLayerLock(1)
+  const n = S().applyAiMotion({ layers: [{ index: 1, keys: [{ t: 0, r: 0 }, { t: 30, r: 90 }] }] })
+  ok(n === 0, `잠긴 레이어만 대상 → 적용 0 (${n})`)
+  S().toggleLayerLock(1)
+  const n2 = S().applyAiMotion({ layers: [{ index: 1, keys: [{ t: 0, r: 0 }, { t: 30, r: 90 }] }] })
+  ok(n2 === 1, `해제 후 적용 1 (${n2})`)
 }
 
 console.log(failed ? `STORE FAIL ${failed}` : 'STORE PASS')

@@ -382,14 +382,16 @@ export default function Preview() {
       if (isTyping(e.target)) return
       const s = useEditor.getState()
       if (e.key === 'Escape') {
-        // 마키 진행 중 취소
+        // 마키 진행 중 취소 — Esc 소비 표시 (그래프 에디터 닫힘 방지)
         if (selMarquee.current) {
+          e.preventDefault()
           selMarquee.current = null
           setSelMarqueeBox(null)
           return
         }
         // 펜 진행 중 Esc = 그린 만큼 레이어로 확정하고 펜 종료 (일러 방식)
         if (penPtsRef.current.length) {
+          e.preventDefault()
           finishPen(false)
           return
         }

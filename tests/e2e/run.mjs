@@ -12,7 +12,10 @@ const BASE_URL = process.env.LM_BASE_URL ?? 'http://localhost:5173/'
 async function serverUp() {
   try {
     const res = await fetch(BASE_URL, { signal: AbortSignal.timeout(1500) })
-    return res.ok
+    if (!res.ok) return false
+    // 포트를 다른 앱이 차지한 경우 오탐 방지 — 우리 앱 마커 확인
+    const html = await res.text()
+    return html.includes('LottieMaker') || html.includes('/@vite/client')
   } catch {
     return false
   }
@@ -40,16 +43,26 @@ const files = fs
   .filter((f) => f.endsWith('.test.mjs') && (!filter || f.includes(filter)))
   .sort()
 
-let failed = 0
-for (const f of files) {
-  console.log(`\n── ${f} ──`)
-  try {
-    execFileSync(process.execPath, [path.join(HERE, f)], { stdio: 'inherit', timeout: 120000 })
-  } catch {
-    failed++
-  }
+// 러너가 죽어도 자동 기동한 dev 서버는 정리
+const cleanup = () => {
+  if (devProc && !devProc.killed) devProc.kill()
 }
+process.on('SIGINT', () => { cleanup(); process.exit(130) })
+process.on('SIGTERM', () => { cleanup(); process.exit(143) })
+process.on('exit', cleanup)
 
-if (devProc) devProc.kill()
+let failed = 0
+try {
+  for (const f of files) {
+    console.log(`\n── ${f} ──`)
+    try {
+      execFileSync(process.execPath, [path.join(HERE, f)], { stdio: 'inherit', timeout: 120000 })
+    } catch {
+      failed++
+    }
+  }
+} finally {
+  cleanup()
+}
 console.log(`\n${files.length}본 중 ${files.length - failed} 통과${failed ? ` · ${failed} 실패` : ''}`)
 process.exit(failed ? 1 : 0)

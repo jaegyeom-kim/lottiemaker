@@ -121,8 +121,13 @@ function parseColor(str: string | null): [number, number, number, number] | null
   }
   const rgb = s.match(/rgba?\(([^)]*)\)/)
   if (rgb) {
-    const p = rgb[1].split(/[\s,/]+/).filter(Boolean).map(Number)
-    return [p[0] / 255, p[1] / 255, p[2] / 255, Number.isFinite(p[3]) ? Math.max(0, Math.min(1, p[3])) : 1]
+    const parts = rgb[1].split(/[\s,/]+/).filter(Boolean)
+    // 성분·알파 모두 % 표기 허용 — rgb(100% 0% 0% / 50%)
+    const ch = (v: string) => (v.endsWith('%') ? (Number(v.slice(0, -1)) / 100) * 255 : Number(v))
+    const aRaw = parts[3] === undefined ? 1
+      : parts[3].endsWith('%') ? Number(parts[3].slice(0, -1)) / 100 : Number(parts[3])
+    const a = Number.isFinite(aRaw) ? Math.max(0, Math.min(1, aRaw)) : 1
+    return [ch(parts[0]) / 255, ch(parts[1]) / 255, ch(parts[2]) / 255, a]
   }
   const NAMED: Record<string, [number, number, number, number]> = {
     black: [0, 0, 0, 1], white: [1, 1, 1, 1], red: [1, 0, 0, 1],
@@ -359,9 +364,16 @@ export function svgToLottie(svgText: string): ImportedGraphic {
     const strokeStr = styleOf(el, 'stroke') ?? inheritStroke
     const fill = parseColor(fillStr)
     const stroke = parseColor(strokeStr)
-    const baseOp = Number(styleOf(el, 'opacity') ?? 1)
-    const fillOp = baseOp * Number(styleOf(el, 'fill-opacity') ?? 1)
-    const strokeOp = baseOp * Number(styleOf(el, 'stroke-opacity') ?? 1)
+    // 불투명도 — %·소수 모두 허용, 파싱 실패는 1 (NaN이 로티 o로 새는 것 방지)
+    const opNum = (v: string | null): number => {
+      if (v == null) return 1
+      const t2 = v.trim()
+      const n = t2.endsWith('%') ? Number(t2.slice(0, -1)) / 100 : Number(t2)
+      return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 1
+    }
+    const baseOp = opNum(styleOf(el, 'opacity'))
+    const fillOp = baseOp * opNum(styleOf(el, 'fill-opacity'))
+    const strokeOp = baseOp * opNum(styleOf(el, 'stroke-opacity'))
     const painters: unknown[] = []
     if (stroke) {
       const w = Number(styleOf(el, 'stroke-width') ?? 1)

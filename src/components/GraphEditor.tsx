@@ -233,12 +233,14 @@ export default function GraphEditor({ onClose }: { onClose: () => void }) {
   onCloseRef.current = onClose
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
       if (e.key === 'Escape') {
+        // 다른 핸들러(펜 취소 등)가 이미 소비한 Esc는 무시
+        if (e.defaultPrevented) return
         onCloseRef.current()
         return
       }
-      const el = e.target as HTMLElement | null
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
       if (e.metaKey || e.ctrlKey || e.altKey) return
       if (e.key.toLowerCase() === 'h') {
         e.preventDefault()
