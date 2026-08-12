@@ -8,7 +8,7 @@ import {
 import { durationSec, parseLottie, type LottieJson } from '../lib/lottieUtils'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
 import {
-  layerHalfOf, layerAabbOf, normKf, kfValueAt,
+  layerHalfOf, layerAabbOf, layerBaseOf, layerRotationOf, normKf, kfValueAt,
   kfChannelKeys, normSel, animSpans, kfFallbackValue,
   type CustomPayload, type CustomKf, type CustomSel, type KfChannel,
 } from '../lib/customBuilder'
@@ -20,31 +20,6 @@ import {
   type DrawTool, type PenPt,
 } from '../lib/drawTools'
 import { readDotLottie } from '../lib/dotlottie'
-
-/** 문서에서 레이어 i의 기준 위치 (첫 키프레임 또는 정적 값). atFrame = 키프레임 모드 보간 시각. */
-function layerBaseOf(doc: LottieJson, i: number, atFrame?: number): [number, number] | null {
-  const layer = doc.layers[i] as (Record<string, unknown> & { ks?: unknown }) | undefined
-  if (!layer) return null
-  // 키프레임 모드 — 파킹 프레임의 보간 위치 (박스가 애니메이션 위치를 따라감)
-  const xkfRaw = layer.xkf as Partial<CustomKf> | undefined
-  if (xkfRaw?.on && typeof atFrame === 'number') {
-    const xb: [number, number] = Array.isArray(layer.xbase)
-      ? [(layer.xbase as number[])[0], (layer.xbase as number[])[1]]
-      : [256, 256]
-    return kfValueAt(normKf(xkfRaw), 'p', atFrame, xb) as [number, number]
-  }
-  // 정착 위치 = xbase (슬라이드류는 첫 키프레임이 화면 밖 오프셋이라 쓰면 안 됨)
-  if (Array.isArray(layer.xbase)) {
-    return [(layer.xbase as number[])[0], (layer.xbase as number[])[1]]
-  }
-  const p = (layer.ks as Record<string, unknown>).p as { a?: number; k: unknown }
-  if (p.a === 1 && Array.isArray(p.k)) {
-    const kfs = p.k as { s: number[] }[]
-    const last = kfs[kfs.length - 1].s
-    return [last[0], last[1]]
-  }
-  return [(p.k as number[])[0], (p.k as number[])[1]]
-}
 
 export default function Preview() {
   const {
@@ -648,11 +623,9 @@ export default function Preview() {
         const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0
         const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0
         if (dx || dy) {
-          const layer = s.sourceData?.layers[
-            Math.min(s.customIdx, (s.sourceData?.layers.length ?? 1) - 1)
-          ] as Record<string, unknown> | undefined
-          const xb = layer?.xbase as number[] | undefined
-          if (xb) s.setCustomBaseLive(xb[0] + dx, xb[1] + dy)
+          // 델타 이동 — kf p키 레이어에서 xbase 절대값으로 가면 현재 프레임
+          // 시각 위치에서 xbase+step으로 텔레포트한다 (nudge는 kf 자동 키 처리 내장)
+          s.nudgeCustomBase(dx, dy)
         }
       } else if (
         !e.metaKey &&
@@ -839,7 +812,8 @@ export default function Preview() {
     const [hw, hh] = layerHalfOf(st.sourceData, li, Math.round(frameRef.current))
     if (!base || hw < 0.5 || hh < 0.5) return
     // 앵커 월드 = base — 커서와의 차를 무회전 로컬로 돌려 분율 증분
-    const rot = ((xsel.rotation ?? 0) * Math.PI) / 180
+    // (회전은 프레임 인지 — kf r 키 레이어에서 xsel.rotation은 폴백일 뿐)
+    const rot = (layerRotationOf(st.sourceData, li, Math.round(frameRef.current)) * Math.PI) / 180
     const dx = pt[0] - base[0]
     const dy = pt[1] - base[1]
     const lx = dx * Math.cos(-rot) - dy * Math.sin(-rot)
@@ -914,7 +888,9 @@ export default function Preview() {
   const layerBase = (i: number): [number, number] | null => {
     const s = useEditor.getState()
     if (s.templateId !== '__custom' || !s.sourceData) return null
-    return layerBaseOf(s.sourceData, i, s.curFrame)
+    // frameRef = 눈에 보이는 프레임 (재생 중에도 갱신) — curFrame은 재생 중 파킹돼
+    // 히트테스트가 재생 시작 시점 위치를 보게 된다
+    return layerBaseOf(s.sourceData, i, Math.round(frameRef.current))
   }
 
 
@@ -1808,6 +1784,19 @@ export default function Preview() {
                               e.stopPropagation()
                               const rect = wrapRef.current?.getBoundingClientRect()
                               const st = useEditor.getState()
+                              {
+                                // applyLayerSize가 스케일 못 하는 레이어(씬 참조·bbox 메타 없는
+                                // 셰이프)는 리사이즈 무시 — 보정 이동만 남아 레이어가 밀린다
+                                const li0 = Math.min(st.customIdx, (st.sourceData?.layers.length ?? 1) - 1)
+                                const lr0 = st.sourceData?.layers[li0] as Record<string, unknown> | undefined
+                                const asset0 = (st.sourceData?.assets as Record<string, unknown>[] | undefined)?.find(
+                                  (a) => a.id === lr0?.refId,
+                                )
+                                const sizable =
+                                  (asset0 && typeof asset0.nw === 'number') ||
+                                  typeof ((lr0?.shapes as Record<string, unknown>[] | undefined)?.[0] as Record<string, unknown> | undefined)?.bboxMax === 'number'
+                                if (!sizable) return
+                              }
                               const li = Math.min(
                                 st.customIdx,
                                 (st.sourceData?.layers.length ?? 1) - 1,

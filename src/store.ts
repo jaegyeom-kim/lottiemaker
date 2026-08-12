@@ -14,7 +14,7 @@ import {
   CUSTOM_ASSET_PREFIX, DEFAULT_SEL,
   type CustomSel, type CustomPayload, type CustomKf, type KfChannel, type Bezier4,
   type KfSelItem,
-  kfChannelKeys, applyTrimChannels, extractTrimToKf, layerScaleOf, layerAabbOf,
+  kfChannelKeys, applyTrimChannels, extractTrimToKf, layerScaleOf, layerAabbOf, layerRotationOf, layerBaseOf,
 } from './lib/customBuilder'
 
 const HISTORY_CAP = 50
@@ -494,20 +494,21 @@ export const useEditor = create<EditorState>((set, get) => {
       if (group && bboxMax) {
         const tr = (group.it as Record<string, unknown>[]).find((i) => i.ty === 'tr')
         const trK = (tr?.s as { k: number[] } | undefined)?.k
-        const oldSc = ((trK?.[0] as number | undefined) ?? 100) / 100
+        const oldScX = ((trK?.[0] as number | undefined) ?? 100) / 100
+        const oldScY = ((trK?.[1] as number | undefined) ?? (trK?.[0] as number | undefined) ?? 100) / 100
         // 비균등 스케일(가져온 벡터)이면 축 비율 보존 — 균등 덮어쓰기는 종횡비를 깨뜨린다
-        const axisRatio = trK && trK[0] ? (trK[1] ?? trK[0]) / trK[0] : 1
+        const axisRatio = oldScX > 0 ? oldScY / oldScX : 1
         if (tr) (tr.s as { k: number[] }).k = [(px / bboxMax) * 100, (px / bboxMax) * 100 * axisRatio]
-        const newSc = px / bboxMax
-        // 앵커 오프셋도 비례 스케일 — 비율 유지
-        const prev = ((layer.xsel as CustomSel | undefined)?.size ?? 240)
+        const newScX = px / bboxMax
+        const newScY = newScX * axisRatio
+        // 앵커 오프셋 — 실제 그룹 스케일 비율로 (xsel.size는 스테일할 수 있어 기준으로 부적합)
         const ak = ((layer.ks as Record<string, unknown>).a as { k: number[] }).k
-        ak[0] = (ak[0] * px) / prev
-        ak[1] = (ak[1] * px) / prev
-        // 펜 편집 중심 오프셋(bboxCx/Cy)은 그룹 스케일 곱으로 저장돼 있음 — 재스케일
-        if (oldSc > 0 && typeof group.bboxCx === 'number') {
-          group.bboxCx = (group.bboxCx as number) * (newSc / oldSc)
-          group.bboxCy = (Number(group.bboxCy) || 0) * (newSc / oldSc)
+        if (oldScX > 0) ak[0] = ak[0] * (newScX / oldScX)
+        if (oldScY > 0) ak[1] = ak[1] * (newScY / oldScY)
+        // 펜 편집 중심 오프셋(bboxCx/Cy)은 그룹 스케일 곱으로 저장돼 있음 — 축별 재스케일
+        if (typeof group.bboxCx === 'number') {
+          if (oldScX > 0) group.bboxCx = (group.bboxCx as number) * (newScX / oldScX)
+          if (oldScY > 0) group.bboxCy = (Number(group.bboxCy) || 0) * (newScY / oldScY)
         }
       }
     }
@@ -556,10 +557,17 @@ export const useEditor = create<EditorState>((set, get) => {
     } else {
       const g = (layer.shapes as Record<string, unknown>[] | undefined)?.[0]
       const tr = (g?.it as Record<string, unknown>[] | undefined)?.find((i) => i.ty === 'tr')
-      const sc = ((tr?.s as { k: number[] } | undefined)?.k[0] ?? 100) / 100
-      const gw = ((g?.bboxW as number | undefined) ?? 120) * sc
-      const gh = ((g?.bboxH as number | undefined) ?? 120) * sc
-      newA = [(fx - 0.5) * gw, (fy - 0.5) * gh, 0]
+      const trK = (tr?.s as { k: number[] } | undefined)?.k
+      const scX = ((trK?.[0] as number | undefined) ?? 100) / 100
+      const scY = ((trK?.[1] as number | undefined) ?? (trK?.[0] as number | undefined) ?? 100) / 100
+      const gw = ((g?.bboxW as number | undefined) ?? 120) * scX
+      const gh = ((g?.bboxH as number | undefined) ?? 120) * scY
+      // 펜 편집으로 중심이 원점에서 벗어난 만큼(bboxCx/Cy) 보정 — 없으면 유령 박스에 매핑된다
+      newA = [
+        Number(g?.bboxCx ?? 0) + (fx - 0.5) * gw,
+        Number(g?.bboxCy ?? 0) + (fy - 0.5) * gh,
+        0,
+      ]
     }
     const oldA = ((ks.a as { k?: number[] })?.k as number[]) ?? [0, 0, 0]
     const xsel = { ...DEFAULT_SEL, ...((layer.xsel as Partial<CustomSel>) ?? {}) }
@@ -567,7 +575,8 @@ export const useEditor = create<EditorState>((set, get) => {
     // 스케일 100 가정이면 스케일≠100에서 그래픽이 밀린다 — 유효 ks.s 곱 필수
     const li2 = Math.min(customIdx, src.layers.length - 1)
     const eff = layerScaleOf(src, li2, st.curFrame)
-    const rad = ((xsel.rotation ?? 0) * Math.PI) / 180
+    // 회전도 프레임 인지 — kf r 키가 있으면 xsel.rotation은 폴백일 뿐
+    const rad = (layerRotationOf(src, li2, st.curFrame) * Math.PI) / 180
     const da = [(newA[0] - oldA[0]) * eff, (newA[1] - oldA[1]) * eff]
     const dx = da[0] * Math.cos(rad) - da[1] * Math.sin(rad)
     const dy = da[0] * Math.sin(rad) + da[1] * Math.cos(rad)
@@ -1773,10 +1782,13 @@ export const useEditor = create<EditorState>((set, get) => {
       const layer = src.layers[primary] as Record<string, unknown>
       if (!layer || !Array.isArray(layer.xbase)) return
       const xb = layer.xbase as number[]
-      const dx = x - xb[0]
-      const dy = y - xb[1]
+      // 델타는 주 선택의 '시각' 위치 기준 — kf p키 레이어는 현재 프레임 보간 위치가
+      // xbase와 달라, xbase 기준이면 다중 드래그 첫 틱에 전원이 그 차만큼 점프한다
+      const vis = layerBaseOf(src, primary, st.curFrame) ?? (xb as [number, number])
+      const dx = x - vis[0]
+      const dy = y - vis[1]
       if (!dx && !dy) return
-      // 주 선택은 절대 좌표, 함께 선택된 레이어들은 같은 델타로 동반 이동 — 선택 없으면 무시
+      // 함께 선택된 레이어들은 같은 델타로 동반 이동 — 선택 없으면 무시
       const sel = [...new Set(customIdxs)].filter(
         (i) => i >= 0 && i < src.layers.length && !lockedAt(src, i),
       )
@@ -1784,8 +1796,6 @@ export const useEditor = create<EditorState>((set, get) => {
       for (const i of sel) {
         shiftLayer(src.layers[i] as Record<string, unknown>, dx, dy)
       }
-      xb[0] = x
-      xb[1] = y
       const applied = applyKnobs(src, templateKnobs, knobValues)
       set({
         animationData: applied,
@@ -1797,7 +1807,7 @@ export const useEditor = create<EditorState>((set, get) => {
     },
 
     alignCustom: (mode, basis = 'canvas') => {
-      const { sourceData, templateKnobs, knobValues } = get()
+      const { sourceData, templateKnobs, knobValues, curFrame } = get()
       if (!sourceData) return
       const src = structuredClone(sourceData)
       ensureLayerColors(src)
@@ -1809,10 +1819,11 @@ export const useEditor = create<EditorState>((set, get) => {
       // 각 레이어의 시각적 박스
       const boxes = targets.map((i) => {
         const layer = src.layers[i] as Record<string, unknown>
-        const xb = (layer.xbase as number[]) ?? [256, 256]
+        // 시각 위치 = 현재 프레임의 p (kf 키 보간) — xbase만 보면 키 레이어가 점프한다
+        const vb = layerBaseOf(src, i, curFrame) ?? ((layer.xbase as number[]) ?? [256, 256])
         // 회전·스케일 반영 화면 박스 — 시각적 가장자리에 정렬돼야 한다
-        const { half, offset } = layerAabbOf(src, i)
-        return { i, layer, cx: xb[0] + offset[0], cy: xb[1] + offset[1], hw: half[0], hh: half[1] }
+        const { half, offset } = layerAabbOf(src, i, curFrame)
+        return { i, layer, cx: vb[0] + offset[0], cy: vb[1] + offset[1], hw: half[0], hh: half[1] }
       })
       // 정렬 기준 경계: 캔버스 또는 선택 합집합 바운드 (2개 미만이면 캔버스로 폴백)
       let L = 0, R = 512, T = 0, B = 512
@@ -1843,7 +1854,7 @@ export const useEditor = create<EditorState>((set, get) => {
     },
 
     distributeCustom: (axis) => {
-      const { sourceData, templateKnobs, knobValues } = get()
+      const { sourceData, templateKnobs, knobValues, curFrame } = get()
       if (!sourceData || sourceData.layers.length < 3) return
       const src = structuredClone(sourceData)
       ensureLayerColors(src)
@@ -1854,9 +1865,11 @@ export const useEditor = create<EditorState>((set, get) => {
       const pool = selD.length >= 3 ? selD : src.layers.map((_, i) => i).filter((i) => !lockedAt(src, i))
       const items = pool.map((i) => {
         const l = src.layers[i]
-        const xb = ((l as Record<string, unknown>).xbase as number[]) ?? [256, 256]
-        const { offset } = layerAabbOf(src, i) // 회전·스케일 반영 시각 중심
-        return { i, c: axis === 'h' ? xb[0] + offset[0] : xb[1] + offset[1] }
+        const vb =
+          layerBaseOf(src, i, curFrame) ??
+          (((l as Record<string, unknown>).xbase as number[]) ?? [256, 256])
+        const { offset } = layerAabbOf(src, i, curFrame) // 회전·스케일·프레임 반영 시각 중심
+        return { i, c: axis === 'h' ? vb[0] + offset[0] : vb[1] + offset[1] }
       })
       if (items.length < 3) return
       items.sort((a, b) => a.c - b.c)

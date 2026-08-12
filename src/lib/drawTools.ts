@@ -3,7 +3,7 @@
 
 export type DrawTool = 'rect' | 'ellipse' | 'polygon' | 'star' | 'line' | 'pen'
 export const DRAW_FILL = '#3380f5'
-export const STROKE_W = 8
+export const STROKE_W = 1
 
 const HEAD = (w: number, h: number) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`

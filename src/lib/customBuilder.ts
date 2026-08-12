@@ -705,6 +705,31 @@ export function layerScaleOf(doc: LottieJson, i: number, frame?: number): number
   return Math.max(0.01, v / 100)
 }
 
+/** 문서에서 레이어 i의 기준 위치 (첫 키프레임 또는 정적 값). atFrame = 키프레임 모드 보간 시각. */
+export function layerBaseOf(doc: LottieJson, i: number, atFrame?: number): [number, number] | null {
+  const layer = doc.layers[i] as (Record<string, unknown> & { ks?: unknown }) | undefined
+  if (!layer) return null
+  // 키프레임 모드 — 파킹 프레임의 보간 위치 (박스가 애니메이션 위치를 따라감)
+  const xkfRaw = layer.xkf as Partial<CustomKf> | undefined
+  if (xkfRaw?.on && typeof atFrame === 'number') {
+    const xb: [number, number] = Array.isArray(layer.xbase)
+      ? [(layer.xbase as number[])[0], (layer.xbase as number[])[1]]
+      : [256, 256]
+    return kfValueAt(normKf(xkfRaw), 'p', atFrame, xb) as [number, number]
+  }
+  // 정착 위치 = xbase (슬라이드류는 첫 키프레임이 화면 밖 오프셋이라 쓰면 안 됨)
+  if (Array.isArray(layer.xbase)) {
+    return [(layer.xbase as number[])[0], (layer.xbase as number[])[1]]
+  }
+  const p = (layer.ks as Record<string, unknown>).p as { a?: number; k: unknown }
+  if (p.a === 1 && Array.isArray(p.k)) {
+    const kfs = p.k as { s: number[] }[]
+    const last = kfs[kfs.length - 1].s
+    return [last[0], last[1]]
+  }
+  return [(p.k as number[])[0], (p.k as number[])[1]]
+}
+
 /** 정착 회전(도) — 정적 ks.r 우선, 애니메이션 중엔 xkf r 채널/xsel. layerScaleOf와 같은 규칙. */
 export function layerRotationOf(doc: LottieJson, i: number, frame?: number): number {
   const layer = doc.layers[i] as Record<string, unknown> | undefined
