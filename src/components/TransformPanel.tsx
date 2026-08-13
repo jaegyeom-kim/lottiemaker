@@ -1,4 +1,4 @@
-import { useEditor } from '../store'
+import { useEditor, type ShapeMeta } from '../store'
 import { t } from '../lib/i18n'
 import {
   normSel, normKf, kfValueAt, kfChannelKeys,
@@ -6,6 +6,11 @@ import {
 } from '../lib/customBuilder'
 import { PosInput } from './CustomBuilder'
 import AnchorControls from './AnchorControls'
+
+/** xshape.tool → 표시 라벨. */
+const TOOL_LABELS: Record<string, string> = {
+  rect: '사각형', ellipse: '원형', polygon: '삼각형', star: '별',
+}
 
 /** 로티 블렌드 모드 (bm) — 순서 = 로티 스펙 인덱스. */
 const BLEND_MODES = [
@@ -23,7 +28,7 @@ export default function TransformPanel() {
   const curFrame = useEditor((s) => s.curFrame)
   const {
     setCustomChannelsLive, setKfChannelLive, commitEdit,
-    nudgeCustomBase, setLayerBlend, setLayerStroke,
+    nudgeCustomBase, setLayerBlend, setLayerStroke, setShapeGeom,
   } = useEditor()
 
   const layers = sourceData?.layers ?? []
@@ -107,6 +112,33 @@ export default function TransformPanel() {
           </p>
         )}
       </div>
+
+      {/* 도형 — 드로잉 툴로 만든 레이어(xshape 메타): 지오메트리 크기·라운드 코너 */}
+      {(() => {
+        const xs = selLayer.xshape as ShapeMeta | undefined
+        if (!xs) return null
+        return (
+          <div className="knob">
+            <div className="knob__head">
+              <span className="knob__name">{t('도형')}</span>
+              <span className="knob__unit">{t(TOOL_LABELS[xs.tool] ?? xs.tool)}</span>
+            </div>
+            <div className="posrow">
+              <PosInput label="W" value={xs.w} onCommit={(v) => setShapeGeom(idx, { w: v })} />
+              <PosInput label="H" value={xs.h} onCommit={(v) => setShapeGeom(idx, { h: v })} />
+            </div>
+            {xs.tool === 'rect' && (
+              <div className="posrow">
+                <PosInput
+                  label={t('라운드')}
+                  value={xs.r ?? 0}
+                  onCommit={(v) => setShapeGeom(idx, { r: v })}
+                />
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* 선(스트로크) — 패스/선 레이어일 때만: 두께·라인캡 */}
       {(() => {

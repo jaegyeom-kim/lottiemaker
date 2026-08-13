@@ -6,7 +6,7 @@ import { applyKnobs, type TemplateKnob } from './lib/lottieKnobs'
 import type { AiMotionPlan } from './lib/ai'
 import { convertLottieToCustom, convertLottieToScenes, hasPrecomps } from './lib/lottieImport'
 import { t } from './lib/i18n'
-import { growCubicBbox } from './lib/drawTools'
+import { growCubicBbox, shapeGeomK } from './lib/drawTools'
 import {
   buildAnimKs, buildCustomDoc, buildCustomLayer, animSpans, normSel,
   normKf, buildKfKs, kfValueAt,
@@ -40,6 +40,15 @@ export interface PenPathK {
   i: [number, number][]
   o: [number, number][]
   c: boolean
+}
+
+/** 드로잉 도형 메타 (layer.xshape) — properties에서 크기·라운드 리빌드용. */
+export interface ShapeMeta {
+  tool: 'rect' | 'ellipse' | 'polygon' | 'star'
+  w: number
+  h: number
+  /** 모서리 라운드 (rect 전용). */
+  r?: number
 }
 
 /** localStorage 자동 저장 페이로드. */
@@ -198,13 +207,15 @@ interface EditorState {
   /** 다중 레이어 삭제 (인덱스 목록). */
   removeCustomLayers: (idxs: number[]) => void
   /** 커스텀 빌더: 그래픽 추가 — 세션 없으면 새 문서, 있으면 맨 위 레이어로. at = 배치 좌표. */
-  addCustomLayer: (payload: CustomPayload, name: string, at?: [number, number], size?: number) => void
+  addCustomLayer: (payload: CustomPayload, name: string, at?: [number, number], size?: number, xshape?: ShapeMeta) => void
   /** 선택 레이어의 그래픽을 통째 교체 (라이브) — 펜 드로잉 진행 중 갱신. 모션·이름·라벨 유지, commitEdit로 확정. */
   replaceCustomGraphicLive: (payload: CustomPayload, at: [number, number], size: number) => void
-  /** 펜 패스 포인트 편집 (라이브) — 단일 sh 레이어의 로컬 경로 k 교체. */
-  setPenPathLive: (li: number, k: PenPathK) => void
+  /** 펜 패스 포인트 편집 (라이브) — 단일 sh 레이어의 로컬 경로 k 교체. xshape는 도형 리빌드 시 메타 동기용. */
+  setPenPathLive: (li: number, k: PenPathK, xshape?: ShapeMeta) => void
   /** 선(스트로크) 옵션 — 두께/라인캡. */
   setLayerStroke: (li: number, opts: { w?: number; lc?: number }) => void
+  /** 도형 지오메트리 리빌드 — xshape 메타 있는 레이어의 크기/라운드 (제자리 유지, 언두 1회). */
+  setShapeGeom: (li: number, patch: Partial<Omit<ShapeMeta, 'tool'>>) => void
   /** 로티 문서를 커스텀 레이어로 가져오기 — 트랜스폼 키프레임을 xkf로 변환. */
   importLottieLayers: (
     doc: LottieJson,
@@ -1237,7 +1248,7 @@ export const useEditor = create<EditorState>((set, get) => {
       set({ customIdxs: next, customIdx: next[next.length - 1] })
     },
 
-    addCustomLayer: (payload, name, at, size) => {
+    addCustomLayer: (payload, name, at, size, xshape) => {
       const { templateId, sourceData, templateKnobs, knobValues } = get()
       const base: [number, number] = at ?? [256, 256]
       // 드로잉 툴은 그린 크기 그대로 생성 (기본은 240px)
@@ -1245,6 +1256,7 @@ export const useEditor = create<EditorState>((set, get) => {
       if (templateId !== '__custom' || !sourceData) {
         const doc = buildCustomDoc(payload, sel, base, name)
         ;(doc.layers[0] as Record<string, unknown>).xci = 0
+        if (xshape) (doc.layers[0] as Record<string, unknown>).xshape = xshape
         // 커스텀은 timeStretch 노브 없음 — 컴포지션 길이는 setCompLength로 (절대 시간 유지)
         get().loadTemplate(doc, '__custom', [])
         // 편집 모드로 시작 — 재생(프리뷰) 버튼을 눌러야 루프 재생
@@ -1258,6 +1270,7 @@ export const useEditor = create<EditorState>((set, get) => {
         payload, sel, base, name, nextAssetId(assets), src.op,
       )
       layer.xci = nextXci(src)
+      if (xshape) layer.xshape = xshape
       if (asset) assets.push(asset)
       src.assets = assets
       src.layers = [layer as never, ...src.layers]
@@ -1273,7 +1286,7 @@ export const useEditor = create<EditorState>((set, get) => {
       })
     },
 
-    setPenPathLive: (li, k) => {
+    setPenPathLive: (li, k, xshape) => {
       const st = get()
       const baseline = st.editBaseline ?? snap()
       const baseSrc = baseline.source ?? st.sourceData
@@ -1285,6 +1298,7 @@ export const useEditor = create<EditorState>((set, get) => {
       const sh = findSinglePath(group)
       if (!sh) return
       ;(sh.ks as Record<string, unknown>).k = structuredClone(k)
+      if (xshape) layer.xshape = xshape
       // bbox 메타 갱신 — 선택 박스·크기 조절이 새 곡선 범위를 따라가게 (곡선 극값 기준)
       const acc = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
       const n = k.c ? k.v.length : k.v.length - 1
@@ -1323,6 +1337,46 @@ export const useEditor = create<EditorState>((set, get) => {
         editBaseline: baseline,
         future: [],
       })
+    },
+
+    setShapeGeom: (li, patch) => {
+      const st = get()
+      const src0 = st.sourceData
+      if (!src0?.layers[li] || lockedAt(src0, li)) return
+      const layer0 = src0.layers[li] as Record<string, unknown>
+      const xs = layer0.xshape as ShapeMeta | undefined
+      if (!xs) return
+      const next: ShapeMeta = {
+        tool: xs.tool,
+        w: Math.max(4, Math.round(patch.w ?? xs.w)),
+        h: Math.max(4, Math.round(patch.h ?? xs.h)),
+        r: Math.max(0, Math.round(patch.r ?? xs.r ?? 0)),
+      }
+      const k = shapeGeomK(next.tool, next.w, next.h, next.r)
+      if (!k) return
+      // 지오메트리는 (0,0)-(w,h)로 생성 — 기존 로컬 bbox 중심에 맞춰 이동해 도형 제자리 유지
+      const sh = findSinglePath((layer0.shapes as Record<string, unknown>[] | undefined)?.[0])
+      const k0 = (sh?.ks as Record<string, unknown> | undefined)?.k as PenPathK | undefined
+      if (k0?.v?.length) {
+        let mnX = Infinity
+        let mxX = -Infinity
+        let mnY = Infinity
+        let mxY = -Infinity
+        for (const [x, y] of k0.v) {
+          mnX = Math.min(mnX, x)
+          mxX = Math.max(mxX, x)
+          mnY = Math.min(mnY, y)
+          mxY = Math.max(mxY, y)
+        }
+        const dx = (mnX + mxX) / 2 - next.w / 2
+        const dy = (mnY + mxY) / 2 - next.h / 2
+        for (const p of k.v) {
+          p[0] += dx
+          p[1] += dy
+        }
+      }
+      get().setPenPathLive(li, k, next)
+      get().commitEdit()
     },
 
     setLayerStroke: (li, opts) => {

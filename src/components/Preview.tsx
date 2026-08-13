@@ -465,6 +465,11 @@ export default function Preview() {
     if (w < 3 && h < 3) return // 클릭만 한 것 — 무시
     const svg = buildShapeSvg(dt, w, h, dt === 'line' ? { dx: dd.x1 - dd.x0, dy: dd.y1 - dd.y0 } : undefined)
     const size = dt === 'line' ? Math.max(w, h) + STROKE_W + 2 : Math.max(w, h)
+    // 도형 메타 태깅 — properties에서 크기/라운드 리빌드 (line은 방향 정보 없어 제외)
+    const xshape =
+      dt === 'rect' || dt === 'ellipse' || dt === 'polygon' || dt === 'star'
+        ? { tool: dt, w: Math.max(4, Math.round(w)), h: Math.max(4, Math.round(h)), r: 0 }
+        : undefined
     useEditor
       .getState()
       .addCustomLayer(
@@ -472,6 +477,7 @@ export default function Preview() {
         t(TOOL_NAMES[dt]),
         [(dd.x0 + dd.x1) / 2, (dd.y0 + dd.y1) / 2],
         size,
+        xshape,
       )
     setTool('move') // Figma처럼 만들고 나면 이동 툴로
   }

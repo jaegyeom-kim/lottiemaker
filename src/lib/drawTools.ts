@@ -103,6 +103,59 @@ export function penPathD(pts: PenPt[], closed: boolean, hover?: [number, number]
   return d
 }
 
+/** 도형 지오메트리 → 로티 sh.ks.k (로컬 (0,0)-(w,h)) — properties 도형 옵션 리빌드용.
+    svgImport의 rect/ellipse 베지어 변환과 동일한 수식 (라운드 코너 k=0.5523r). */
+export function shapeGeomK(
+  tool: DrawTool,
+  w: number,
+  h: number,
+  r = 0,
+): { v: [number, number][]; i: [number, number][]; o: [number, number][]; c: boolean } | null {
+  const P = (x: number, y: number): [number, number] => [x, y]
+  const Z: [number, number] = [0, 0]
+  switch (tool) {
+    case 'rect': {
+      const rr = Math.min(Math.max(0, r), w / 2, h / 2)
+      if (rr <= 0)
+        return { v: [P(0, 0), P(w, 0), P(w, h), P(0, h)], i: [Z, Z, Z, Z], o: [Z, Z, Z, Z], c: true }
+      const kk = 0.5523 * rr
+      return {
+        v: [P(rr, 0), P(w - rr, 0), P(w, rr), P(w, h - rr), P(w - rr, h), P(rr, h), P(0, h - rr), P(0, rr)],
+        i: [Z, Z, P(0, -kk), Z, P(kk, 0), Z, P(0, kk), Z],
+        o: [Z, P(kk, 0), Z, P(0, kk), Z, P(-kk, 0), Z, P(0, -kk)],
+        c: true,
+      }
+    }
+    case 'ellipse': {
+      const rx = w / 2
+      const ry = h / 2
+      const kx = 0.5523 * rx
+      const ky = 0.5523 * ry
+      return {
+        v: [P(rx, 0), P(w, ry), P(rx, h), P(0, ry)],
+        i: [P(-kx, 0), P(0, -ky), P(kx, 0), P(0, ky)],
+        o: [P(kx, 0), P(0, ky), P(-kx, 0), P(0, -ky)],
+        c: true,
+      }
+    }
+    case 'polygon': {
+      const v = [P(w / 2, 0), P(w, h), P(0, h)]
+      return { v, i: v.map(() => Z), o: v.map(() => Z), c: true }
+    }
+    case 'star': {
+      const v = starPoints(w, h)
+        .split(' ')
+        .map((pt) => {
+          const [x, y] = pt.split(',').map(Number)
+          return P(x, y)
+        })
+      return { v, i: v.map(() => Z), o: v.map(() => Z), c: true }
+    }
+    default:
+      return null // line/pen — 지오메트리 리빌드 미지원
+  }
+}
+
 /**
  * ⌥클릭 포인트 변환 토글 — 핸들 있으면 제거(코너), 없으면 스무스로 만들며
  * 살짝 당겨진 핸들을 준다. 0길이 핸들은 화면에서 앵커와 겹쳐 잡을 수 없어서
