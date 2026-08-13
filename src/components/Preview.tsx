@@ -13,6 +13,7 @@ import {
   type CustomPayload, type CustomKf, type CustomSel, type KfChannel,
 } from '../lib/customBuilder'
 import LottiePlayer from './LottiePlayer'
+import type { AnimationItem } from 'lottie-web/build/player/lottie_svg'
 import MockupView from './MockupView'
 import Timeline from './Timeline'
 import {
@@ -187,7 +188,7 @@ export default function Preview() {
     f: number; bx: number; by: number; startSize: number; startDist: number
     ox: number; oy: number
   } | null>(null)
-  // 캔버스 드래그 라이브 반영 — rAF 스로틀 (임베드 이미지 재계산 비용 완화)
+  // 캔버스 드래그 라이브 반영 — rAF 스로틀 (오버레이 폴백 경로)
   const liveRaf = useRef<number | null>(null)
   const pendingBase = useRef<[number, number] | null>(null)
   const flushLiveBase = () => {
@@ -197,6 +198,52 @@ export default function Preview() {
       pendingBase.current = null
       useEditor.getState().setCustomBaseLive(b[0], b[1])
     }
+  }
+
+  // ── 드래그 이동 오버레이 — 재구축 없이 렌더된 레이어 <g>에 translate ──
+  // 매 틱 인스턴스 파괴+재구축(틱당 55~77ms 롱태스크)이 편집 버벅임의 원인.
+  // 드래그 중엔 lottie 내부 요소에 직접 translate, 릴리즈에 store 1회 커밋.
+  const lottieInst = useRef<AnimationItem | null>(null)
+  const dragOverlay = useRef<Map<Element, string> | null>(null)
+  const applyMoveOverlay = (dx: number, dy: number): boolean => {
+    const inst = lottieInst.current as unknown as {
+      renderer?: { elements?: ({ layerElement?: SVGGElement } | null | undefined)[] }
+    } | null
+    const els = inst?.renderer?.elements
+    if (!els?.length) return false
+    const st = useEditor.getState()
+    const n = st.sourceData?.layers.length ?? 0
+    const sel = [...new Set(st.customIdxs)].filter(
+      (i) =>
+        i >= 0 &&
+        i < n &&
+        (st.sourceData?.layers[i] as Record<string, unknown> | undefined)?.xlock !== true,
+    )
+    if (!sel.length) return false
+    if (!dragOverlay.current) dragOverlay.current = new Map()
+    let applied = 0
+    for (const i of sel) {
+      const el = els[i]?.layerElement
+      if (!el) continue
+      // 재구축(alt 복제 직후 등)으로 el이 바뀌면 새로 원본 캡처 — 지연 캡처
+      if (!dragOverlay.current.has(el))
+        dragOverlay.current.set(el, el.getAttribute('transform') ?? '')
+      const orig = dragOverlay.current.get(el)!
+      el.setAttribute('transform', `translate(${dx} ${dy})${orig ? ` ${orig}` : ''}`)
+      applied++
+    }
+    return applied > 0
+  }
+  /** restore=true(취소)면 원본 transform 복원, 커밋 경로면 재구축이 대체하므로 그대로 둔다. */
+  const clearMoveOverlay = (restore: boolean) => {
+    if (!dragOverlay.current) return
+    if (restore) {
+      for (const [el, orig] of dragOverlay.current) {
+        if (orig) el.setAttribute('transform', orig)
+        else el.removeAttribute('transform')
+      }
+    }
+    dragOverlay.current = null
   }
 
   // 어니언 스킨 토글 — 전후 프레임 고스트 (일시정지·비편집 중에만 렌더)
@@ -492,6 +539,17 @@ export default function Preview() {
       if (isTyping(e.target)) return
       const s = useEditor.getState()
       if (e.key === 'Escape') {
+        // 이동 드래그 진행 중 — 오버레이 복원하고 드래그 중단 (store 무변경)
+        if (dragStart.current) {
+          e.preventDefault()
+          clearMoveOverlay(true)
+          dragStart.current = null
+          dragLast.current = null
+          setGuides({ v: null, h: null })
+          setDragCoord(null)
+          setDragBox(null)
+          return
+        }
         // 마키 진행 중 취소 — Esc 소비 표시 (그래프 에디터 닫힘 방지)
         if (selMarquee.current) {
           e.preventDefault()
@@ -1477,6 +1535,7 @@ export default function Preview() {
                   playing={playing}
                   speed={speed}
                   loop={loop}
+                  instRef={lottieInst}
                   onFrame={onFrame}
                   seekFrame={seek}
                   replayToken={replayToken}
@@ -1721,6 +1780,7 @@ export default function Preview() {
                     />
                   )}
                   {!previewing &&
+                    !dragBox &&
                     customIdxs
                       .filter((i) => i !== idxClamped && sourceData?.layers[i])
                       .map((i) => {
@@ -2000,10 +2060,13 @@ export default function Preview() {
                         setDragCoord({ x: tx, y: ty })
                         setDragBox({ x: tx + d.ox, y: ty + d.oy, hw: d.hw, hh: d.hh })
                         dragLast.current = { tx, ty }
-                        // AE식 라이브 미리보기 — 파킹 프레임 기준으로 실시간 갱신
-                        pendingBase.current = [tx, ty]
-                        if (liveRaf.current === null)
-                          liveRaf.current = requestAnimationFrame(flushLiveBase)
+                        // 라이브 미리보기 — 재구축 없이 <g> translate (릴리즈 때 store 1회)
+                        if (!applyMoveOverlay(tx - d.bx, ty - d.by)) {
+                          // 내부 API 불가 폴백 — 기존 rAF 라이브 경로
+                          pendingBase.current = [tx, ty]
+                          if (liveRaf.current === null)
+                            liveRaf.current = requestAnimationFrame(flushLiveBase)
+                        }
                       }}
                       onPointerLeave={() => {
                         if (!dragStart.current) setHoverIdx(null)
@@ -2023,13 +2086,18 @@ export default function Preview() {
                           cancelAnimationFrame(liveRaf.current)
                           liveRaf.current = null
                         }
-                        if (!d || !last) return
-                        // 마지막 위치 반영 후 히스토리 1회 커밋
+                        if (!d || !last) {
+                          clearMoveOverlay(true)
+                          return
+                        }
+                        // 마지막 위치 반영 후 히스토리 1회 커밋 — 오버레이는 재구축이 대체
+                        clearMoveOverlay(false)
                         useEditor.getState().setCustomBaseLive(last.tx, last.ty)
                         useEditor.getState().commitEdit()
                       }}
                       onPointerCancel={() => {
-                        // 제스처 중단 — 스턱 드래그 방지, 진행분은 커밋
+                        // 제스처 중단 — 오버레이 복원 (store엔 아무것도 안 갔음)
+                        clearMoveOverlay(true)
                         setShowAllBoxes(false)
                         marqueeEnd()
                         dragStart.current = null

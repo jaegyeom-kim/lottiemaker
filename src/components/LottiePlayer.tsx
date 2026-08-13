@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 // svg 전용 빌드 — 캔버스/HTML 렌더러 제외 (표현식은 포함, 임포트 문서 호환 유지)
+import type React from 'react'
 import lottie, { type AnimationItem } from 'lottie-web/build/player/lottie_svg'
 
 interface Props {
@@ -14,6 +15,8 @@ interface Props {
   replayToken?: number
   /** loop=false 재생이 끝났을 때 호출. */
   onComplete?: () => void
+  /** 라이브 인스턴스 노출 — 드래그 오버레이(재구축 없는 이동 미리보기)용. */
+  instRef?: React.MutableRefObject<AnimationItem | null>
 }
 
 /** lottie-web 래퍼. data가 바뀌면 인스턴스를 재생성한다. */
@@ -35,6 +38,7 @@ export default function LottiePlayer({
   seekFrame = null,
   replayToken,
   onComplete,
+  instRef,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const animRef = useRef<AnimationItem | null>(null)
@@ -87,12 +91,14 @@ export default function LottiePlayer({
       anim.addEventListener('enterFrame', handler)
       anim.addEventListener('complete', completeHandler)
       animRef.current = anim
+      if (instRef) instRef.current = anim
       destroyRef.current = () => {
         anim.removeEventListener('enterFrame', handler)
         anim.removeEventListener('DOMLoaded', ready)
         anim.removeEventListener('complete', completeHandler)
         anim.destroy()
         animRef.current = null
+        if (instRef && instRef.current === anim) instRef.current = null
         destroyRef.current = null
       }
     }
