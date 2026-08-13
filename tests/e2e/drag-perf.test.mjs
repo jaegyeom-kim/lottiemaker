@@ -49,7 +49,7 @@ ok(
   `릴리즈 위치 정확 (${b1.map((v) => v.toFixed(0))} ≈ ${base0[0] + 80},${base0[1] + 40})`,
 )
 // 렌더도 데이터와 일치 (오버레이 잔재 없이 재구축이 대체했는지)
-const visOk = await page.evaluate((exp) => {
+const visOk = await page.evaluate(() => {
   const wrapEl = document.querySelector('.preview__lottiewrap')
   const svg = wrapEl.querySelector('svg')
   // 오버레이 translate 잔재 여부 — 어떤 g도 이중 translate 프리픽스 없어야
@@ -57,7 +57,7 @@ const visOk = await page.evaluate((exp) => {
     /^translate\([^)]*\)\s*translate/.test(g.getAttribute('transform') ?? ''),
   )
   return { stray: stray.length }
-}, null)
+})
 ok(visOk.stray === 0, '오버레이 잔재 없음')
 
 // 언두 1스텝 → 원위치
