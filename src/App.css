@@ -3976,10 +3976,10 @@ body.drag-cross * { cursor: crosshair !important; }
 /* ── 펜 편집 커서 — Material 글리프 (open_with / commit / change_history) ──
    드로잉 모드 와일드카드 crosshair(0-2-0)를 이기도록 특이도 확보 */
 .drawghost .drawghost__anchor {
-  /* Material Symbols 'near_me' — 핫스팟은 화살촉(우상단) */
+  /* Material Symbols 'near_me' 수평 반전 — 핫스팟은 화살촉(좌상단) */
   cursor:
-    url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 -960 960 960"><path d="M516-120 402-402 120-516v-56l720-268-268 720h-56Zm26-148 162-436-436 162 196 78 78 196Zm-78-196Z" fill="white" stroke="black" stroke-width="52" paint-order="stroke"/></svg>')
-      17 3,
+    url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 -960 960 960"><g transform="translate(960 0) scale(-1 1)"><path d="M516-120 402-402 120-516v-56l720-268-268 720h-56Zm26-148 162-436-436 162 196 78 78 196Zm-78-196Z" fill="white" stroke="black" stroke-width="52" paint-order="stroke"/></g></svg>')
+      3 3,
     move !important;
 }
 
