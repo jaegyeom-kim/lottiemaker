@@ -17,7 +17,7 @@ import type { AnimationItem } from 'lottie-web/build/player/lottie_svg'
 import MockupView from './MockupView'
 import Timeline from './Timeline'
 import {
-  buildShapeSvg, buildPenSvg, penPathD, shapeGhostPoints, STROKE_W,
+  buildShapeSvg, buildPenSvg, penPathD, shapeGhostPoints, togglePenHandles, STROKE_W,
   type DrawTool, type PenPt,
 } from '../lib/drawTools'
 import { readDotLottie } from '../lib/dotlottie'
@@ -1503,8 +1503,8 @@ export default function Preview() {
                   else setPenSel(ed.idx)
                 }
                 else if (ed.kind === 'pull') {
-                  // ⌥클릭 = 핸들 제거 (스무스 → 코너)
-                  const next = pe.pts.map((pp, i) => (i === ed.idx ? { ...pp, ho: null, hi: null } : pp))
+                  // ⌥클릭 = 포인트 변환 토글 (코너 ↔ 스무스 — 시작 핸들 당겨진 상태)
+                  const next = togglePenHandles(pe.pts, ed.idx, pe.closed)
                   setPathEdit({ ...pe, pts: next })
                   setPenSel(ed.idx)
                   useEditor.getState().setPenPathLive(pe.li, penPtsToK(next, pe.closed))
@@ -1525,10 +1525,8 @@ export default function Preview() {
                 if (gd.add) togglePenSel(gd.idx)
                 else setPenSel(gd.idx)
               } else if (gd.kind === 'pull') {
-                // ⌥클릭(무이동) = 핸들 제거 (스무스 → 코너, AE 포인트 변환 클릭)
-                const next = penPtsRef.current.map((pp, i) =>
-                  i === gd.idx ? { ...pp, ho: null, hi: null } : pp,
-                )
+                // ⌥클릭(무이동) = 포인트 변환 토글 (코너 ↔ 스무스 — 시작 핸들 당겨진 상태)
+                const next = togglePenHandles(penPtsRef.current, gd.idx, false)
                 setPenPts(next)
                 setPenSel(gd.idx)
                 syncPenLayer(next)

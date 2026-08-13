@@ -103,6 +103,38 @@ export function penPathD(pts: PenPt[], closed: boolean, hover?: [number, number]
   return d
 }
 
+/**
+ * ⌥클릭 포인트 변환 토글 — 핸들 있으면 제거(코너), 없으면 스무스로 만들며
+ * 살짝 당겨진 핸들을 준다. 0길이 핸들은 화면에서 앵커와 겹쳐 잡을 수 없어서
+ * 이웃 세그먼트 길이의 25%(최소 8)로 시작한다. 방향은 이웃 앵커를 잇는 탄젠트.
+ */
+export function togglePenHandles(pts: PenPt[], idx: number, closed: boolean): PenPt[] {
+  const cur = pts[idx]
+  if (cur.ho || cur.hi)
+    return pts.map((pp, i) => (i === idx ? { ...pp, ho: null, hi: null } : pp))
+  const n = pts.length
+  const prev = closed || idx > 0 ? pts[(idx - 1 + n) % n] : null
+  const next = closed || idx < n - 1 ? pts[(idx + 1) % n] : null
+  let dx = (next?.p[0] ?? cur.p[0]) - (prev?.p[0] ?? cur.p[0])
+  let dy = (next?.p[1] ?? cur.p[1]) - (prev?.p[1] ?? cur.p[1])
+  if (!dx && !dy) {
+    dx = 1
+    dy = 0
+  }
+  const len = Math.hypot(dx, dy)
+  dx /= len
+  dy /= len
+  const dPrev = prev ? Math.hypot(cur.p[0] - prev.p[0], cur.p[1] - prev.p[1]) : Infinity
+  const dNext = next ? Math.hypot(next.p[0] - cur.p[0], next.p[1] - cur.p[1]) : Infinity
+  const seg = Math.min(dPrev, dNext)
+  const h = Number.isFinite(seg) ? Math.max(8, seg * 0.25) : 12
+  return pts.map((pp, i) =>
+    i === idx
+      ? { ...pp, ho: [dx * h, dy * h] as [number, number], hi: [-dx * h, -dy * h] as [number, number] }
+      : pp,
+  )
+}
+
 /** 1축 3차 베지어 극값 — 시작/끝 + 도함수 근(0..1)의 값. */
 function cubicAxisExtremes(p0: number, c1: number, c2: number, p3: number): number[] {
   const out = [p0, p3]
