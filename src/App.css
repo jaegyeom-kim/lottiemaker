@@ -3973,7 +3973,7 @@ body.drag-cross * { cursor: crosshair !important; }
   pointer-events: none !important;
 }
 
-/* ── 펜 편집 커서 — Material 글리프 (open_with / commit / change_history) ──
+/* ── 펜 편집 커서 — near_me(반전)·베지어 글리프·커브(사용자 제공) ──
    드로잉 모드 와일드카드 crosshair(0-2-0)를 이기도록 특이도 확보 */
 .drawghost .drawghost__anchor {
   /* Material Symbols 'near_me' 수평 반전 — 핫스팟은 화살촉(좌상단) */
@@ -3984,10 +3984,10 @@ body.drag-cross * { cursor: crosshair !important; }
 }
 
 .drawghost .drawghost__hdot {
-  /* 베지어 핸들 활성 — 사용자 제공 커브 글리프 (흰 스트로크 + 검정 케이싱) */
+  /* 베지어 핸들(양쪽 대칭) — 커브를 관통하는 탄젠트 + 양끝 점 */
   cursor:
-    url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24"><g fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M3,10.8l15.7-5.8c.2,0,.5.1.4.4l-6,15.6" stroke="black" stroke-width="4.6"/><path d="M3,10.8l15.7-5.8c.2,0,.5.1.4.4l-6,15.6" stroke="white" stroke-width="2"/></g></svg>')
-      11 11,
+    url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24"><g stroke="black" stroke-width="5" fill="black" stroke-linecap="round"><path d="M3 18C7 9 17 9 21 18" fill="none"/><path d="M4 7h16" fill="none"/><circle cx="4" cy="7" r="2.2"/><circle cx="20" cy="7" r="2.2"/><circle cx="12" cy="11.2" r="2.4"/></g><g stroke="white" stroke-width="1.8" fill="white" stroke-linecap="round"><path d="M3 18C7 9 17 9 21 18" fill="none"/><path d="M4 7h16" fill="none"/><circle cx="4" cy="7" r="1.6"/><circle cx="20" cy="7" r="1.6"/><circle cx="12" cy="11.2" r="1.8"/></g></svg>')
+      11 7,
     ew-resize !important;
 }
 
@@ -3999,11 +3999,11 @@ body.drag-cross * { cursor: crosshair !important; }
     ew-resize !important;
 }
 
-/* ⌥ 홀드 — 앵커 위 = 포인트 변환 (스무스↔코너) */
+/* ⌥ 홀드 — 앵커 위 = 포인트 변환 (스무스↔코너): 사용자 제공 커브 글리프 */
 .drawghost--alt .drawghost__anchor {
   cursor:
-    url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><path d="M12 7.77 18.39 18H5.61L12 7.77M12 4 2 20h20L12 4z" fill="white" stroke="black" stroke-width="1.6" paint-order="stroke"/></svg>')
-      10 10,
+    url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24"><g fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M3,10.8l15.7-5.8c.2,0,.5.1.4.4l-6,15.6" stroke="black" stroke-width="4.6"/><path d="M3,10.8l15.7-5.8c.2,0,.5.1.4.4l-6,15.6" stroke="white" stroke-width="2"/></g></svg>')
+      11 11,
     copy !important;
 }
 
