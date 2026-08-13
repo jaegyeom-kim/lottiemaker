@@ -290,6 +290,58 @@ await page.keyboard.press('Meta+Shift+z')
 await page.waitForTimeout(400)
 ok((await rows()) === rowsBase + 1, '⇧⌘Z → 리두 복원')
 
+// ── 포인트 다중선택 (AE) — ⇧클릭 · 그룹 드래그 · 마키 · 다중 삭제 ──
+await page.locator('.drawbar button[title*="펜"]').click()
+await page.mouse.click(...toClient(80, 60))
+await page.mouse.click(...toClient(180, 100))
+await page.mouse.click(...toClient(280, 60))
+await page.mouse.click(...toClient(380, 100))
+await page.keyboard.press('Enter')
+await page.waitForTimeout(1300)
+await page.locator('.drawbar button[title*="펜"]').click()
+await page.waitForTimeout(400)
+const anchorBox = async (i) => (await page.$$('.drawghost__anchor'))[i].boundingBox()
+// ⇧클릭 두 개 선택
+let b1 = await anchorBox(0)
+await page.mouse.click(b1.x + b1.width / 2, b1.y + b1.height / 2)
+b1 = await anchorBox(1)
+await page.keyboard.down('Shift')
+await page.mouse.click(b1.x + b1.width / 2, b1.y + b1.height / 2)
+await page.keyboard.up('Shift')
+await page.waitForTimeout(150)
+ok((await page.locator('.drawghost__anchor--sel').count()) === 2, '⇧클릭 → 2개 선택')
+// 그룹 드래그 — 선택된 앵커 하나를 끌면 둘 다 이동
+const kBefore = shOf(await src())
+const p0 = [...kBefore.v[0]]
+const p1 = [...kBefore.v[1]]
+b1 = await anchorBox(1)
+await page.mouse.move(b1.x + b1.width / 2, b1.y + b1.height / 2)
+await page.mouse.down()
+await page.mouse.move(b1.x + b1.width / 2, b1.y + b1.height / 2 + 40, { steps: 5 })
+await page.mouse.up()
+await page.waitForTimeout(1300)
+const kAfter = shOf(await src())
+const d0 = kAfter.v[0][1] - p0[1]
+const d1 = kAfter.v[1][1] - p1[1]
+ok(d0 > 20 && Math.abs(d0 - d1) < 1, `그룹 드래그 → 둘 다 동일 델타 (${d0.toFixed(1)}, ${d1.toFixed(1)})`)
+ok(Math.abs(kAfter.v[2][1] - kBefore.v[2][1]) < 0.5, '비선택 앵커는 불변')
+// 마키 — 선택 있는 상태에서 빈 곳 드래그 = 러버밴드
+const a2 = await anchorBox(2)
+const a3 = await anchorBox(3)
+await page.mouse.move(a2.x - 30, a2.y - 30)
+await page.mouse.down()
+await page.mouse.move(a3.x + a3.width + 30, a3.y + a3.height + 30, { steps: 5 })
+await page.mouse.up()
+await page.waitForTimeout(200)
+ok((await page.locator('.drawghost__anchor--sel').count()) === 2, `마키 → 뒤 2개 선택 (${await page.locator('.drawghost__anchor--sel').count()})`)
+// 다중 삭제 — 4점 중 2점 삭제
+await page.keyboard.press('Backspace')
+await page.waitForTimeout(1300)
+const kDel = shOf(await src())
+ok(kDel.v.length === 2, `다중 삭제 → 2점 (${kDel.v.length})`)
+await page.keyboard.press('v')
+await page.waitForTimeout(300)
+
 // ── 휠(가운데) 버튼 드래그 = 팬 ──
 const panOf = () => page.$eval('.preview__lottiewrap', (e) => e.style.transform)
 const t0 = await panOf()

@@ -297,8 +297,14 @@ export default function Preview() {
     idx: number
     moved: boolean
     alt: boolean
+    add?: boolean
+    group?: { idxs: number[]; starts: [number, number][]; from: [number, number] } | null
   } | null>(null)
-  const [penSel, setPenSel] = useState<number | null>(null)
+  // 펜 포인트 선택 — AE식 다중 (⇧클릭 토글 · 선택 후 빈 곳 드래그 = 포인트 마키)
+  const [penSels, setPenSels] = useState<number[]>([])
+  const setPenSel = (i: number | null) => setPenSels(i === null ? [] : [i])
+  const togglePenSel = (i: number) =>
+    setPenSels((prev) => (prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i]))
   // ⌥ 홀드 — 펜 앵커 위 커서를 '포인트 변환'으로 (CSS는 모디파이어를 못 본다)
   const [penAlt, setPenAlt] = useState(false)
   useEffect(() => {
@@ -319,8 +325,11 @@ export default function Preview() {
       window.removeEventListener('blur', blur)
     }
   }, [templateId])
-  const penSelRef = useRef(penSel)
-  penSelRef.current = penSel
+  const penSelsRef = useRef(penSels)
+  penSelsRef.current = penSels
+  // 포인트 마키 (편집 모드 — 선택이 있을 때 빈 곳 드래그)
+  const pointMarquee = useRef<{ x0: number; y0: number; add: boolean } | null>(null)
+  const [pmBox, setPmBox] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
   // 완성된 패스 재편집 (일러 직접 선택) — 포인트는 셰이프 로컬 좌표, 표시용 로컬→캔버스 행렬
   const [pathEdit, setPathEdit] = useState<{ li: number; pts: PenPt[]; closed: boolean } | null>(null)
   const pathEditRef = useRef(pathEdit)
@@ -328,7 +337,13 @@ export default function Preview() {
   const [editM, setEditM] = useState<DOMMatrix | null>(null)
   const editMRef = useRef(editM)
   editMRef.current = editM
-  const editDrag = useRef<{ kind: 'anchor' | 'ho' | 'hi' | 'pull'; idx: number; moved: boolean } | null>(null)
+  const editDrag = useRef<{
+    kind: 'anchor' | 'ho' | 'hi' | 'pull'
+    idx: number
+    moved: boolean
+    add: boolean // ⇧ — 클릭 해석 시 토글
+    group: { idxs: number[]; starts: [number, number][]; from: [number, number] } | null
+  } | null>(null)
 
   /** 레이어가 펜 편집 가능(단일 sh)한지 — 로컬 포인트 추출. */
   const penEditTarget = (li: number): { pts: PenPt[]; closed: boolean } | null => {
@@ -649,9 +664,10 @@ export default function Preview() {
         // 완성 패스 편집 중 — 선택 앵커 삭제 (최소 2점 유지)
         if (toolRef.current === 'pen' && !penPtsRef.current.length && pathEditRef.current) {
           const pe = pathEditRef.current
-          const selIdx = penSelRef.current
-          if (selIdx !== null && selIdx < pe.pts.length && pe.pts.length > 2) {
-            const pts = pe.pts.filter((_, i) => i !== selIdx)
+          const sels = penSelsRef.current.filter((i) => i < pe.pts.length)
+          // 선택 전부 삭제 — 최소 2점은 남겨야 패스 유지
+          if (sels.length && pe.pts.length - sels.length >= 2) {
+            const pts = pe.pts.filter((_, i) => !sels.includes(i))
             setPathEdit({ ...pe, pts })
             setPenSel(null)
             s.setPenPathLive(pe.li, penPtsToK(pts, pe.closed))
@@ -661,9 +677,9 @@ export default function Preview() {
         }
         if (toolRef.current === 'pen' && penPtsRef.current.length) {
           // 선택 앵커가 있으면 그 점, 없으면 마지막 점
-          const selIdx = penSelRef.current
-          if (selIdx !== null && selIdx < penPtsRef.current.length) {
-            const rest = penPtsRef.current.filter((_, i) => i !== selIdx)
+          const sels = penSelsRef.current.filter((i) => i < penPtsRef.current.length)
+          if (sels.length) {
+            const rest = penPtsRef.current.filter((_, i) => !sels.includes(i))
             setPenSel(null)
             setPenPts(rest)
             if (rest.length >= 2) syncPenLayer(rest)
@@ -1236,6 +1252,13 @@ export default function Preview() {
             if (!pt) return
             e.preventDefault()
             if (drawTool === 'pen') {
+              // 편집 모드 + 포인트 선택 있음 → 빈 곳 드래그 = 포인트 마키 (AE)
+              if (pathEditRef.current && penSelsRef.current.length && !penPtsRef.current.length) {
+                pointMarquee.current = { x0: pt[0], y0: pt[1], add: e.shiftKey }
+                setPmBox({ x0: pt[0], y0: pt[1], x1: pt[0], y1: pt[1] })
+                ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+                return
+              }
               const pts = penPtsRef.current
               // 시작점 근처 클릭 = 닫힌 패스로 완성
               if (pts.length >= 3 && Math.hypot(pt[0] - pts[0].p[0], pt[1] - pts[0].p[1]) < 10) {
@@ -1286,6 +1309,10 @@ export default function Preview() {
             const pt = toCanvasPt(e)
             if (!pt) return
             if (drawTool === 'pen') {
+              if (pointMarquee.current) {
+                setPmBox({ x0: pointMarquee.current.x0, y0: pointMarquee.current.y0, x1: pt[0], y1: pt[1] })
+                return
+              }
               // 완성 패스 편집 드래그 — 캔버스 → 로컬 역변환 후 셰이프에 라이브 반영
               const ed = editDrag.current
               const pe = pathEditRef.current
@@ -1295,6 +1322,20 @@ export default function Preview() {
                 const inv = M.inverse()
                 const lq = inv.transformPoint(new DOMPoint(pt[0], pt[1]))
                 const local: [number, number] = [lq.x, lq.y]
+                // 그룹 이동 — 잡은 앵커 기준 델타를 선택 전체에
+                if (ed.kind === 'anchor' && ed.group) {
+                  const gdx = local[0] - ed.group.from[0]
+                  const gdy = local[1] - ed.group.from[1]
+                  const nextG = pe.pts.map((pp, i) => {
+                    const gi = ed.group!.idxs.indexOf(i)
+                    if (gi < 0) return pp
+                    const st0 = ed.group!.starts[gi]
+                    return { ...pp, p: [st0[0] + gdx, st0[1] + gdy] as [number, number] }
+                  })
+                  setPathEdit({ ...pe, pts: nextG })
+                  useEditor.getState().setPenPathLive(pe.li, penPtsToK(nextG, pe.closed))
+                  return
+                }
                 const next = pe.pts.map((pp, i) => {
                   if (i !== ed.idx) return pp
                   if (ed.kind === 'anchor') return { ...pp, p: local }
@@ -1323,6 +1364,19 @@ export default function Preview() {
               const gd = ghostDrag.current
               if (gd) {
                 gd.moved = true
+                if (gd.kind === 'anchor' && gd.group) {
+                  const gdx = pt[0] - gd.group.from[0]
+                  const gdy = pt[1] - gd.group.from[1]
+                  const nextG = penPtsRef.current.map((pp, i) => {
+                    const gi = gd.group!.idxs.indexOf(i)
+                    if (gi < 0) return pp
+                    const st0 = gd.group!.starts[gi]
+                    return { ...pp, p: [st0[0] + gdx, st0[1] + gdy] as [number, number] }
+                  })
+                  setPenPts(nextG)
+                  syncPenLayer(nextG)
+                  return
+                }
                 const next = penPtsRef.current.map((pp, i) => {
                   if (i !== gd.idx) return pp
                   if (gd.kind === 'anchor') return { ...pp, p: pt }
@@ -1411,11 +1465,37 @@ export default function Preview() {
             return
           }
           if (drawTool === 'pen') {
+            if (pointMarquee.current) {
+              const mq = pointMarquee.current
+              const box = pmBox
+              pointMarquee.current = null
+              setPmBox(null)
+              const pe = pathEditRef.current
+              const M = editMRef.current
+              if (pe && M && box) {
+                const xA = Math.min(box.x0, box.x1)
+                const xB = Math.max(box.x0, box.x1)
+                const yA = Math.min(box.y0, box.y1)
+                const yB = Math.max(box.y0, box.y1)
+                const tiny = xB - xA < 3 && yB - yA < 3
+                const hits: number[] = []
+                pe.pts.forEach((pp, i) => {
+                  const q = M.transformPoint(new DOMPoint(pp.p[0], pp.p[1]))
+                  if (q.x >= xA && q.x <= xB && q.y >= yA && q.y <= yB) hits.push(i)
+                })
+                if (tiny) setPenSels([]) // 클릭만 = 해제 (다음 클릭부터 새 패스)
+                else setPenSels((prev) => (mq.add ? [...new Set([...prev, ...hits])] : hits))
+              }
+              return
+            }
             const ed = editDrag.current
             if (ed) {
               const pe = pathEditRef.current
               if (pe && !ed.moved) {
-                if (ed.kind === 'anchor') setPenSel(ed.idx)
+                if (ed.kind === 'anchor') {
+                  if (ed.add) togglePenSel(ed.idx)
+                  else setPenSel(ed.idx)
+                }
                 else if (ed.kind === 'pull') {
                   // ⌥클릭 = 핸들 제거 (스무스 → 코너)
                   const next = pe.pts.map((pp, i) => (i === ed.idx ? { ...pp, ho: null, hi: null } : pp))
@@ -1435,8 +1515,9 @@ export default function Preview() {
             const gd = ghostDrag.current
             if (gd && !gd.moved) {
               if (gd.kind === 'anchor') {
-                // 클릭(무이동) = 앵커 선택
-                setPenSel(gd.idx)
+                // 클릭(무이동) = 선택 (⇧ = 토글)
+                if (gd.add) togglePenSel(gd.idx)
+                else setPenSel(gd.idx)
               } else if (gd.kind === 'pull') {
                 // ⌥클릭(무이동) = 핸들 제거 (스무스 → 코너, AE 포인트 변환 클릭)
                 const next = penPtsRef.current.map((pp, i) =>
@@ -1460,6 +1541,8 @@ export default function Preview() {
           panDrag.current = null
         }}
         onPointerCancel={() => {
+          pointMarquee.current = null
+          setPmBox(null)
           if (anchorDrag.current) {
             anchorDrag.current = false
             useEditor.getState().commitEdit()
@@ -1661,8 +1744,19 @@ export default function Preview() {
                         if (e.button !== 0) return
                         e.stopPropagation()
                         e.preventDefault()
+                        const idx2 = Number((e.currentTarget as Element).getAttribute('data-i'))
                         const k2 = kind === 'anchor' && e.altKey ? 'pull' : kind
-                        editDrag.current = { kind: k2, idx: Number((e.currentTarget as Element).getAttribute('data-i')), moved: false }
+                        // 선택에 포함된 앵커를 잡으면 그룹째 이동 (AE)
+                        const sels = penSelsRef.current
+                        const group =
+                          k2 === 'anchor' && sels.includes(idx2) && sels.length > 1
+                            ? {
+                                idxs: [...sels],
+                                starts: sels.map((si) => [...pathEdit.pts[si].p] as [number, number]),
+                                from: [...pathEdit.pts[idx2].p] as [number, number],
+                              }
+                            : null
+                        editDrag.current = { kind: k2, idx: idx2, moved: false, add: e.shiftKey, group }
                         canvasRef.current?.setPointerCapture(e.pointerId)
                       }
                     return (
@@ -1683,10 +1777,10 @@ export default function Preview() {
                               </>
                             )}
                             <circle
-                              className={`drawghost__anchor ${penSel === i ? 'drawghost__anchor--sel' : ''}`}
+                              className={`drawghost__anchor ${penSels.includes(i) ? 'drawghost__anchor--sel' : ''}`}
                               cx={pp.p[0]}
                               cy={pp.p[1]}
-                              r={penSel === i ? 5 : 4}
+                              r={penSels.includes(i) ? 5 : 4}
                               data-i={i}
                               onPointerDown={grabEditKnob('anchor')}
                             />
@@ -1695,6 +1789,16 @@ export default function Preview() {
                       </>
                     )
                   })()}
+                  {/* 포인트 마키 러버밴드 */}
+                  {pmBox && (
+                    <rect
+                      className="drawghost__marquee"
+                      x={Math.min(pmBox.x0, pmBox.x1)}
+                      y={Math.min(pmBox.y0, pmBox.y1)}
+                      width={Math.abs(pmBox.x1 - pmBox.x0)}
+                      height={Math.abs(pmBox.y1 - pmBox.y0)}
+                    />
+                  )}
                   {drawTool === 'pen' && penPts.length > 0 && (
                     <>
                       <path className="drawghost__path" d={penPathD(penPts, false, penHover)} />
@@ -1711,7 +1815,16 @@ export default function Preview() {
                             }
                             // ⌥앵커 = 포인트 변환 (클릭: 핸들 제거 / 드래그: 핸들 뽑기)
                             const k2 = kind === 'anchor' && e.altKey ? 'pull' : kind
-                            ghostDrag.current = { kind: k2, idx: i, moved: false, alt: e.altKey }
+                            const sels0 = penSelsRef.current
+                            const grp =
+                              k2 === 'anchor' && sels0.includes(i) && sels0.length > 1
+                                ? {
+                                    idxs: [...sels0],
+                                    starts: sels0.map((si) => [...penPtsRef.current[si].p] as [number, number]),
+                                    from: [...penPtsRef.current[i].p] as [number, number],
+                                  }
+                                : null
+                            ghostDrag.current = { kind: k2, idx: i, moved: false, alt: e.altKey, add: e.shiftKey, group: grp }
                             canvasRef.current?.setPointerCapture(e.pointerId)
                           }
                         return (
@@ -1753,10 +1866,10 @@ export default function Preview() {
                               </>
                             )}
                             <circle
-                              className={`drawghost__anchor ${i === 0 && penPts.length >= 3 ? 'drawghost__anchor--first' : ''} ${penSel === i ? 'drawghost__anchor--sel' : ''}`}
+                              className={`drawghost__anchor ${i === 0 && penPts.length >= 3 ? 'drawghost__anchor--first' : ''} ${penSels.includes(i) ? 'drawghost__anchor--sel' : ''}`}
                               cx={pp.p[0]}
                               cy={pp.p[1]}
-                              r={penSel === i ? 5 : i === 0 && penPts.length >= 3 ? 5 : 4}
+                              r={penSels.includes(i) ? 5 : i === 0 && penPts.length >= 3 ? 5 : 4}
                               onPointerDown={grabKnob('anchor')}
                             />
                           </g>

@@ -3997,3 +3997,13 @@ body.drag-cross * { cursor: crosshair !important; }
       10 10,
     copy !important;
 }
+
+/* 펜 포인트 마키 — 캔버스 마키와 동일 언어 */
+.drawghost__marquee {
+  fill: var(--guide-fill);
+  stroke: var(--blue);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
