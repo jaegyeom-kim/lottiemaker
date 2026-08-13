@@ -1484,7 +1484,13 @@ export default function Preview() {
                   if (q.x >= xA && q.x <= xB && q.y >= yA && q.y <= yB) hits.push(i)
                 })
                 if (tiny) setPenSels([]) // 클릭만 = 해제 (다음 클릭부터 새 패스)
-                else setPenSels((prev) => (mq.add ? [...new Set([...prev, ...hits])] : hits))
+                else if (mq.add)
+                  // ⇧마키 = 토글 — 이미 선택된 포인트는 해제, 새 포인트는 추가 (일러 방식)
+                  setPenSels((prev) => [
+                    ...prev.filter((i) => !hits.includes(i)),
+                    ...hits.filter((i) => !prev.includes(i)),
+                  ])
+                else setPenSels(hits)
               }
               return
             }
