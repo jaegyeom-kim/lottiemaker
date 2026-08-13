@@ -399,11 +399,21 @@ export default function Preview() {
       const v0 = pathEdit.pts[0]?.p
       if (!wrap || !svg || !v0) return
       let el: SVGPathElement | null = null
-      for (const cand of Array.from(svg.querySelectorAll('path'))) {
-        const m = (cand.getAttribute('d') ?? '').match(/M\s*(-?[\d.]+)[ ,](-?[\d.]+)/)
-        if (m && Math.abs(Number(m[1]) - v0[0]) < 0.6 && Math.abs(Number(m[2]) - v0[1]) < 0.6) {
-          el = cand as SVGPathElement
-          break
+      // 1순위: 레이어 인덱스로 직접 매핑 — d 좌표 매칭은 첫 앵커를 끄는 동안
+      // (DOM이 재구축 전이라) 어긋나서 행렬이 끊긴다
+      const inst = lottieInst.current as unknown as {
+        renderer?: { elements?: ({ layerElement?: SVGGElement } | null | undefined)[] }
+      } | null
+      const layerG = inst?.renderer?.elements?.[pathEdit.li]?.layerElement
+      if (layerG?.isConnected) el = layerG.querySelector('path')
+      if (!el) {
+        // 폴백: 첫 앵커 좌표로 d 매칭
+        for (const cand of Array.from(svg.querySelectorAll('path'))) {
+          const m = (cand.getAttribute('d') ?? '').match(/M\s*(-?[\d.]+)[ ,](-?[\d.]+)/)
+          if (m && Math.abs(Number(m[1]) - v0[0]) < 0.6 && Math.abs(Number(m[2]) - v0[1]) < 0.6) {
+            el = cand as SVGPathElement
+            break
+          }
         }
       }
       const ctm = el?.getScreenCTM()

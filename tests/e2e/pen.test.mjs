@@ -195,6 +195,25 @@ const boxCmp = await page.evaluate(() => {
 })
 ok(boxCmp && Math.abs(boxCmp.dx) < 6 && Math.abs(boxCmp.dy) < 6, `편집 후 박스-지오메트리 정합 (Δ${boxCmp?.dx.toFixed(1)},${boxCmp?.dy.toFixed(1)})`)
 
+// 첫 앵커 — 박스 밖 멀리 연속 드래그 (d-매칭 행렬 끊김 회귀)
+{
+  const a0 = await (await page.$$('.drawghost__anchor'))[0].boundingBox()
+  await page.mouse.move(a0.x + a0.width / 2, a0.y + a0.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(...toClient(60, 460), { steps: 12 }) // 원래 박스 훨씬 밖
+  await page.mouse.up()
+  await page.waitForTimeout(1300)
+  const kk = shOf(await src())
+  // 로컬 좌표라 절대 비교 대신 — 첫 점이 크게 이동했는지 (기존엔 몇 px에서 스턱)
+  const moved = Math.hypot(kk.v[0][0] - k0.v[0][0], kk.v[0][1] - k0.v[0][1])
+  ok(moved > 120, `첫 앵커 박스 밖 드래그 (이동 ${moved.toFixed(0)}px)`)
+  // 고스트 첫 앵커가 목표 캔버스 좌표 근처인지
+  const g0 = await (await page.$$('.drawghost__anchor'))[0].boundingBox()
+  const [ex2, ey2] = toClient(60, 460)
+  const dpx = Math.hypot(g0.x + g0.width / 2 - ex2, g0.y + g0.height / 2 - ey2)
+  ok(dpx < 8, `첫 앵커 = 커서 목표 (Δ${dpx.toFixed(1)}px)`)
+}
+
 // ⌥클릭 = 핸들 제거 (스무스 앵커 → 코너)
 ab = await (await page.$$('.drawghost__anchor'))[1].boundingBox()
 await page.keyboard.down('Alt')
