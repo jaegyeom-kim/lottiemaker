@@ -1949,8 +1949,9 @@ export default function Preview() {
                           />
                         )
                       })}
-                  {/* 앵커 포인트 마커 (⊕) — 바운딩박스와 함께, 앵커 툴에서 드래그 대상 표시 */}
-                  {anchorPt && !dragBox && (
+                  {/* 앵커 포인트 마커 (⊕) — 바운딩박스와 함께, 앵커 툴에서 드래그 대상 표시.
+                      펜 모드에선 숨김 — 패스 앵커와 혼동 방지 */}
+                  {anchorPt && !dragBox && drawTool !== 'pen' && (
                     <svg
                       className={`anchorpoint ${tool === 'anchor' ? 'anchorpoint--active' : ''}`}
                       viewBox="0 0 24 24"

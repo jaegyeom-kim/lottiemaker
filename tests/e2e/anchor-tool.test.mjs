@@ -67,6 +67,13 @@ await page.keyboard.press('v')
 await page.waitForTimeout(200)
 ok((await page.locator('.anchorpoint--active').count()) === 0, 'V → 앵커 툴 해제')
 ok((await page.locator('.anchorpoint').count()) === 1, '마커는 유지 (정보성)')
+// 펜 모드 — 패스 앵커와 혼동 방지, 마커 숨김
+await page.locator('.drawbar button[title*="펜"]').click()
+await page.waitForTimeout(200)
+ok((await page.locator('.anchorpoint').count()) === 0, '펜 모드 → 앵커 마커 숨김')
+await page.keyboard.press('v')
+await page.waitForTimeout(200)
+ok((await page.locator('.anchorpoint').count()) === 1, 'V 복귀 → 마커 복원')
 // ── 스케일 200에서도 그래픽 제자리 (스케일 100 가정 버그 회귀) ──
 // 스케일 200 입력 (kf 모드 레이어 — s키 없음 → 정적 xsel.scale)
 const xform = page.locator('.knob', { hasText: /^스케일/ }).first()
