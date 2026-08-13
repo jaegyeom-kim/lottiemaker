@@ -3978,7 +3978,7 @@ body.drag-cross * { cursor: crosshair !important; }
 .drawghost .drawghost__anchor {
   /* Material Symbols 'near_me' 수평 반전 — 핫스팟은 화살촉(좌상단) */
   cursor:
-    url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 -960 960 960"><g transform="translate(960 0) scale(-1 1)"><path d="M516-120 402-402 120-516v-56l720-268-268 720h-56Zm26-148 162-436-436 162 196 78 78 196Zm-78-196Z" fill="white" stroke="black" stroke-width="52" paint-order="stroke"/></g></svg>')
+    url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 -960 960 960"><g transform="translate(960 0) scale(-1 1)"><path d="M516-120 402-402 120-516v-56l720-268-268 720h-56Zm26-148 162-436-436 162 196 78 78 196Zm-78-196Z" fill="white" stroke="black" stroke-width="52" paint-order="stroke"/></g></svg>')
       2 2,
     move !important;
 }
