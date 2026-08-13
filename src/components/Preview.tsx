@@ -299,6 +299,26 @@ export default function Preview() {
     alt: boolean
   } | null>(null)
   const [penSel, setPenSel] = useState<number | null>(null)
+  // ⌥ 홀드 — 펜 앵커 위 커서를 '포인트 변환'으로 (CSS는 모디파이어를 못 본다)
+  const [penAlt, setPenAlt] = useState(false)
+  useEffect(() => {
+    if (templateId !== '__custom') return
+    const dn = (e: KeyboardEvent) => {
+      if (e.key === 'Alt') setPenAlt(true)
+    }
+    const up = (e: KeyboardEvent) => {
+      if (e.key === 'Alt') setPenAlt(false)
+    }
+    const blur = () => setPenAlt(false)
+    window.addEventListener('keydown', dn)
+    window.addEventListener('keyup', up)
+    window.addEventListener('blur', blur)
+    return () => {
+      window.removeEventListener('keydown', dn)
+      window.removeEventListener('keyup', up)
+      window.removeEventListener('blur', blur)
+    }
+  }, [templateId])
   const penSelRef = useRef(penSel)
   penSelRef.current = penSel
   // 완성된 패스 재편집 (일러 직접 선택) — 포인트는 셰이프 로컬 좌표, 표시용 로컬→캔버스 행렬
@@ -1573,7 +1593,7 @@ export default function Preview() {
               )}
               {/* 드로잉 고스트 — 그리는 중인 도형/펜 경로 미리보기 */}
               {drawTool && (drawDrag || penPts.length > 0 || (pathEdit && editM)) && (
-                <svg className="drawghost" viewBox={`0 0 ${cw} ${ch}`}>
+                <svg className={`drawghost ${penAlt ? 'drawghost--alt' : ''}`} viewBox={`0 0 ${cw} ${ch}`}>
                   {drawDrag && drawTool === 'rect' && (
                     <rect
                       className="drawghost__shape"

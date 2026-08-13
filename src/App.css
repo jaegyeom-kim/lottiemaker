@@ -1832,7 +1832,6 @@ body.drag-cross * { cursor: crosshair !important; }
   stroke: var(--blue);
   stroke-width: 1.5;
   pointer-events: all;
-  cursor: grab !important;
 }
 
 .drawghost__anchor {
@@ -1840,7 +1839,6 @@ body.drag-cross * { cursor: crosshair !important; }
   stroke: var(--blue);
   stroke-width: 1.5;
   pointer-events: all;
-  cursor: grab !important;
 }
 
 .drawghost__anchor--first {
@@ -3973,4 +3971,28 @@ body.drag-cross * { cursor: crosshair !important; }
 .preview__canvas--anchor .customdrag,
 .preview__canvas--anchor .selhandle {
   pointer-events: none !important;
+}
+
+/* ── 펜 편집 커서 — Material 글리프 (open_with / commit / change_history) ──
+   드로잉 모드 와일드카드 crosshair(0-2-0)를 이기도록 특이도 확보 */
+.drawghost .drawghost__anchor {
+  cursor:
+    url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><path d="M10 9h4V6h3l-5-5-5 5h3v3zm-1 1H6V7l-5 5 5 5v-3h3v-4zm14 2l-5-5v3h-3v4h3v3l5-5zm-9 3h-4v3H7l5 5 5-5h-3v-3z" fill="white" stroke="black" stroke-width="1.6" paint-order="stroke"/></svg>')
+      10 10,
+    move !important;
+}
+
+.drawghost .drawghost__hdot {
+  cursor:
+    url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><path d="M17.66 9.53A6.01 6.01 0 0 0 6.34 9.53H2v4h4.34a6.01 6.01 0 0 0 11.32 0H22v-4h-4.34zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" fill="white" stroke="black" stroke-width="1.6" paint-order="stroke"/></svg>')
+      10 10,
+    ew-resize !important;
+}
+
+/* ⌥ 홀드 — 앵커 위 = 포인트 변환 (스무스↔코너) */
+.drawghost--alt .drawghost__anchor {
+  cursor:
+    url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><path d="M12 7.77 18.39 18H5.61L12 7.77M12 4 2 20h20L12 4z" fill="white" stroke="black" stroke-width="1.6" paint-order="stroke"/></svg>')
+      10 10,
+    copy !important;
 }

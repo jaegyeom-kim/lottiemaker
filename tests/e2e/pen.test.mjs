@@ -31,6 +31,16 @@ await page.waitForTimeout(400)
 
 ok((await page.locator('.drawghost__anchor').count()) === 3, '앵커 3개')
 ok((await page.locator('.drawghost__hdot').count()) >= 2, '핸들 표시')
+// 편집 커서 — 앵커/핸들 글리프, ⌥=변환
+const curOf = (sel) => page.$eval(sel, (e) => getComputedStyle(e).cursor)
+const aCur = await curOf('.drawghost__anchor')
+ok(aCur.includes('url(') && aCur.includes('move'), '앵커 커서 글리프(move 폴백)')
+ok((await curOf('.drawghost__hdot')).includes('ew-resize'), '핸들 커서 글리프(ew-resize 폴백)')
+await page.keyboard.down('Alt')
+await page.waitForTimeout(120)
+ok((await curOf('.drawghost__anchor')) !== aCur, '⌥ → 변환 커서')
+await page.keyboard.up('Alt')
+await page.waitForTimeout(120)
 
 // 고스트 앵커 vs 실제 렌더된 패스 끝점 정합 측정 (캔버스 좌표)
 const align = await page.evaluate(() => {
