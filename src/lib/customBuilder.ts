@@ -3,6 +3,7 @@
 // 각 슬롯이 필요한 채널(위치/스케일/불투명도/회전)에 시간 분리된 키프레임을 쓴다.
 import type { LottieJson } from './lottieUtils'
 import { wrapToFit, fitImageSize, type ImportedGraphic, type ImportedImage } from './svgImport'
+import { growCubicBbox } from './drawTools'
 
 export const CUSTOM_OP = 90 // 1.5s @60fps
 export const CUSTOM_ASSET_PREFIX = 'img_custom'
@@ -359,6 +360,14 @@ export function easeIndexBez(i: number): Bezier4 {
   return (EASE_PRESETS[i] ?? EASE_PRESETS[1]).bez
 }
 
+/** 패스 지오메트리 (로티 sh.ks.k 형태) — pk 채널 키 값. */
+export interface PathShapeK {
+  v: [number, number][]
+  i: [number, number][]
+  o: [number, number][]
+  c: boolean
+}
+
 export interface KfKey {
   t: number
   /** 위치 (절대 캔버스 px). */
@@ -373,6 +382,8 @@ export interface KfKey {
   ts?: number
   /** 트림 패스 끝 0~100 (%). */
   te?: number
+  /** 패스 모핑 키 — 레이어 로컬 패스 지오메트리 (단일 sh 레이어 전용). */
+  pk?: PathShapeK
   /** 이 키에서 시작하는 구간의 채널별 이징 오버라이드 — 없으면 레이어 기본. */
   e?: Partial<Record<KfChannel, Bezier4>>
 }
@@ -400,7 +411,7 @@ export function normKf(raw: Partial<CustomKf> | undefined): CustomKf {
     .filter((k) => typeof k?.t === 'number')
     .map((k) => {
       const e: KfKey['e'] = {}
-      for (const ch of ['p', 's', 'r', 'o', 'ts', 'te'] as const) {
+      for (const ch of ['p', 's', 'r', 'o', 'ts', 'te', 'pk'] as const) {
         const b = k.e?.[ch]
         if (Array.isArray(b) && b.length === 4 && b.every((n) => typeof n === 'number'))
           e[ch] = [b[0], b[1], b[2], b[3]]
@@ -419,7 +430,7 @@ export function normKf(raw: Partial<CustomKf> | undefined): CustomKf {
       merged.push(k)
       continue
     }
-    for (const ch of ['p', 's', 'r', 'o', 'ts', 'te'] as const)
+    for (const ch of ['p', 's', 'r', 'o', 'ts', 'te', 'pk'] as const)
       if (dup[ch] === undefined && k[ch] !== undefined) (dup[ch] as unknown) = k[ch]
     if (k.e) dup.e = { ...k.e, ...(dup.e ?? {}) }
   }
@@ -433,7 +444,7 @@ function crTangent(pts: [number, number][], j: number): [number, number] {
   return [(p2[0] - p0[0]) / 2, (p2[1] - p0[1]) / 2]
 }
 
-export type KfChannel = 'p' | 's' | 'r' | 'o' | 'ts' | 'te'
+export type KfChannel = 'p' | 's' | 'r' | 'o' | 'ts' | 'te' | 'pk'
 
 /** 타임라인 키 선택 항목 — 레이어 인덱스 + 채널 + 시각. */
 export interface KfSelItem {
@@ -450,6 +461,7 @@ export const KF_CHANNEL_DEFS: { ch: KfChannel; label: string; unit: string }[] =
   { ch: 'o', label: '불투명도', unit: '%' },
   { ch: 'ts', label: '트림 시작', unit: '%' },
   { ch: 'te', label: '트림 끝', unit: '%' },
+  { ch: 'pk', label: '패스', unit: '' },
 ]
 
 /** 채널의 키 없는 구간 기본값 — ◆ 캡처/단축키/패널이 공유. */
@@ -463,6 +475,7 @@ export function kfFallbackValue(
   if (ch === 'r') return xsel.rotation
   if (ch === 'ts') return 0
   if (ch === 'te') return 100
+  if (ch === 'pk') return 0 // 패스는 수치 아님 — 값 패널에서 제외됨
   return xsel.opacity
 }
 
@@ -479,7 +492,7 @@ export function kfValueAt(
   fallback: number | [number, number],
 ): number | [number, number] {
   const keys = kfChannelKeys(xkf, ch)
-  if (!keys.length) return fallback
+  if (!keys.length || ch === 'pk') return fallback // 패스 값은 pathKAt으로
   const val = (k: KfKey) => k[ch] as number | [number, number]
   if (t <= keys[0].t) return val(keys[0])
   if (t >= keys[keys.length - 1].t) return val(keys[keys.length - 1])
@@ -581,6 +594,113 @@ export function buildKfScalarProp(
         s: [R(x[ch] as number)],
       }
     }),
+  }
+}
+
+/** 패스 k의 곡선 극값 bbox를 acc에 누적 (닫힘 세그먼트 포함). */
+export function growPathBbox(
+  acc: { minX: number; minY: number; maxX: number; maxY: number },
+  k: PathShapeK,
+): void {
+  const n = k.c ? k.v.length : k.v.length - 1
+  for (let j = 0; j < n; j++) {
+    const j2 = (j + 1) % k.v.length
+    growCubicBbox(
+      acc,
+      k.v[j],
+      [k.v[j][0] + k.o[j][0], k.v[j][1] + k.o[j][1]],
+      [k.v[j2][0] + k.i[j2][0], k.v[j2][1] + k.i[j2][1]],
+      k.v[j2],
+    )
+  }
+}
+
+/**
+ * t 시점의 패스 보간값 — 키 없으면 null. 선형 근사 (kfValueAt와 동일 —
+ * 편집 오버레이용이라 이징 오차 허용). 포인트 수가 다르면 모핑 불가 → 왼쪽 키 홀드.
+ */
+export function pathKAt(xkf: CustomKf, t: number): PathShapeK | null {
+  const keys = kfChannelKeys(xkf, 'pk')
+  if (!keys.length) return null
+  const val = (k: KfKey) => k.pk as PathShapeK
+  if (t <= keys[0].t) return structuredClone(val(keys[0]))
+  if (t >= keys[keys.length - 1].t) return structuredClone(val(keys[keys.length - 1]))
+  for (let i = 0; i < keys.length - 1; i++) {
+    const a = keys[i]
+    const b = keys[i + 1]
+    if (t < a.t || t > b.t) continue
+    const A = val(a)
+    const B = val(b)
+    if (A.v.length !== B.v.length || A.c !== B.c) return structuredClone(A)
+    const f = b.t === a.t ? 0 : (t - a.t) / (b.t - a.t)
+    const mix = (pa: [number, number][], pb: [number, number][]) =>
+      pa.map((p, j) => [p[0] + (pb[j][0] - p[0]) * f, p[1] + (pb[j][1] - p[1]) * f] as [number, number])
+    return { v: mix(A.v, B.v), i: mix(A.i, B.i), o: mix(A.o, B.o), c: A.c }
+  }
+  return structuredClone(val(keys[keys.length - 1]))
+}
+
+/** 그룹 안의 유일한 sh — 패스 편집/모핑 가능 조건. */
+export function findSinglePathShape(layer: Record<string, unknown>): Record<string, unknown> | null {
+  const shapes = layer.shapes as Record<string, unknown>[] | undefined
+  const found: Record<string, unknown>[] = []
+  const walk = (items?: Record<string, unknown>[]) => {
+    for (const it of items ?? []) {
+      if (it.ty === 'sh') found.push(it)
+      else if (it.ty === 'gr') walk(it.it as Record<string, unknown>[])
+    }
+  }
+  if (shapes?.[0]) walk(shapes[0].it as Record<string, unknown>[])
+  return found.length === 1 ? found[0] : null
+}
+
+/**
+ * xkf의 패스 채널(pk)을 레이어의 단일 sh.ks에 반영 — 키 1개 = 정적, 2개+ = 모핑.
+ * bbox 메타는 전 키 유니온 — 프레임마다 형태가 변해도 선택/히트 박스가 전 구간을 덮는다.
+ */
+export function applyPathChannel(layer: Record<string, unknown>, xkf: CustomKf): void {
+  const keys = kfChannelKeys(xkf, 'pk')
+  const sh = findSinglePathShape(layer)
+  if (!sh) return
+  if (!keys.length) {
+    // pk 채널이 있다가 사라진 레이어(xpk) — 첫 키 형태로 고정 (타임라인 키 전체 삭제 등)
+    if (layer.xpk === true) {
+      const ks = sh.ks as { a?: number; k?: unknown }
+      if (ks?.a === 1 && Array.isArray(ks.k)) {
+        const first = (ks.k[0] as { s?: unknown[] } | undefined)?.s?.[0]
+        if (first) sh.ks = { a: 0, k: structuredClone(first) }
+      }
+      delete layer.xpk
+    }
+    return
+  }
+  layer.xpk = true
+  if (keys.length === 1) {
+    sh.ks = { a: 0, k: structuredClone(keys[0].pk) }
+  } else {
+    sh.ks = {
+      a: 1,
+      k: keys.map((x, i) => {
+        if (i === keys.length - 1) return { t: x.t, s: [structuredClone(x.pk)] }
+        const [x1, y1, x2, y2] = segEaseOf(xkf, x, 'pk')
+        return { o: { x: [x1], y: [y1] }, i: { x: [x2], y: [y2] }, t: x.t, s: [structuredClone(x.pk)] }
+      }),
+    }
+  }
+  const acc = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
+  for (const key of keys) growPathBbox(acc, key.pk as PathShapeK)
+  const group = (layer.shapes as Record<string, unknown>[] | undefined)?.[0]
+  if (group && Number.isFinite(acc.minX)) {
+    group.bboxW = acc.maxX - acc.minX
+    group.bboxH = acc.maxY - acc.minY
+    group.bboxMax = Math.max(acc.maxX - acc.minX, acc.maxY - acc.minY)
+    const tr = (group.it as Record<string, unknown>[] | undefined)?.find((it) => it.ty === 'tr') as
+      | { a?: { k: number[] }; s?: { k: number[] } }
+      | undefined
+    const ta = tr?.a?.k ?? [0, 0]
+    const gsc = ((tr?.s?.k?.[0] as number | undefined) ?? 100) / 100
+    group.bboxCx = ((acc.minX + acc.maxX) / 2 - ta[0]) * gsc
+    group.bboxCy = ((acc.minY + acc.maxY) / 2 - ta[1]) * gsc
   }
 }
 

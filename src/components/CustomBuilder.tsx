@@ -589,7 +589,7 @@ function KfPanel({
   const curFrame = useEditor((s) => s.curFrame)
   const frame = Math.max(0, Math.min(compOp, curFrame))
 
-  const channels = KF_CHANNEL_DEFS
+  const channels = KF_CHANNEL_DEFS.filter(({ ch }) => ch !== 'pk')
 
   // 채널의 현재 프레임 값 (보간) — ◆로 캡처되는 값이기도 하다
   const valueOf = (ch: KfChannel): number | [number, number] =>

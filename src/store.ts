@@ -13,8 +13,8 @@ import {
   springValue, SPRING_PRESETS, bounceValue,
   CUSTOM_ASSET_PREFIX, DEFAULT_SEL,
   type CustomSel, type CustomPayload, type CustomKf, type KfChannel, type Bezier4,
-  type KfSelItem,
-  kfChannelKeys, applyTrimChannels, extractTrimToKf, layerScaleOf, layerAabbOf, layerRotationOf, layerBaseOf,
+  type KfSelItem, type PathShapeK,
+  kfChannelKeys, applyTrimChannels, applyPathChannel, pathKAt, extractTrimToKf, layerScaleOf, layerAabbOf, layerRotationOf, layerBaseOf,
 } from './lib/customBuilder'
 
 const HISTORY_CAP = 50
@@ -216,6 +216,10 @@ interface EditorState {
   setLayerStroke: (li: number, opts: { w?: number; lc?: number }) => void
   /** 도형 지오메트리 리빌드 — xshape 메타 있는 레이어의 크기/라운드 (제자리 유지, 언두 1회). */
   setShapeGeom: (li: number, patch: Partial<Omit<ShapeMeta, 'tool'>>) => void
+  /** 패스 애니메이션 토글 — on: 현재 패스로 재생헤드에 pk 키, off: 현재 프레임 형태로 고정. */
+  togglePathKf: (li: number) => void
+  /** 재생헤드 프레임에 pk 키 추가 — 현재 보간 형태 스냅샷 (타임라인 ◆ 버튼). */
+  addPathKey: (li: number, frame: number) => void
   /** 로티 문서를 커스텀 레이어로 가져오기 — 트랜스폼 키프레임을 xkf로 변환. */
   importLottieLayers: (
     doc: LottieJson,
@@ -599,6 +603,9 @@ export const useEditor = create<EditorState>((set, get) => {
     return { animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) }
   }
 
+  /** 값 채널 전체 — 빈 키 정리 판정용. */
+  const KF_ALL_CHS = ['p', 's', 'r', 'o', 'ts', 'te', 'pk'] as const
+
   /** 잠긴 레이어(xlock) 여부 — UI와 별개로 store 차원에서 편집을 차단하는 기준. */
   const lockedAt = (src: LottieJson | null | undefined, li: number): boolean =>
     (src?.layers[li] as Record<string, unknown> | undefined)?.xlock === true
@@ -634,6 +641,8 @@ export const useEditor = create<EditorState>((set, get) => {
     ks.r = anim.r
     // 트림 패스 채널(ts/te) — ks 밖(shapes의 tm)에 반영, 키 있을 때만
     applyTrimChannels(layer, xkf)
+    // 패스 모핑 채널(pk) — 단일 sh.ks에 반영 (키 이동/삭제/이징도 이 경로로 재생성)
+    applyPathChannel(layer, xkf)
     const { clipA, clipB } = animSpans(full, src.op)
     layer.ip = clipA
     layer.op = clipB
@@ -1195,18 +1204,20 @@ export const useEditor = create<EditorState>((set, get) => {
     revealChannels: (lis, spec, additive = false) => {
       const src = get().sourceData
       if (!src) return
-      const ALL: KfChannel[] = ['p', 's', 'r', 'o', 'ts', 'te']
+      const ALL: KfChannel[] = ['p', 's', 'r', 'o', 'ts', 'te', 'pk']
       const next = { ...get().tlReveal }
       for (const li of lis) {
         const layer = src.layers[li] as Record<string, unknown> | undefined
         if (!layer) continue
         const xkf = normKf(layer.xkf as Partial<CustomKf> | undefined)
         // 트림 채널(ts/te)은 kf 모드와 무관하게 동작 — on 아닐 땐 트림만 공개 가능
-        const eligible = (c: KfChannel) => xkf.on || c === 'ts' || c === 'te'
+        const eligible = (c: KfChannel) =>
+          xkf.on || c === 'ts' || c === 'te' ||
+          (c === 'pk' && xkf.keys.some((k) => k.pk !== undefined))
         if (
           !xkf.on &&
           Number(layer.ty) !== 4 &&
-          !xkf.keys.some((k) => k.ts !== undefined || k.te !== undefined)
+          !xkf.keys.some((k) => k.ts !== undefined || k.te !== undefined || k.pk !== undefined)
         )
           continue
         const cur = next[li] ?? []
@@ -1297,6 +1308,38 @@ export const useEditor = create<EditorState>((set, get) => {
       const group = (layer.shapes as Record<string, unknown>[] | undefined)?.[0]
       const sh = findSinglePath(group)
       if (!sh) return
+      const xkfP = normKf(layer.xkf as Partial<CustomKf> | undefined)
+      const pkKeys = kfChannelKeys(xkfP, 'pk')
+      if (pkKeys.length) {
+        // 패스 애니메이션 중 — 정적 교체 대신 재생헤드에 pk 키 업서트 (AE 방식)
+        const t = Math.round(st.curFrame * 10) / 10
+        let key = xkfP.keys.find((x) => Math.abs(x.t - t) < 0.5)
+        if (!key) {
+          key = { t }
+          xkfP.keys.push(key)
+          xkfP.keys.sort((a, b) => a.t - b.t)
+        }
+        key.pk = structuredClone(k)
+        layer.xkf = xkfP
+        applyPathChannel(layer, xkfP) // sh.ks + 유니온 bbox 메타
+        if (group) {
+          const trP = (group.it as Record<string, unknown>[] | undefined)?.find(
+            (it) => it.ty === 'tr',
+          ) as { s?: { k: number[] } } | undefined
+          const gscP = ((trP?.s?.k?.[0] as number | undefined) ?? 100) / 100
+          const xselP = normSel(layer.xsel as Partial<CustomSel> | undefined, src.op)
+          layer.xsel = { ...xselP, size: Math.max(4, ((group.bboxMax as number) ?? 4) * gscP) }
+        }
+        const appliedP = applyKnobs(src, st.templateKnobs, st.knobValues)
+        set({
+          animationData: appliedP,
+          sourceData: src,
+          colorGroups: st.colorGroups,
+          editBaseline: baseline,
+          future: [],
+        })
+        return
+      }
       ;(sh.ks as Record<string, unknown>).k = structuredClone(k)
       if (xshape) layer.xshape = xshape
       // bbox 메타 갱신 — 선택 박스·크기 조절이 새 곡선 범위를 따라가게 (곡선 극값 기준)
@@ -1377,6 +1420,69 @@ export const useEditor = create<EditorState>((set, get) => {
       }
       get().setPenPathLive(li, k, next)
       get().commitEdit()
+    },
+
+    togglePathKf: (li) => {
+      const st = get()
+      const src0 = st.sourceData
+      if (!src0?.layers[li] || lockedAt(src0, li)) return
+      const src = structuredClone(src0)
+      ensureLayerColors(src)
+      const layer = src.layers[li] as Record<string, unknown>
+      const sh = findSinglePath((layer.shapes as Record<string, unknown>[] | undefined)?.[0])
+      if (!sh) return
+      const t = Math.round(st.curFrame * 10) / 10
+      const done = editKfLayerIn(src, li, (xkf) => {
+        if (kfChannelKeys(xkf, 'pk').length) {
+          // OFF — 현재 프레임의 보간 형태로 고정하고 pk 채널 제거
+          const frozen = pathKAt(xkf, t)
+          for (const k of xkf.keys) {
+            delete k.pk
+            if (k.e) delete k.e.pk
+          }
+          xkf.keys = xkf.keys.filter((k) => KF_ALL_CHS.some((c) => k[c] !== undefined))
+          if (frozen) sh.ks = { a: 0, k: frozen }
+        } else {
+          // ON — 현재 패스를 재생헤드 키로 (이미 애니메이션된 임포트 패스면 첫 키 형태)
+          const ks = sh.ks as { a?: number; k?: unknown }
+          const k0 =
+            ks?.a === 1 && Array.isArray(ks.k)
+              ? ((ks.k[0] as { s?: unknown[] } | undefined)?.s?.[0] as PathShapeK | undefined)
+              : (ks?.k as PathShapeK | undefined)
+          if (!k0?.v?.length) return
+          let key = xkf.keys.find((x) => Math.abs(x.t - t) < 0.5)
+          if (!key) {
+            key = { t }
+            xkf.keys.push(key)
+          }
+          key.pk = structuredClone(k0)
+        }
+      })
+      if (!done) return
+      const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
+      push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
+    },
+
+    addPathKey: (li, frame) => {
+      const st = get()
+      const src0 = st.sourceData
+      if (!src0?.layers[li] || lockedAt(src0, li)) return
+      const src = structuredClone(src0)
+      ensureLayerColors(src)
+      const t = Math.round(frame * 10) / 10
+      const done = editKfLayerIn(src, li, (xkf) => {
+        const cur = pathKAt(xkf, t)
+        if (!cur) return
+        let key = xkf.keys.find((x) => Math.abs(x.t - t) < 0.5)
+        if (!key) {
+          key = { t }
+          xkf.keys.push(key)
+        }
+        key.pk = cur
+      })
+      if (!done) return
+      const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
+      push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
     },
 
     setLayerStroke: (li, opts) => {
@@ -1962,7 +2068,7 @@ export const useEditor = create<EditorState>((set, get) => {
             const dup = kept.find((m) => Math.abs(m.t - t) < 0.5)
             if (dup) {
               // 같은 프레임으로 클램프된 키 — 채널 값을 버리지 않고 빈 채널에 병합
-              for (const ch of ['p', 's', 'r', 'o', 'ts', 'te'] as const)
+              for (const ch of ['p', 's', 'r', 'o', 'ts', 'te', 'pk'] as const)
                 if (dup[ch] === undefined && k[ch] !== undefined)
                   (dup[ch] as unknown) = k[ch]
               if (k.e) dup.e = { ...k.e, ...(dup.e ?? {}) }
@@ -2039,7 +2145,7 @@ export const useEditor = create<EditorState>((set, get) => {
         const k = xkf.keys.find((x) => Math.abs(x.t - frame) < 0.5)
         if (!k) return
         delete k[ch]
-        if (k.p === undefined && k.s === undefined && k.r === undefined && k.o === undefined)
+        if (KF_ALL_CHS.every((c) => k[c] === undefined))
           xkf.keys = xkf.keys.filter((x) => x !== k)
       })
       if (next) push(next)
@@ -2067,7 +2173,7 @@ export const useEditor = create<EditorState>((set, get) => {
             if (!k) continue
             removed++
             delete k[it.ch]
-            if (k.p === undefined && k.s === undefined && k.r === undefined && k.o === undefined)
+            if (KF_ALL_CHS.every((c) => k[c] === undefined))
               xkf.keys = xkf.keys.filter((x) => x !== k)
           }
         })
@@ -2136,7 +2242,7 @@ export const useEditor = create<EditorState>((set, get) => {
             })
             delete k[it.ch]
             if (k.e) delete k.e[it.ch]
-            if (k.p === undefined && k.s === undefined && k.r === undefined && k.o === undefined)
+            if (KF_ALL_CHS.every((c) => k[c] === undefined))
               xkf.keys = xkf.keys.filter((x) => x !== k)
           }
           for (const m of movedVals) upsertKey(xkf, m.ch, m.t, m.v, m.e)

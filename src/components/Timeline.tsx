@@ -68,7 +68,7 @@ export default function Timeline({
 }) {
   const {
     setCustomChannelsLive, commitEdit, setPlaying, setCustomIdx,
-    moveKfClipLive, removeKfChannel, setKfChannel,
+    moveKfClipLive, removeKfChannel, setKfChannel, addPathKey,
     setKfSegEase, setKfSegEaseLive, bakeSpringSegEase, bakeBounceSegEase,
     setKfSel, moveKfKeysLive, reverseKfSel, toggleCustomSel, setCustomSelList,
     revealChannels,
@@ -725,7 +725,7 @@ export default function Timeline({
             const xkfL = normKf(lr.xkf as Partial<CustomKf> | undefined)
             const hasTrimKeys = xkfL.keys.some((k) => k.ts !== undefined || k.te !== undefined)
             const shownChs = (tlReveal[li] ?? []).filter(
-              (c) => xkfL.on || c === 'ts' || c === 'te',
+              (c) => xkfL.on || c === 'ts' || c === 'te' || c === 'pk',
             )
             const open = shownChs.length > 0
             const isRef = isSceneRef(lr)
@@ -868,9 +868,11 @@ export default function Timeline({
                   KF_CHANNELS.filter(
                     ({ ch }) =>
                       shownChs.includes(ch) &&
-                      (!(ch === 'ts' || ch === 'te') ||
-                        Number(lr.ty) === 4 ||
-                        kfChannelKeys(xkfL, ch).length > 0),
+                      (ch === 'pk'
+                        ? kfChannelKeys(xkfL, ch).length > 0
+                        : !(ch === 'ts' || ch === 'te') ||
+                          Number(lr.ty) === 4 ||
+                          kfChannelKeys(xkfL, ch).length > 0),
                   ).map(
                     ({ ch, label }) => {
                     const keys = kfChannelKeys(xkfL, ch)
@@ -885,6 +887,8 @@ export default function Timeline({
                             setCustomIdx(li)
                             if (hasAt) {
                               removeKfChannel(ch, curFrame)
+                            } else if (ch === 'pk') {
+                              addPathKey(li, curFrame) // 현재 보간 형태 스냅샷
                             } else {
                               const xb: [number, number] = Array.isArray(lr.xbase)
                                 ? [(lr.xbase as number[])[0], (lr.xbase as number[])[1]]
@@ -983,7 +987,9 @@ export default function Timeline({
             const color = layerColor(l as Record<string, unknown>, li)
             const isPrimary = li === idx && customIdxs.includes(li)
             const isMulti = li !== idx && customIdxs.includes(li)
-            const shownChs = (tlReveal[li] ?? []).filter((c) => kfOn || c === 'ts' || c === 'te')
+            const shownChs = (tlReveal[li] ?? []).filter(
+              (c) => kfOn || c === 'ts' || c === 'te' || c === 'pk',
+            )
             const open = shownChs.length > 0
             const lrT = l as Record<string, unknown>
             const treeOpenT = isSceneRef(lrT) && sceneOpen.has(String(li))
@@ -1086,9 +1092,11 @@ export default function Timeline({
                 KF_CHANNELS.filter(
                   ({ ch }) =>
                     shownChs.includes(ch) &&
-                    (!(ch === 'ts' || ch === 'te') ||
-                      Number(lrT.ty) === 4 ||
-                      kfChannelKeys(xkf, ch).length > 0),
+                    (ch === 'pk'
+                      ? kfChannelKeys(xkf, ch).length > 0
+                      : !(ch === 'ts' || ch === 'te') ||
+                        Number(lrT.ty) === 4 ||
+                        kfChannelKeys(xkf, ch).length > 0),
                 ).map(
                   ({ ch, label }) => {
                   const keys = kfChannelKeys(xkf, ch)

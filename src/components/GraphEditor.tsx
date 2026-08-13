@@ -66,7 +66,7 @@ export default function GraphEditor({ onClose }: { onClose: () => void }) {
   const xkf: CustomKf = normKf(layer?.xkf as Partial<CustomKf> | undefined)
   const OP = Number(sourceData?.op ?? 240)
 
-  const channels = KF_CHANNEL_DEFS.filter(({ ch }) => kfChannelKeys(xkf, ch).length >= 2)
+  const channels = KF_CHANNEL_DEFS.filter(({ ch }) => ch !== 'pk' && kfChannelKeys(xkf, ch).length >= 2)
   const [chSel, setChSel] = useState<KfChannel | null>(null)
   const ch: KfChannel | null =
     chSel && channels.some((c) => c.ch === chSel) ? chSel : (channels[0]?.ch ?? null)

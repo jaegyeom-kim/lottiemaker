@@ -8,7 +8,7 @@ import {
 import { durationSec, parseLottie, type LottieJson } from '../lib/lottieUtils'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
 import {
-  layerHalfOf, layerAabbOf, layerBaseOf, layerRotationOf, normKf, kfValueAt,
+  layerHalfOf, layerAabbOf, layerBaseOf, layerRotationOf, normKf, kfValueAt, pathKAt,
   kfChannelKeys, normSel, animSpans, kfFallbackValue,
   type CustomPayload, type CustomKf, type CustomSel, type KfChannel,
 } from '../lib/customBuilder'
@@ -33,6 +33,8 @@ export default function Preview() {
   const ch = Number(animationData?.h ?? 512)
   const sourceData = useEditor((s) => s.sourceData)
   const customIdx = useEditor((s) => s.customIdx)
+  // 패스 애니메이션 편집 — 스크럽 시 현재 프레임의 보간 형태로 pathEdit 갱신용
+  const editCurFrame = useEditor((s) => s.curFrame)
   const customIdxs = useEditor((s) => s.customIdxs)
   // 씬(컴포지션) 목록 — 문서의 xscene comp 에셋에서 파생
   const activeScene = useEditor((s) => s.activeScene)
@@ -361,9 +363,14 @@ export default function Preview() {
     }
     walk((shapes[0] as Record<string, unknown>).it as Record<string, unknown>[])
     if (found.length !== 1) return null
-    const k = (found[0].ks as Record<string, unknown> | undefined)?.k as
-      | { v: [number, number][]; i: [number, number][]; o: [number, number][]; c?: boolean }
-      | undefined
+    // 패스 애니메이션(pk) 레이어 — 현재 프레임의 보간 형태를 편집 대상으로
+    const xkfP = normKf(layer.xkf as Partial<CustomKf> | undefined)
+    const animK = pathKAt(xkfP, Math.round(st.curFrame))
+    const k =
+      animK ??
+      ((found[0].ks as Record<string, unknown> | undefined)?.k as
+        | { v: [number, number][]; i: [number, number][]; o: [number, number][]; c?: boolean }
+        | undefined)
     if (!Array.isArray(k?.v) || k.v.length < 2) return null
     const z = (pt?: [number, number]) => !pt || (Math.abs(pt[0]) < 1e-6 && Math.abs(pt[1]) < 1e-6)
     return {
@@ -400,7 +407,7 @@ export default function Preview() {
     setPathEdit(target ? { li, ...target } : null)
     setPenSel(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [templateId, tool, customIdx, sourceData, penPts.length])
+  }, [templateId, tool, customIdx, sourceData, penPts.length, editCurFrame])
 
   // 로컬→캔버스 행렬 — 렌더된 path의 CTM에서 (레이어/그룹 트랜스폼 전부 흡수)
   useEffect(() => {

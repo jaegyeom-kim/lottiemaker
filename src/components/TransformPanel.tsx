@@ -28,7 +28,7 @@ export default function TransformPanel() {
   const curFrame = useEditor((s) => s.curFrame)
   const {
     setCustomChannelsLive, setKfChannelLive, commitEdit,
-    nudgeCustomBase, setLayerBlend, setLayerStroke, setShapeGeom,
+    nudgeCustomBase, setLayerBlend, setLayerStroke, setShapeGeom, togglePathKf,
   } = useEditor()
 
   const layers = sourceData?.layers ?? []
@@ -135,6 +135,35 @@ export default function TransformPanel() {
                   onCommit={(v) => setShapeGeom(idx, { r: v })}
                 />
               </div>
+            )}
+          </div>
+        )
+      })()}
+
+      {/* 패스 애니메이션 — 단일 sh 레이어(펜/도형): pk 채널 스톱워치 */}
+      {(() => {
+        const shs: Record<string, unknown>[] = []
+        const walkSh = (items?: Record<string, unknown>[]) => {
+          for (const it of items ?? []) {
+            if (it.ty === 'sh') shs.push(it)
+            else if (it.ty === 'gr') walkSh(it.it as Record<string, unknown>[])
+          }
+        }
+        walkSh(((selLayer.shapes as Record<string, unknown>[] | undefined)?.[0] as Record<string, unknown> | undefined)?.it as Record<string, unknown>[])
+        if (shs.length !== 1 || Number(selLayer.ty) !== 4) return null
+        const pkOn = kfChannelKeys(xkf, 'pk').length > 0
+        return (
+          <div className="knob">
+            <div className="knob__head">
+              <span className="knob__name">{t('패스 애니메이션')}{pkOn ? ' ◆' : ''}</span>
+              <button className="linkbtn" onClick={() => togglePathKf(idx)}>
+                {pkOn ? t('끄기 (현재 형태로 고정)') : t('켜기')}
+              </button>
+            </div>
+            {pkOn && (
+              <p className="knob__note">
+                {t('펜 툴로 패스를 수정하면 재생헤드({f}f)에 키를 찍습니다.').replace('{f}', String(curFrame))}
+              </p>
             )}
           </div>
         )
