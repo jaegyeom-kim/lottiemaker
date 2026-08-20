@@ -29,6 +29,11 @@ const sig1 = await domainSig()
 ok(sig0 === sig1, '드래그해도 도메인 불변 (팬 제거)')
 const selCount = await page.locator('.gepanel__key--sel').count()
 ok(selCount >= 2, `마키 다중 선택 (${selCount}/${keyCount})`)
+// 다중 선택 → 선택 키의 나가는 구간 전부 핸들
+ok(
+  (await page.locator('.gepanel__handle').count()) === (keyCount - 1) * 2,
+  `다중 선택 핸들 전부 표시 (${await page.locator('.gepanel__handle').count()})`,
+)
 ok(!(await page.$('.gepanel__marquee')), '드래그 종료 후 마키 박스 제거')
 
 // 2) 다중 선택 프리셋 → 여러 구간에 이지 이즈
@@ -40,10 +45,16 @@ const easedN = l0keys.filter((k) => k.e && Object.values(k.e).some((b) => Math.a
 // 선택 키 중 다음 키 있는 것 = keyCount-1 구간 전부 적용돼야 함
 ok(easedN === keyCount - 1, `프리셋 선택 구간 전부 적용 (${easedN}/${keyCount - 1})`)
 
-// 3) 빈 곳 짧은 클릭 → 선택 해제
+// 3) 패딩(축 라벨) 클릭 → 선택 해제
 await page.mouse.click(plot.x + 30, plot.y + 12)
 await page.waitForTimeout(150)
-ok((await page.locator('.gepanel__key--sel').count()) === 0, '빈 곳 클릭 → 선택 해제')
+ok((await page.locator('.gepanel__key--sel').count()) === 0, '패딩 클릭 → 선택 해제')
+
+// 3.5) 플롯 안 아무 프레임 클릭 (키 아님) → 그 구간 시작 키 선택 + 베지어 핸들
+await page.mouse.click(plot.x + plot.w * 0.55, plot.y + plot.h * 0.35)
+await page.waitForTimeout(150)
+ok((await page.locator('.gepanel__key--sel').count()) === 1, '아무 프레임 클릭 → 구간 키 선택')
+ok((await page.locator('.gepanel__handle').count()) === 2, '클릭 구간 베지어 핸들 표시')
 
 // 4) 단일 키 클릭 선택 + 핸들 표시 유지
 await (await page.$$('.gepanel__key'))[0].click()

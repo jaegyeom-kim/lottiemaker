@@ -337,6 +337,16 @@ export default function GraphEditor({ onClose }: { onClose: () => void }) {
           if (d2 <= 64 && (!best || d2 < best.d2)) best = { t: k.t, d2 }
         }
       if (best) hit.push(best.t)
+      else if (
+        keys.length >= 2 &&
+        cx >= PAD.l && cx <= W - PAD.r && cy >= PAD.t && cy <= H - PAD.b
+      ) {
+        // 키 밖 클릭 — 그 프레임이 속한 구간의 시작 키 선택 → 베지어 핸들 표시
+        const f = invX(cx)
+        let k0 = keys[0]
+        for (let i = 0; i < keys.length - 1; i++) if (keys[i].t <= f) k0 = keys[i]
+        hit.push(k0.t)
+      }
     } else {
       for (const k of keys)
         for (let d = 0; d < dims; d++) {
@@ -362,54 +372,68 @@ export default function GraphEditor({ onClose }: { onClose: () => void }) {
   }
 
   // ── 베지어 핸들 드래그 ──
-  const handleDrag = useRef<{ which: 0 | 1; bez: Bezier4 } | null>(null)
-  const seg = useMemo(() => {
-    if (!selKey || !canEase || !ch) return null
-    const i = keys.indexOf(selKey)
-    const nk = keys[i + 1]
-    const v0 = val(selKey, 0)
-    const v1 = val(nk, 0)
-    const bez = segEaseOf(xkf, selKey, ch)
-    const px = (u: number) => X(selKey.t + (nk.t - selKey.t) * u)
-    const py = (w: number) => Y(v0 + (v1 - v0) * w)
-    return {
-      k: selKey, nk, v0, v1, bez,
-      p0: { x: X(selKey.t), y: Y(v0) },
-      p3: { x: X(nk.t), y: Y(v1) },
-      c1: { x: px(bez[0]), y: py(bez[1]) },
-      c2: { x: px(bez[2]), y: py(bez[3]) },
-    }
+  const handleDrag = useRef<{
+    which: 0 | 1
+    bez: Bezier4
+    kt: number
+    nkt: number
+    v0: number
+    v1: number
+  } | null>(null)
+  // 선택된 키의 나가는 구간 전부 — 다중 선택도 핸들 표시 (클릭 = 구간 선택이라 1개가 보통)
+  const segs = useMemo(() => {
+    if (!ch) return []
+    return easeTargets.map((k) => {
+      const i = keys.indexOf(k)
+      const nk = keys[i + 1]
+      const v0 = val(k, 0)
+      const v1 = val(nk, 0)
+      const bez = segEaseOf(xkf, k, ch)
+      const px = (u: number) => X(k.t + (nk.t - k.t) * u)
+      const py = (w: number) => Y(v0 + (v1 - v0) * w)
+      return {
+        k, nk, v0, v1, bez,
+        p0: { x: X(k.t), y: Y(v0) },
+        p3: { x: X(nk.t), y: Y(v1) },
+        c1: { x: px(bez[0]), y: py(bez[1]) },
+        c2: { x: px(bez[2]), y: py(bez[3]) },
+      }
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selKey, canEase, ch, xkf, dom.t0, dom.t1, dom.v0, dom.v1])
+  }, [selTs, ch, xkf, dom.t0, dom.t1, dom.v0, dom.v1])
 
-  const beginHandle = (e: React.PointerEvent, which: 0 | 1) => {
-    if (!seg || !ch) return
+  const beginHandle = (e: React.PointerEvent, which: 0 | 1, sg: (typeof segs)[number]) => {
+    if (!ch) return
     e.preventDefault()
     e.stopPropagation()
     ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
-    handleDrag.current = { which, bez: [...seg.bez] as Bezier4 }
+    handleDrag.current = {
+      which, bez: [...sg.bez] as Bezier4,
+      kt: sg.k.t, nkt: sg.nk.t, v0: sg.v0, v1: sg.v1,
+    }
   }
   const moveHandle = (e: React.PointerEvent) => {
-    if (!handleDrag.current || !seg || !ch || !selKey) return
+    const hd = handleDrag.current
+    if (!hd || !ch) return
     e.stopPropagation()
     const pt = svgPoint(e)
     const frame = invX(pt.x)
-    const u = Math.max(0.001, Math.min(0.999, (frame - seg.k.t) / (seg.nk.t - seg.k.t)))
+    const u = Math.max(0.001, Math.min(0.999, (frame - hd.kt) / (hd.nkt - hd.kt)))
     const vAt = invY(pt.y)
-    const dv = seg.v1 - seg.v0
+    const dv = hd.v1 - hd.v0
     // 평평한 구간은 뷰 값 범위 기준으로 환산 (0 나눗셈 방지)
     const denom = Math.abs(dv) > 1e-6 ? dv : dom.v1 - dom.v0 || 1
-    const w = Math.max(-3, Math.min(4, (vAt - seg.v0) / denom))
-    const bez: Bezier4 = [...handleDrag.current.bez] as Bezier4
-    if (handleDrag.current.which === 0) {
+    const w = Math.max(-3, Math.min(4, (vAt - hd.v0) / denom))
+    const bez: Bezier4 = [...hd.bez] as Bezier4
+    if (hd.which === 0) {
       bez[0] = Math.round(u * 1000) / 1000
       bez[1] = Math.round(w * 1000) / 1000
     } else {
       bez[2] = Math.round(u * 1000) / 1000
       bez[3] = Math.round(w * 1000) / 1000
     }
-    handleDrag.current.bez = bez
-    setKfSegEaseLive(ch, selKey.t, bez)
+    hd.bez = bez
+    setKfSegEaseLive(ch, hd.kt, bez)
   }
   const endHandle = () => {
     if (!handleDrag.current) return
@@ -527,13 +551,13 @@ export default function GraphEditor({ onClose }: { onClose: () => void }) {
               ))}
             </g>
           ))}
-          {/* 베지어 핸들 — 선택 구간 (드래그로 이징 조절) */}
-          {seg && (
-            <g className="gepanel__handles" clipPath="url(#ge-plot)">
-              <line x1={seg.p0.x} y1={seg.p0.y} x2={seg.c1.x} y2={seg.c1.y} />
-              <line x1={seg.p3.x} y1={seg.p3.y} x2={seg.c2.x} y2={seg.c2.y} />
+          {/* 베지어 핸들 — 선택된 키의 나가는 구간 전부 (드래그로 이징 조절) */}
+          {segs.map((sg) => (
+            <g className="gepanel__handles" clipPath="url(#ge-plot)" key={sg.k.t}>
+              <line x1={sg.p0.x} y1={sg.p0.y} x2={sg.c1.x} y2={sg.c1.y} />
+              <line x1={sg.p3.x} y1={sg.p3.y} x2={sg.c2.x} y2={sg.c2.y} />
               {([0, 1] as const).map((which) => {
-                const c = which === 0 ? seg.c1 : seg.c2
+                const c = which === 0 ? sg.c1 : sg.c2
                 return (
                   <circle
                     key={which}
@@ -541,7 +565,7 @@ export default function GraphEditor({ onClose }: { onClose: () => void }) {
                     cy={c.y}
                     r={5.5}
                     className="gepanel__handle"
-                    onPointerDown={(e) => beginHandle(e, which)}
+                    onPointerDown={(e) => beginHandle(e, which, sg)}
                     onPointerMove={moveHandle}
                     onPointerUp={endHandle}
                     onPointerCancel={endHandle}
@@ -549,7 +573,7 @@ export default function GraphEditor({ onClose }: { onClose: () => void }) {
                 )
               })}
             </g>
-          )}
+          ))}
           </g>
           {/* 마키 러버밴드 */}
           {marquee && (
