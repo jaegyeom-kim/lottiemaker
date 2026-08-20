@@ -3517,6 +3517,7 @@ body.drag-cross * { cursor: crosshair !important; }
   background: var(--bg);
   cursor: crosshair; /* 드래그 = 마키 키 선택 */
   touch-action: none;
+  overflow: visible; /* 오버슛 베지어 핸들이 svg 밖으로 나가도 표시 */
 }
 
 .gepanel__grid {

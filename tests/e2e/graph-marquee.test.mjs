@@ -82,6 +82,11 @@ ok(handles >= 1, `단일 선택 핸들 표시 (${handles})`)
     yb.min >= 13 && yb.max <= yb.H - 23,
     `오버슛 커브 전부 표시 (y ${yb.min.toFixed(0)}..${yb.max.toFixed(0)} / 플롯 14..${yb.H - 24})`,
   )
+  // 핸들은 클립 그룹 밖 — 플롯을 벗어난 핸들도 렌더 트리에서 잘리지 않아야
+  const unclipped = await page.$eval('.gepanel__graph', (svg) =>
+    [...svg.querySelectorAll('.gepanel__handles')].every((g) => !g.closest('[clip-path]')),
+  )
+  ok(unclipped, '핸들 클립 해제 (플롯 밖 핸들 표시)')
 }
 
 // 5) ⇧클릭 추가 선택

@@ -600,9 +600,10 @@ export default function GraphEditor({ onClose }: { onClose: () => void }) {
               ))}
             </g>
           ))}
-          {/* 베지어 핸들 — 선택된 키의 나가는 구간 전부 (드래그로 이징 조절) */}
+          </g>
+          {/* 베지어 핸들 — 클립 밖 렌더: 오버슛 핸들이 플롯 밖에 있어도 보이게 */}
           {segs.map((sg) => (
-            <g className="gepanel__handles" clipPath="url(#ge-plot)" key={sg.k.t}>
+            <g className="gepanel__handles" key={sg.k.t}>
               <line x1={sg.p0.x} y1={sg.p0.y} x2={sg.c1.x} y2={sg.c1.y} />
               <line x1={sg.p3.x} y1={sg.p3.y} x2={sg.c2.x} y2={sg.c2.y} />
               {([0, 1] as const).map((which) => {
@@ -623,7 +624,6 @@ export default function GraphEditor({ onClose }: { onClose: () => void }) {
               })}
             </g>
           ))}
-          </g>
           {/* 마키 러버밴드 */}
           {marquee && (
             <rect
