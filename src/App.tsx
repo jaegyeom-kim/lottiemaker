@@ -206,6 +206,7 @@ export default function App() {
     if (!s.animationData) {
       const saved = loadLastSession()
       if (saved) s.restoreSession(saved)
+      else s.newBlankCustom() // 첫 실행 — 로드 없이 빈 커스텀 캔버스로 바로 시작
     }
   }, [])
 

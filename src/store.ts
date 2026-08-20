@@ -11,7 +11,7 @@ import {
   buildAnimKs, buildCustomDoc, buildCustomLayer, animSpans, normSel,
   normKf, buildKfKs, kfValueAt,
   springValue, SPRING_PRESETS, bounceValue,
-  CUSTOM_ASSET_PREFIX, DEFAULT_SEL,
+  CUSTOM_ASSET_PREFIX, CUSTOM_OP, DEFAULT_SEL,
   type CustomSel, type CustomPayload, type CustomKf, type KfChannel, type Bezier4,
   type KfSelItem, type PathShapeK,
   kfChannelKeys, applyTrimChannels, applyPathChannel, pathKAt, extractTrimToKf, layerScaleOf, layerAabbOf, layerRotationOf, layerBaseOf,
@@ -206,6 +206,8 @@ interface EditorState {
   deselectCustom: () => void
   /** 다중 레이어 삭제 (인덱스 목록). */
   removeCustomLayers: (idxs: number[]) => void
+  /** 빈 커스텀 캔버스로 시작 — 템플릿/그래픽 로드 없이 바로 드로잉. */
+  newBlankCustom: () => void
   /** 커스텀 빌더: 그래픽 추가 — 세션 없으면 새 문서, 있으면 맨 위 레이어로. at = 배치 좌표. */
   addCustomLayer: (payload: CustomPayload, name: string, at?: [number, number], size?: number, xshape?: ShapeMeta) => void
   /** 선택 레이어의 그래픽을 통째 교체 (라이브) — 펜 드로잉 진행 중 갱신. 모션·이름·라벨 유지, commitEdit로 확정. */
@@ -603,6 +605,19 @@ export const useEditor = create<EditorState>((set, get) => {
     return { animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) }
   }
 
+  /** 손대지 않은 빈 커스텀 캔버스 문서 — 시작 화면 없이 바로 드로잉 가능. */
+  const blankCustomDoc = (): LottieJson =>
+    ({
+      v: '5.7.4', fr: 60, ip: 0, op: CUSTOM_OP, w: 512, h: 512, nm: 'Custom', ddd: 0,
+      assets: [], layers: [], xblank: true,
+    }) as unknown as LottieJson
+
+  /** 빈 캔버스(xblank·레이어 0)인지 — 임포트/추가 시 병합 대신 새 문서 취급. */
+  const isBlankCustom = (src: LottieJson | null | undefined): boolean =>
+    !!src &&
+    (src as unknown as Record<string, unknown>).xblank === true &&
+    !(src.layers?.length)
+
   /** 값 채널 전체 — 빈 키 정리 판정용. */
   const KF_ALL_CHS = ['p', 's', 'r', 'o', 'ts', 'te', 'pk'] as const
 
@@ -907,6 +922,11 @@ export const useEditor = create<EditorState>((set, get) => {
       const saved = loadSavedSession(m)
       if (saved) {
         get().restoreSession(saved)
+        return
+      }
+      if (m === 'custom') {
+        // 커스텀에 보관된 작업 없음 — 빈 캔버스로 바로 드로잉 시작
+        get().newBlankCustom()
         return
       }
       // 해당 모드에 보관된 작업 없음 — 빈 작업공간
@@ -1259,12 +1279,17 @@ export const useEditor = create<EditorState>((set, get) => {
       set({ customIdxs: next, customIdx: next[next.length - 1] })
     },
 
+    newBlankCustom: () => {
+      get().loadTemplate(blankCustomDoc(), '__custom', [])
+      set({ customIdx: 0, customIdxs: [], loop: false, playing: false })
+    },
+
     addCustomLayer: (payload, name, at, size, xshape) => {
       const { templateId, sourceData, templateKnobs, knobValues } = get()
       const base: [number, number] = at ?? [256, 256]
       // 드로잉 툴은 그린 크기 그대로 생성 (기본은 240px)
       const sel = { ...DEFAULT_SEL, ...(size ? { size: Math.max(4, Math.round(size)) } : {}) }
-      if (templateId !== '__custom' || !sourceData) {
+      if (templateId !== '__custom' || !sourceData || isBlankCustom(sourceData)) {
         const doc = buildCustomDoc(payload, sel, base, name)
         ;(doc.layers[0] as Record<string, unknown>).xci = 0
         if (xshape) (doc.layers[0] as Record<string, unknown>).xshape = xshape
@@ -1611,7 +1636,7 @@ export const useEditor = create<EditorState>((set, get) => {
           layers: x.layers,
         }))
         const { templateId, sourceData, templateKnobs, knobValues } = get()
-        if (templateId !== '__custom' || !sourceData) {
+        if (templateId !== '__custom' || !sourceData || isBlankCustom(sourceData)) {
           const newDoc = {
             v: '5.7.0', fr: 60, ip: 0, op: sc.op, w: 512, h: 512, nm: 'imported',
             assets: [...sc.assets, ...sceneAssets], layers: sc.main,
@@ -1671,7 +1696,7 @@ export const useEditor = create<EditorState>((set, get) => {
         return { added: 0, warnings: conv.warnings, skipped: conv.skipped, scenes: 0 }
       const { templateId, sourceData, templateKnobs, knobValues } = get()
       // 빈 작업공간 → 새 커스텀 세션으로
-      if (templateId !== '__custom' || !sourceData) {
+      if (templateId !== '__custom' || !sourceData || isBlankCustom(sourceData)) {
         const newDoc = {
           v: '5.7.0', fr: 60, ip: 0, op: conv.op, w: 512, h: 512, nm: 'imported',
           assets: conv.assets, layers: conv.layers,
@@ -1741,10 +1766,12 @@ export const useEditor = create<EditorState>((set, get) => {
       )
       if (!uniq.length) return
       if (uniq.length >= sourceData.layers.length) {
-        // 전부 삭제 = 세션 비움 (undo 가능)
+        // 전부 삭제 = 빈 캔버스로 (드로잉 계속 가능, undo 가능)
+        const blank = blankCustomDoc()
         push({
-          animationData: null, sourceData: null, pristineData: null, templateId: null,
-          templateKnobs: [], knobValues: {}, colorGroups: [], customIdx: 0, customIdxs: [0],
+          animationData: structuredClone(blank), sourceData: blank, pristineData: structuredClone(blank),
+          templateId: '__custom',
+          templateKnobs: [], knobValues: {}, colorGroups: [], customIdx: 0, customIdxs: [],
           kfSel: [],
         })
         return
