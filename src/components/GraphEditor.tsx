@@ -390,11 +390,11 @@ export default function GraphEditor({ onClose }: { onClose: () => void }) {
         keys.length >= 2 &&
         cx >= PAD.l && cx <= W - PAD.r && cy >= PAD.t && cy <= H - PAD.b
       ) {
-        // 키 밖 클릭 — 그 프레임이 속한 구간의 시작 키 선택 → 베지어 핸들 표시
+        // 키 밖 클릭 — 그 프레임이 속한 구간의 양끝 키 선택 → 구간 탄젠트 페어 표시
         const f = invX(cx)
-        let k0 = keys[0]
-        for (let i = 0; i < keys.length - 1; i++) if (keys[i].t <= f) k0 = keys[i]
-        hit.push(k0.t)
+        let i0 = 0
+        for (let i = 0; i < keys.length - 1; i++) if (keys[i].t <= f) i0 = i
+        hit.push(keys[i0].t, keys[i0 + 1].t)
       }
     } else {
       for (const k of keys)
@@ -429,36 +429,59 @@ export default function GraphEditor({ onClose }: { onClose: () => void }) {
     v0: number
     v1: number
   } | null>(null)
-  // 선택된 키의 나가는 구간 전부 — 다중 선택도 핸들 표시 (클릭 = 구간 선택이라 1개가 보통)
-  const segs = useMemo(() => {
-    if (!ch) return []
-    return easeTargets.map((k) => {
+  // AE value graph — 선택된 키마다 in/out 탄젠트 핸들 (키에서 컨트롤 포인트로 뻗는 선)
+  interface HandleSpec {
+    kt: number // 이즈가 저장되는 구간 시작 키 t
+    nkt: number
+    which: 0 | 1 // 0 = out(c1), 1 = in(c2)
+    v0: number
+    v1: number
+    bez: Bezier4
+    anchor: { x: number; y: number }
+    ctrl: { x: number; y: number }
+  }
+  const keyHandles = useMemo(() => {
+    if (!ch) return [] as HandleSpec[]
+    const out: HandleSpec[] = []
+    for (const k of selKeys) {
       const i = keys.indexOf(k)
-      const nk = keys[i + 1]
-      const v0 = val(k, 0)
-      const v1 = val(nk, 0)
-      const bez = segEaseOf(xkf, k, ch)
-      const px = (u: number) => X(k.t + (nk.t - k.t) * u)
-      const py = (w: number) => Y(v0 + (v1 - v0) * w)
-      return {
-        k, nk, v0, v1, bez,
-        p0: { x: X(k.t), y: Y(v0) },
-        p3: { x: X(nk.t), y: Y(v1) },
-        c1: { x: px(bez[0]), y: py(bez[1]) },
-        c2: { x: px(bez[2]), y: py(bez[3]) },
+      const prev = i > 0 ? keys[i - 1] : null
+      const next = i < keys.length - 1 ? keys[i + 1] : null
+      if (next) {
+        // 나가는 탄젠트 — 이 키에서 c1으로
+        const v0 = val(k, 0)
+        const v1 = val(next, 0)
+        const bez = segEaseOf(xkf, k, ch)
+        out.push({
+          kt: k.t, nkt: next.t, which: 0, v0, v1, bez,
+          anchor: { x: X(k.t), y: Y(v0) },
+          ctrl: { x: X(k.t + (next.t - k.t) * bez[0]), y: Y(v0 + (v1 - v0) * bez[1]) },
+        })
       }
-    })
+      if (prev) {
+        // 들어오는 탄젠트 — 이 키에서 c2로 (이전 구간의 이즈)
+        const v0 = val(prev, 0)
+        const v1 = val(k, 0)
+        const bez = segEaseOf(xkf, prev, ch)
+        out.push({
+          kt: prev.t, nkt: k.t, which: 1, v0, v1, bez,
+          anchor: { x: X(k.t), y: Y(v1) },
+          ctrl: { x: X(prev.t + (k.t - prev.t) * bez[2]), y: Y(v0 + (v1 - v0) * bez[3]) },
+        })
+      }
+    }
+    return out
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selTs, ch, xkf, dom.t0, dom.t1, dom.v0, dom.v1])
 
-  const beginHandle = (e: React.PointerEvent, which: 0 | 1, sg: (typeof segs)[number]) => {
+  const beginHandle = (e: React.PointerEvent, sp: HandleSpec) => {
     if (!ch) return
     e.preventDefault()
     e.stopPropagation()
     ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
     handleDrag.current = {
-      which, bez: [...sg.bez] as Bezier4,
-      kt: sg.k.t, nkt: sg.nk.t, v0: sg.v0, v1: sg.v1,
+      which: sp.which, bez: [...sp.bez] as Bezier4,
+      kt: sp.kt, nkt: sp.nkt, v0: sp.v0, v1: sp.v1,
     }
   }
   const moveHandle = (e: React.PointerEvent) => {
@@ -472,7 +495,8 @@ export default function GraphEditor({ onClose }: { onClose: () => void }) {
     const dv = hd.v1 - hd.v0
     // 평평한 구간은 뷰 값 범위 기준으로 환산 (0 나눗셈 방지)
     const denom = Math.abs(dv) > 1e-6 ? dv : dom.v1 - dom.v0 || 1
-    const w = Math.max(-3, Math.min(4, (vAt - hd.v0) / denom))
+    // AE value graph — 슬로프(값)는 무제한, 인플루언스(시간)만 0~100% 클램프
+    const w = Math.max(-50, Math.min(50, (vAt - hd.v0) / denom))
     const bez: Bezier4 = [...hd.bez] as Bezier4
     if (hd.which === 0) {
       bez[0] = Math.round(u * 1000) / 1000
@@ -601,27 +625,20 @@ export default function GraphEditor({ onClose }: { onClose: () => void }) {
             </g>
           ))}
           </g>
-          {/* 베지어 핸들 — 클립 밖 렌더: 오버슛 핸들이 플롯 밖에 있어도 보이게 */}
-          {segs.map((sg) => (
-            <g className="gepanel__handles" key={sg.k.t}>
-              <line x1={sg.p0.x} y1={sg.p0.y} x2={sg.c1.x} y2={sg.c1.y} />
-              <line x1={sg.p3.x} y1={sg.p3.y} x2={sg.c2.x} y2={sg.c2.y} />
-              {([0, 1] as const).map((which) => {
-                const c = which === 0 ? sg.c1 : sg.c2
-                return (
-                  <circle
-                    key={which}
-                    cx={c.x}
-                    cy={c.y}
-                    r={5.5}
-                    className="gepanel__handle"
-                    onPointerDown={(e) => beginHandle(e, which, sg)}
-                    onPointerMove={moveHandle}
-                    onPointerUp={endHandle}
-                    onPointerCancel={endHandle}
-                  />
-                )
-              })}
+          {/* 탄젠트 핸들 (AE value graph) — 클립 밖 렌더: 플롯 밖 핸들도 보이게 */}
+          {keyHandles.map((sp) => (
+            <g className="gepanel__handles" key={`${sp.kt}-${sp.which}`}>
+              <line x1={sp.anchor.x} y1={sp.anchor.y} x2={sp.ctrl.x} y2={sp.ctrl.y} />
+              <circle
+                cx={sp.ctrl.x}
+                cy={sp.ctrl.y}
+                r={5.5}
+                className="gepanel__handle"
+                onPointerDown={(e) => beginHandle(e, sp)}
+                onPointerMove={moveHandle}
+                onPointerUp={endHandle}
+                onPointerCancel={endHandle}
+              />
             </g>
           ))}
           {/* 마키 러버밴드 */}

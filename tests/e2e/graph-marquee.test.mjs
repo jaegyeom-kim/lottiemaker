@@ -53,8 +53,8 @@ ok((await page.locator('.gepanel__key--sel').count()) === 0, '패딩 클릭 → 
 // 3.5) 플롯 안 아무 프레임 클릭 (키 아님) → 그 구간 시작 키 선택 + 베지어 핸들
 await page.mouse.click(plot.x + plot.w * 0.55, plot.y + plot.h * 0.35)
 await page.waitForTimeout(150)
-ok((await page.locator('.gepanel__key--sel').count()) === 1, '아무 프레임 클릭 → 구간 키 선택')
-ok((await page.locator('.gepanel__handle').count()) === 2, '클릭 구간 베지어 핸들 표시')
+ok((await page.locator('.gepanel__key--sel').count()) === 2, '아무 프레임 클릭 → 구간 양끝 키 선택')
+ok((await page.locator('.gepanel__handle').count()) === 2, '클릭 구간 탄젠트 페어 표시 (out+in)')
 
 // 4) 단일 키 클릭 선택 + 핸들 표시 유지
 await (await page.$$('.gepanel__key'))[0].click()
