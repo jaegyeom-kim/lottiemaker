@@ -63,6 +63,27 @@ ok((await page.locator('.gepanel__key--sel').count()) >= 1, '단일 키 클릭 �
 const handles = await page.locator('.gepanel__handle').count()
 ok(handles >= 1, `단일 선택 핸들 표시 (${handles})`)
 
+// 4.5) 오버슛 이징 → H(전체 맞춤) 시 커브가 플롯 밖으로 안 잘림
+{
+  const h0 = await (await page.$$('.gepanel__handle'))[0].boundingBox()
+  await page.mouse.move(h0.x + h0.width / 2, h0.y + h0.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(h0.x + h0.width / 2 + 10, h0.y - 220, { steps: 6 })
+  await page.mouse.up()
+  await page.waitForTimeout(300)
+  await page.keyboard.press('h')
+  await page.waitForTimeout(200)
+  const yb = await page.$eval('.gepanel__graph', (svg) => {
+    const path = svg.querySelector('g[clip-path] path')
+    const ys = [...path.getAttribute('d').matchAll(/,(-?[\d.]+)/g)].map((m) => Number(m[1]))
+    return { min: Math.min(...ys), max: Math.max(...ys), H: svg.viewBox.baseVal.height }
+  })
+  ok(
+    yb.min >= 13 && yb.max <= yb.H - 23,
+    `오버슛 커브 전부 표시 (y ${yb.min.toFixed(0)}..${yb.max.toFixed(0)} / 플롯 14..${yb.H - 24})`,
+  )
+}
+
 // 5) ⇧클릭 추가 선택
 const kEls = await page.$$('.gepanel__key')
 if (kEls.length >= 2) {

@@ -104,20 +104,60 @@ export default function GraphEditor({ onClose }: { onClose: () => void }) {
   const dims = ch === 'p' ? 2 : 1
   const val = (k: KfKey, d: number) => (ch === 'p' ? (k.p as [number, number])[d] : (k[ch!] as number))
 
+  /** 구간 값 범위 — 이징 베지어 오버슛(y<0·y>1) 극값 포함 (프레이밍 시 커브 안 잘리게). */
+  const segVBounds = (k: (typeof keys)[number], nk: (typeof keys)[number], d: number): [number, number] => {
+    const v0 = val(k, d)
+    const v1 = val(nk, d)
+    if (!ch) return [Math.min(v0, v1), Math.max(v0, v1)]
+    const [, y1, , y2] = segEaseOf(xkf, k, ch)
+    // 값 진행 w(s) = 3차 베지어 (0, y1, y2, 1) — 도함수 근에서 극값
+    let wMin = 0
+    let wMax = 1
+    const a = 3 * (3 * y1 - 3 * y2 + 1)
+    const b = 6 * (y2 - 2 * y1)
+    const c = 3 * y1
+    const roots: number[] = []
+    if (Math.abs(a) < 1e-9) {
+      if (Math.abs(b) > 1e-9) roots.push(-c / b)
+    } else {
+      const disc = b * b - 4 * a * c
+      if (disc >= 0) {
+        const sq = Math.sqrt(disc)
+        roots.push((-b + sq) / (2 * a), (-b - sq) / (2 * a))
+      }
+    }
+    for (const u of roots) {
+      if (u <= 0 || u >= 1) continue
+      const q = 1 - u
+      const w = 3 * q * q * u * y1 + 3 * q * u * u * y2 + u * u * u
+      wMin = Math.min(wMin, w)
+      wMax = Math.max(wMax, w)
+    }
+    const A = v0 + (v1 - v0) * wMin
+    const B = v0 + (v1 - v0) * wMax
+    return [Math.min(A, B), Math.max(A, B)]
+  }
+
   const fit: View = useMemo(() => {
     if (!keys.length) return { t0: 0, t1: OP, v0: 0, v1: 100 }
     let tMin = Infinity
     let tMax = -Infinity
     let vMin = Infinity
     let vMax = -Infinity
-    for (const k of keys) {
+    keys.forEach((k, i) => {
       tMin = Math.min(tMin, k.t)
       tMax = Math.max(tMax, k.t)
       for (let d = 0; d < dims; d++) {
-        vMin = Math.min(vMin, val(k, d))
-        vMax = Math.max(vMax, val(k, d))
+        if (i < keys.length - 1) {
+          const [lo, hi] = segVBounds(k, keys[i + 1], d)
+          vMin = Math.min(vMin, lo)
+          vMax = Math.max(vMax, hi)
+        } else {
+          vMin = Math.min(vMin, val(k, d))
+          vMax = Math.max(vMax, val(k, d))
+        }
       }
-    }
+    })
     if (tMax - tMin < 2) {
       tMin -= 1
       tMax += 1
@@ -204,9 +244,18 @@ export default function GraphEditor({ onClose }: { onClose: () => void }) {
     for (const k of scope) {
       tMin = Math.min(tMin, k.t)
       tMax = Math.max(tMax, k.t)
+      const i = keys.indexOf(k)
+      const nk = keys[i + 1]
+      const segIn = nk && scope.includes(nk)
       for (let d = 0; d < dims; d++) {
-        vMin = Math.min(vMin, val(k, d))
-        vMax = Math.max(vMax, val(k, d))
+        if (segIn) {
+          const [lo, hi] = segVBounds(k, nk, d)
+          vMin = Math.min(vMin, lo)
+          vMax = Math.max(vMax, hi)
+        } else {
+          vMin = Math.min(vMin, val(k, d))
+          vMax = Math.max(vMax, val(k, d))
+        }
       }
     }
     if (tMax - tMin < 1) {
