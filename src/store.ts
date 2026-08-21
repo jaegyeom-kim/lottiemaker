@@ -690,6 +690,38 @@ export const useEditor = create<EditorState>((set, get) => {
     (src as unknown as Record<string, unknown>).xblank === true &&
     !(src.layers?.length)
 
+  /**
+   * 새 커스텀 문서 채택 — 빈 캔버스(또는 기존 커스텀 세션) 위라면 push로
+   * 히스토리를 보존 (undo = 이전 상태), 세션이 아예 없을 때만 loadTemplate 리셋.
+   */
+  const adoptFreshDoc = (doc: LottieJson, selIdxs: number[]) => {
+    const st = get()
+    if (st.templateId === '__custom' && st.sourceData) {
+      // 빈 캔버스의 컴프 설정·가이드는 새 문서로 승계
+      const prev = st.sourceData as unknown as Record<string, unknown>
+      doc.w = st.sourceData.w
+      doc.h = st.sourceData.h
+      if (prev.xguides) (doc as unknown as Record<string, unknown>).xguides = structuredClone(prev.xguides)
+      const applied = applyKnobs(doc, [], {})
+      push({
+        animationData: applied,
+        sourceData: doc,
+        pristineData: structuredClone(doc),
+        templateId: '__custom',
+        templateKnobs: [],
+        knobValues: {},
+        colorGroups: extractColorGroups(applied),
+        customIdx: 0,
+        customIdxs: selIdxs,
+        kfSel: [],
+      })
+      set({ loop: false, playing: false })
+    } else {
+      get().loadTemplate(doc, '__custom', [])
+      set({ customIdx: 0, customIdxs: selIdxs, loop: false, playing: false })
+    }
+  }
+
   /** 값 채널 전체 — 빈 키 정리 판정용. */
   const KF_ALL_CHS = ['p', 's', 'r', 'o', 'ts', 'te', 'pk'] as const
 
@@ -1367,10 +1399,8 @@ export const useEditor = create<EditorState>((set, get) => {
         ;(doc.layers[0] as Record<string, unknown>).xci = 0
         if (xshape) (doc.layers[0] as Record<string, unknown>).xshape = xshape
         if (xtext) (doc.layers[0] as Record<string, unknown>).xtext = xtext
-        // 커스텀은 timeStretch 노브 없음 — 컴포지션 길이는 setCompLength로 (절대 시간 유지)
-        get().loadTemplate(doc, '__custom', [])
-        // 편집 모드로 시작 — 재생(프리뷰) 버튼을 눌러야 루프 재생
-        set({ customIdx: 0, customIdxs: [0], loop: false, playing: false })
+        // 빈 캔버스 위 생성은 push — 첫 레이어도 undo로 되돌릴 수 있어야 한다
+        adoptFreshDoc(doc, [0])
         return
       }
       const src = structuredClone(sourceData)
@@ -1862,8 +1892,7 @@ export const useEditor = create<EditorState>((set, get) => {
             assets: [...sc.assets, ...sceneAssets], layers: sc.main,
           } as unknown as LottieJson
           ensureLayerColors(newDoc)
-          get().loadTemplate(newDoc, '__custom', [])
-          set({ customIdx: 0, customIdxs: sc.main.length ? [0] : [], loop: false, playing: false })
+          adoptFreshDoc(newDoc as LottieJson, sc.main.length ? [0] : [])
           return { added: totalLayers, warnings: sc.warnings, skipped: sc.skipped, scenes: sc.scenes.length }
         }
         // 기존 세션에 추가 — 씬 id 충돌 회피 (xsc_ 번호 오프셋) + 이미지 에셋 remap
@@ -1924,8 +1953,7 @@ export const useEditor = create<EditorState>((set, get) => {
         ensureLayerColors(newDoc)
         newDoc.layers.forEach((_, i) => editKfLayerIn(newDoc, i, () => {}, true))
         newDoc.layers.forEach((l, i) => (l.ind = i + 1))
-        get().loadTemplate(newDoc, '__custom', [])
-        set({ customIdx: 0, customIdxs: [0], loop: false, playing: false })
+        adoptFreshDoc(newDoc, [0])
         return { added: conv.layers.length, warnings: conv.warnings, skipped: conv.skipped, scenes: 0 }
       }
       // 기존 세션에 추가 — 에셋 id 충돌은 우리 프리픽스로 재부여
