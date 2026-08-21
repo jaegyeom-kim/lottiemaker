@@ -428,6 +428,8 @@ export default function GraphEditor({ onClose }: { onClose: () => void }) {
     nkt: number
     v0: number
     v1: number
+    /** 같은 키의 반대쪽 탄젠트 — 링크 미러 대상 (⌥ = 브레이크). */
+    adj: { kt: number; dt: number; dv: number; bez: Bezier4; side: 0 | 1 } | null
   } | null>(null)
   // AE value graph — 선택된 키마다 in/out 탄젠트 핸들 (키에서 컨트롤 포인트로 뻗는 선)
   interface HandleSpec {
@@ -479,9 +481,26 @@ export default function GraphEditor({ onClose }: { onClose: () => void }) {
     e.preventDefault()
     e.stopPropagation()
     ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
+    // 핸들이 붙은 키의 반대쪽 탄젠트 — 스무스 링크 대상 수집
+    const keyT = sp.which === 0 ? sp.kt : sp.nkt
+    const ki = keys.findIndex((k) => Math.abs(k.t - keyT) < 0.5)
+    let adj: { kt: number; dt: number; dv: number; bez: Bezier4; side: 0 | 1 } | null = null
+    if (sp.which === 0 && ki > 0) {
+      const pv = keys[ki - 1]
+      adj = {
+        kt: pv.t, dt: keyT - pv.t, dv: val(keys[ki], 0) - val(pv, 0),
+        bez: [...segEaseOf(xkf, pv, ch)] as Bezier4, side: 1,
+      }
+    } else if (sp.which === 1 && ki >= 0 && ki < keys.length - 1) {
+      const nn = keys[ki + 1]
+      adj = {
+        kt: keyT, dt: nn.t - keyT, dv: val(nn, 0) - val(keys[ki], 0),
+        bez: [...segEaseOf(xkf, keys[ki], ch)] as Bezier4, side: 0,
+      }
+    }
     handleDrag.current = {
       which: sp.which, bez: [...sp.bez] as Bezier4,
-      kt: sp.kt, nkt: sp.nkt, v0: sp.v0, v1: sp.v1,
+      kt: sp.kt, nkt: sp.nkt, v0: sp.v0, v1: sp.v1, adj,
     }
   }
   const moveHandle = (e: React.PointerEvent) => {
@@ -507,6 +526,27 @@ export default function GraphEditor({ onClose }: { onClose: () => void }) {
     }
     hd.bez = bez
     setKfSegEaseLive(ch, hd.kt, bez)
+    // 탄젠트 링크 (AE 스무스) — 같은 키의 반대쪽 핸들을 같은 기울기로 회전.
+    // ⌥ = 브레이크 (이쪽만). 반대쪽 인플루언스(길이)는 유지.
+    const adj = hd.adj
+    if (adj && !e.altKey && Math.abs(adj.dv) > 1e-6) {
+      const dt = hd.nkt - hd.kt
+      const dv = hd.v1 - hd.v0
+      const slope =
+        hd.which === 0
+          ? (bez[1] * dv) / (Math.max(0.001, bez[0]) * dt)
+          : ((bez[3] - 1) * dv) / ((Math.min(0.999, bez[2]) - 1) * dt)
+      const ab: Bezier4 = [...adj.bez] as Bezier4
+      if (adj.side === 1) {
+        // 이전 구간의 in(c2) — 키 통과 직선 유지: y2 = 1 + slope·(x2-1)·dt/dv
+        ab[3] = Math.max(-50, Math.min(51, Math.round((1 + (slope * (ab[2] - 1) * adj.dt) / adj.dv) * 1000) / 1000))
+      } else {
+        // 다음 구간의 out(c1) — y1 = slope·x1·dt/dv
+        ab[1] = Math.max(-50, Math.min(51, Math.round(((slope * ab[0] * adj.dt) / adj.dv) * 1000) / 1000))
+      }
+      adj.bez = ab
+      setKfSegEaseLive(ch, adj.kt, ab)
+    }
   }
   const endHandle = () => {
     if (!handleDrag.current) return
