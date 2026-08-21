@@ -265,8 +265,11 @@ interface EditorState {
   replaceCustomGraphicLive: (payload: CustomPayload, at: [number, number], size: number) => void
   /** 펜 패스 포인트 편집 (라이브) — 단일 sh 레이어의 로컬 경로 k 교체. xshape는 도형 리빌드 시 메타 동기용. */
   setPenPathLive: (li: number, k: PenPathK, xshape?: ShapeMeta) => void
-  /** 선(스트로크) 옵션 — 두께/라인캡. */
-  setLayerStroke: (li: number, opts: { w?: number; lc?: number }) => void
+  /** 선(스트로크) 옵션 — 두께/라인캡/대시(0 = 실선). */
+  setLayerStroke: (li: number, opts: { w?: number; lc?: number; dash?: number }) => void
+  /** 선 추가/제거 — 채움색 기반 기본 스트로크 생성, 제거는 st 전부. */
+  addLayerStroke: (li: number) => void
+  removeLayerStroke: (li: number) => void
   /** 칠 — 단색(fl) ↔ 그라디언트(gf 선형/방사) 전환·색·각도. 로컬 bbox 기준 끝점. */
   setLayerFill: (li: number, fill: LayerFill) => void
   /** 텍스트 레이어 재생성 — 그래픽 교체 + xtext 메타 동기 (언두 1회). li = 주 선택이어야 함. */
@@ -1617,6 +1620,47 @@ export const useEditor = create<EditorState>((set, get) => {
       get().commitEdit()
     },
 
+    addLayerStroke: (li) => {
+      const { sourceData, templateKnobs, knobValues } = get()
+      if (!sourceData?.layers[li] || lockedAt(sourceData, li)) return
+      const src = structuredClone(sourceData)
+      ensureLayerColors(src)
+      const layer = src.layers[li] as Record<string, unknown>
+      const group = (layer.shapes as Record<string, unknown>[] | undefined)?.[0]
+      if (!group?.it) return
+      if (findStrokes(group).length) return
+      const it = group.it as Record<string, unknown>[]
+      // 채움색 기반 기본 스트로크 — 페인터(fl/gf) 바로 앞에 삽입 (스트로크가 위에 그려지게)
+      const fl = it.find((x) => x.ty === 'fl') as { c?: { k?: number[] } } | undefined
+      const c = Array.isArray(fl?.c?.k) ? fl.c.k.slice(0, 3) : [0.2, 0.5, 0.96]
+      const at = it.findIndex((x) => ['fl', 'gf', 'st', 'gs'].includes(String(x.ty)))
+      it.splice(at < 0 ? it.length : at, 0, {
+        ty: 'st', c: { a: 0, k: [...c, 1] }, o: { a: 0, k: 100 },
+        w: { a: 0, k: 2 }, lc: 2, lj: 2, nm: 'Stroke',
+      })
+      const applied = applyKnobs(src, templateKnobs, knobValues)
+      push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
+    },
+
+    removeLayerStroke: (li) => {
+      const { sourceData, templateKnobs, knobValues } = get()
+      if (!sourceData?.layers[li] || lockedAt(sourceData, li)) return
+      const src = structuredClone(sourceData)
+      ensureLayerColors(src)
+      const layer = src.layers[li] as Record<string, unknown>
+      const group = (layer.shapes as Record<string, unknown>[] | undefined)?.[0]
+      if (!group?.it) return
+      const strip = (items: Record<string, unknown>[]) => {
+        for (let i = items.length - 1; i >= 0; i--) {
+          if (items[i].ty === 'st') items.splice(i, 1)
+          else if (items[i].ty === 'gr') strip(items[i].it as Record<string, unknown>[])
+        }
+      }
+      strip(group.it as Record<string, unknown>[])
+      const applied = applyKnobs(src, templateKnobs, knobValues)
+      push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
+    },
+
     setLayerFill: (li, fill) => {
       const { sourceData, templateKnobs, knobValues } = get()
       if (!sourceData?.layers[li] || lockedAt(sourceData, li)) return
@@ -1689,6 +1733,14 @@ export const useEditor = create<EditorState>((set, get) => {
       for (const st2 of sts) {
         if (opts.w !== undefined) (st2.w as { k: number }) = { a: 0, k: Math.max(0.5, opts.w) } as never
         if (opts.lc !== undefined) st2.lc = opts.lc
+        if (opts.dash !== undefined) {
+          if (opts.dash > 0) {
+            st2.d = [
+              { n: 'd', nm: 'dash', v: { a: 0, k: Math.max(0.5, opts.dash) } },
+              { n: 'g', nm: 'gap', v: { a: 0, k: Math.max(0.5, opts.dash) } },
+            ]
+          } else delete st2.d
+        }
       }
       const applied = applyKnobs(src, templateKnobs, knobValues)
       push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })

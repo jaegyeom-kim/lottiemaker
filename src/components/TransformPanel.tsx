@@ -32,7 +32,7 @@ export default function TransformPanel() {
   const {
     setCustomChannelsLive, setKfChannelLive, commitEdit,
     nudgeCustomBase, setLayerBlend, setLayerStroke, setShapeGeom, togglePathKf, matchPathPoints,
-    setLayerFill,
+    setLayerFill, addLayerStroke, removeLayerStroke,
   } = useEditor()
 
   const layers = sourceData?.layers ?? []
@@ -298,14 +298,35 @@ export default function TransformPanel() {
           }
         }
         walk(((selLayer.shapes as Record<string, unknown>[] | undefined)?.[0] as Record<string, unknown> | undefined)?.it as Record<string, unknown>[])
-        if (!strokes.length) return null
+        // 셰이프 레이어인데 선이 없으면 — 추가 버튼
+        if (!strokes.length) {
+          if (Number(selLayer.ty) !== 4 || !(selLayer.shapes as unknown[])?.length) return null
+          return (
+            <div className="knob">
+              <div className="knob__head">
+                <span className="knob__name">{t('선')}</span>
+                <button className="linkbtn" onClick={() => addLayerStroke(idx)}>
+                  {t('선 추가')}
+                </button>
+              </div>
+            </div>
+          )
+        }
         const st0 = strokes[0]
         const w = Number((st0.w as { k?: number } | undefined)?.k ?? 1)
         const lc = Number(st0.lc ?? 2)
+        const dash = (() => {
+          const d = st0.d as { n?: string; v?: { k?: number } }[] | undefined
+          const dd = d?.find((x) => x.n === 'd')
+          return Number(dd?.v?.k ?? 0)
+        })()
         return (
           <div className="knob">
             <div className="knob__head">
               <span className="knob__name">{t('선')}</span>
+              <button className="linkbtn" onClick={() => removeLayerStroke(idx)}>
+                {t('선 제거')}
+              </button>
             </div>
             <div className="posrow posrow--stroke">
               <PosInput
@@ -323,6 +344,13 @@ export default function TransformPanel() {
                 <option value={2}>{t('라운드')}</option>
                 <option value={3}>{t('스퀘어')}</option>
               </select>
+            </div>
+            <div className="posrow">
+              <PosInput
+                label={`${t('대시')} px`}
+                value={dash}
+                onCommit={(v) => setLayerStroke(idx, { dash: Math.max(0, v) })}
+              />
             </div>
           </div>
         )
