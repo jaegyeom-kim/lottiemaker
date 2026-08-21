@@ -1,7 +1,7 @@
 import { useEditor, type ShapeMeta } from '../store'
 import { t } from '../lib/i18n'
 import {
-  normSel, normKf, kfValueAt, kfChannelKeys,
+  normSel, normKf, kfValueAt, kfChannelKeys, pkMismatch,
   type CustomKf, type CustomSel,
 } from '../lib/customBuilder'
 import { PosInput } from './CustomBuilder'
@@ -28,7 +28,7 @@ export default function TransformPanel() {
   const curFrame = useEditor((s) => s.curFrame)
   const {
     setCustomChannelsLive, setKfChannelLive, commitEdit,
-    nudgeCustomBase, setLayerBlend, setLayerStroke, setShapeGeom, togglePathKf,
+    nudgeCustomBase, setLayerBlend, setLayerStroke, setShapeGeom, togglePathKf, matchPathPoints,
   } = useEditor()
 
   const layers = sourceData?.layers ?? []
@@ -163,6 +163,14 @@ export default function TransformPanel() {
             {pkOn && (
               <p className="knob__note">
                 {t('펜 툴로 패스를 수정하면 재생헤드({f}f)에 키를 찍습니다.').replace('{f}', String(curFrame))}
+              </p>
+            )}
+            {pkOn && pkMismatch(xkf) && (
+              <p className="knob__note knob__note--warn">
+                {t('⚠ 키 간 포인트 수가 달라 모핑되지 않는 구간이 있습니다.')}{' '}
+                <button className="linkbtn" onClick={() => matchPathPoints(idx)}>
+                  {t('포인트 수 맞추기')}
+                </button>
               </p>
             )}
           </div>

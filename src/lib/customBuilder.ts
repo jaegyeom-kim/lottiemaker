@@ -640,6 +640,69 @@ export function pathKAt(xkf: CustomKf, t: number): PathShapeK | null {
   return structuredClone(val(keys[keys.length - 1]))
 }
 
+/** pk 키 간 포인트 수/열림 불일치 — 모핑 불가 구간 존재 여부 (⚠ 가드). */
+export function pkMismatch(xkf: CustomKf): boolean {
+  const keys = kfChannelKeys(xkf, 'pk')
+  for (let i = 0; i < keys.length - 1; i++) {
+    const a = keys[i].pk as PathShapeK
+    const b = keys[i + 1].pk as PathShapeK
+    if (a.v.length !== b.v.length || a.c !== b.c) return true
+  }
+  return false
+}
+
+/**
+ * 패스 k를 target 포인트 수로 세분 — 가장 긴 세그먼트를 드 카스텔조 이등분.
+ * 형태는 수학적으로 동일하게 유지된다 (모핑 포인트 수 맞추기용).
+ */
+export function subdividePathK(k0: PathShapeK, target: number): PathShapeK {
+  const k = structuredClone(k0)
+  const mid = (a: [number, number], b: [number, number]): [number, number] => [
+    (a[0] + b[0]) / 2,
+    (a[1] + b[1]) / 2,
+  ]
+  const add = (a: [number, number], b: [number, number]): [number, number] => [a[0] + b[0], a[1] + b[1]]
+  const sub = (a: [number, number], b: [number, number]): [number, number] => [a[0] - b[0], a[1] - b[1]]
+  const dist = (a: [number, number], b: [number, number]) => Math.hypot(a[0] - b[0], a[1] - b[1])
+  while (k.v.length < target) {
+    const nSeg = k.c ? k.v.length : k.v.length - 1
+    if (nSeg < 1) break
+    // 컨트롤 폴리곤 길이가 가장 긴 세그먼트 선택
+    let bestJ = 0
+    let bestL = -1
+    for (let j = 0; j < nSeg; j++) {
+      const j2 = (j + 1) % k.v.length
+      const p0 = k.v[j]
+      const c1 = add(p0, k.o[j])
+      const p3 = k.v[j2]
+      const c2 = add(p3, k.i[j2])
+      const L = dist(p0, c1) + dist(c1, c2) + dist(c2, p3)
+      if (L > bestL) {
+        bestL = L
+        bestJ = j
+      }
+    }
+    const j = bestJ
+    const j2 = (j + 1) % k.v.length
+    const p0 = k.v[j]
+    const c1 = add(p0, k.o[j])
+    const p3 = k.v[j2]
+    const c2 = add(p3, k.i[j2])
+    const L = mid(p0, c1)
+    const M0 = mid(c1, c2)
+    const R = mid(c2, p3)
+    const LL = mid(L, M0)
+    const RR = mid(M0, R)
+    const MID = mid(LL, RR)
+    k.o[j] = sub(L, p0)
+    k.i[j2] = sub(R, p3)
+    k.v.splice(j + 1, 0, MID)
+    k.i.splice(j + 1, 0, sub(LL, MID))
+    k.o.splice(j + 1, 0, sub(RR, MID))
+  }
+  return k
+}
+
 /** 그룹 안의 유일한 sh — 패스 편집/모핑 가능 조건. */
 export function findSinglePathShape(layer: Record<string, unknown>): Record<string, unknown> | null {
   const shapes = layer.shapes as Record<string, unknown>[] | undefined

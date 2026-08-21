@@ -11,7 +11,7 @@ import { t } from '../lib/i18n'
 import { loadEaseTokens, saveEaseTokens, type EaseToken } from '../lib/easeTokens'
 import {
   animSpans, normSel, normKf, kfValueAt, kfChannelKeys, segEaseOf, layerColor, tint,
-  kfFallbackValue, EASE_PRESETS, KF_CHANNEL_DEFS, SPRING_PRESETS,
+  kfFallbackValue, EASE_PRESETS, KF_CHANNEL_DEFS, SPRING_PRESETS, pkMismatch,
   type CustomSel, type CustomKf, type KfChannel, type Bezier4, type KfSelItem,
 } from '../lib/customBuilder'
 
@@ -901,6 +901,14 @@ export default function Timeline({
                           ◆
                         </button>
                         {t(label)}
+                        {ch === 'pk' && pkMismatch(xkfL) && (
+                          <span
+                            className="timeline__pkwarn"
+                            title={t('키 간 포인트 수가 달라 모핑되지 않는 구간이 있습니다 — properties에서 포인트 수 맞추기')}
+                          >
+                            ⚠
+                          </span>
+                        )}
                         {keys.length > 0 && <em className="timeline__propcount">{keys.length}</em>}
                       </div>
                     )

@@ -4017,3 +4017,13 @@ body.drag-cross * { cursor: crosshair !important; }
   vector-effect: non-scaling-stroke;
   pointer-events: none;
 }
+
+/* 패스 애니메이션 가드 — 포인트 수 불일치 경고 */
+.knob__note--warn {
+  color: var(--amber, #e5a64b);
+}
+.timeline__pkwarn {
+  margin-left: 4px;
+  color: var(--amber, #e5a64b);
+  cursor: help;
+}

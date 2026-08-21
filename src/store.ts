@@ -14,7 +14,7 @@ import {
   CUSTOM_ASSET_PREFIX, CUSTOM_OP, DEFAULT_SEL,
   type CustomSel, type CustomPayload, type CustomKf, type KfChannel, type Bezier4,
   type KfSelItem, type PathShapeK,
-  kfChannelKeys, applyTrimChannels, applyPathChannel, pathKAt, extractTrimToKf, layerScaleOf, layerAabbOf, layerRotationOf, layerBaseOf,
+  kfChannelKeys, applyTrimChannels, applyPathChannel, pathKAt, pkMismatch, subdividePathK, extractTrimToKf, layerScaleOf, layerAabbOf, layerRotationOf, layerBaseOf,
 } from './lib/customBuilder'
 
 const HISTORY_CAP = 50
@@ -222,6 +222,8 @@ interface EditorState {
   togglePathKf: (li: number) => void
   /** 재생헤드 프레임에 pk 키 추가 — 현재 보간 형태 스냅샷 (타임라인 ◆ 버튼). */
   addPathKey: (li: number, frame: number) => void
+  /** pk 키 간 포인트 수 맞추기 — 적은 키를 세분해 최대 수에 맞춤 (형태 보존, 언두 1회). */
+  matchPathPoints: (li: number) => void
   /** 로티 문서를 커스텀 레이어로 가져오기 — 트랜스폼 키프레임을 xkf로 변환. */
   importLottieLayers: (
     doc: LottieJson,
@@ -1504,6 +1506,26 @@ export const useEditor = create<EditorState>((set, get) => {
           xkf.keys.push(key)
         }
         key.pk = cur
+      })
+      if (!done) return
+      const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
+      push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
+    },
+
+    matchPathPoints: (li) => {
+      const st = get()
+      const src0 = st.sourceData
+      if (!src0?.layers[li] || lockedAt(src0, li)) return
+      const src = structuredClone(src0)
+      ensureLayerColors(src)
+      const done = editKfLayerIn(src, li, (xkf) => {
+        const keys = kfChannelKeys(xkf, 'pk')
+        if (keys.length < 2 || !pkMismatch(xkf)) return
+        const target = Math.max(...keys.map((k) => (k.pk as PathShapeK).v.length))
+        for (const k of keys) {
+          const cur = k.pk as PathShapeK
+          if (cur.v.length < target) k.pk = subdividePathK(cur, target)
+        }
       })
       if (!done) return
       const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
