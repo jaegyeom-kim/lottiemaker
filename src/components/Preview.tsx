@@ -1581,7 +1581,11 @@ export default function Preview() {
                 setPenPts(next)
                 syncPenLayer(next)
               } else if (penPtsRef.current.length) {
-                setPenHover(pt)
+                // AE 방식 — 기존 포인트/핸들 위(선택·변환 커서)에선 예상 경로 숨김
+                const onPoint = (e.target as HTMLElement).closest?.(
+                  '.drawghost__anchor, .drawghost__hdot',
+                )
+                setPenHover(onPoint ? null : pt)
               }
               return
             }
@@ -2097,6 +2101,7 @@ export default function Preview() {
                                   }
                                 : null
                             ghostDrag.current = { kind: k2, idx: i, moved: false, alt: e.altKey, add: e.shiftKey, group: grp }
+                            setPenHover(null) // 조작 중엔 예상 경로 숨김 (AE)
                             canvasRef.current?.setPointerCapture(e.pointerId)
                           }
                         return (

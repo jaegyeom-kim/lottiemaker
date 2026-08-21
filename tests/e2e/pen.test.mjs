@@ -80,6 +80,23 @@ const align = await page.evaluate(() => {
 })
 ok(!align.err && align.d1 < 3 && align.d2 < 3, `고스트-렌더 정합 (d1=${align.d1?.toFixed(2)}, d2=${align.d2?.toFixed(2)})`)
 
+// 예상 경로(러버밴드) — 빈 곳 호버 = 표시, 포인트/핸들 위 = 숨김 (AE)
+{
+  await page.mouse.move(...toClient(460, 400))
+  await page.waitForTimeout(120)
+  const dHover = await page.$eval('.drawghost__path', (e) => e.getAttribute('d') ?? '')
+  const segs = (d0) => (d0.match(/[LC]/g) ?? []).length
+  const withHover = segs(dHover)
+  const a0 = await (await page.$$('.drawghost__anchor'))[0].boundingBox()
+  await page.mouse.move(a0.x + a0.width / 2, a0.y + a0.height / 2)
+  await page.waitForTimeout(120)
+  const dOnPoint = await page.$eval('.drawghost__path', (e) => e.getAttribute('d') ?? '')
+  ok(segs(dOnPoint) === withHover - 1, `포인트 위 = 예상 경로 숨김 (${withHover}→${segs(dOnPoint)})`)
+  await page.mouse.move(...toClient(460, 400))
+  await page.waitForTimeout(120)
+  ok(segs(await page.$eval('.drawghost__path', (e) => e.getAttribute('d') ?? '')) === withHover, '빈 곳 복귀 = 다시 표시')
+}
+
 // Backspace = 마지막 앵커 삭제 (레이어 삭제로 새면 안 됨)
 await page.keyboard.press('Backspace')
 await page.waitForTimeout(200)
