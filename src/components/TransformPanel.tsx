@@ -1,6 +1,7 @@
 import { useEditor, type ShapeMeta, type TextMeta } from '../store'
 import { TextSection } from './TextControls'
 import { rgbArrayToHex } from '../lib/lottieColors'
+import { idbLibPut } from '../lib/sessionStore'
 import { t } from '../lib/i18n'
 import {
   normSel, normKf, kfValueAt, kfChannelKeys, pkMismatch,
@@ -56,7 +57,38 @@ export default function TransformPanel() {
   return (
     <section className="panel__group">
       {/* 섹션 제목은 바깥 Section이 — 여기선 선택 레이어 이름만 */}
-      <h4 className="grouphead">{String(selLayer.nm ?? '')}</h4>
+      <h4 className="grouphead grouphead--row">
+        {String(selLayer.nm ?? '')}
+        {(() => {
+          // 재사용 가능한 그래픽 소스 — SVG 원본(xsrc) 또는 이미지 에셋 dataURI
+          const svg = typeof selLayer.xsrc === 'string' ? (selLayer.xsrc as string) : null
+          const asset = ((sourceData?.assets as Record<string, unknown>[] | undefined) ?? []).find(
+            (a) => a.id === selLayer.refId && typeof a.p === 'string' && (a.p as string).startsWith('data:image'),
+          )
+          if (!svg && !asset) return null
+          return (
+            <button
+              className="linkbtn"
+              title={t('이 그래픽을 라이브러리에 저장 — 다른 문서에서도 재사용')}
+              onClick={async () => {
+                const at = Date.now()
+                await idbLibPut(
+                  svg
+                    ? { id: `lib_${at}`, name: String(selLayer.nm ?? '그래픽'), at, kind: 'svg', data: svg }
+                    : {
+                        id: `lib_${at}`, name: String(selLayer.nm ?? '이미지'), at, kind: 'image',
+                        data: String(asset!.p),
+                        w: Number(asset!.w ?? 256), h: Number(asset!.h ?? 256),
+                      },
+                )
+                window.dispatchEvent(new Event('lm:library-changed'))
+              }}
+            >
+              {t('라이브러리에 저장')}
+            </button>
+          )
+        })()}
+      </h4>
 
       {/* 위치 */}
       <div className="knob">

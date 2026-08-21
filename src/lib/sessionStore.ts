@@ -5,6 +5,7 @@ const DB_NAME = 'lottiemaker'
 const STORE = 'sessions'
 const FONT_STORE = 'fonts'
 const VER_STORE = 'versions'
+const LIB_STORE = 'library'
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -12,11 +13,12 @@ function openDb(): Promise<IDBDatabase> {
       reject(new Error('no indexedDB'))
       return
     }
-    const req = indexedDB.open(DB_NAME, 3)
+    const req = indexedDB.open(DB_NAME, 4)
     req.onupgradeneeded = () => {
       if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE)
       if (!req.result.objectStoreNames.contains(FONT_STORE)) req.result.createObjectStore(FONT_STORE)
       if (!req.result.objectStoreNames.contains(VER_STORE)) req.result.createObjectStore(VER_STORE)
+      if (!req.result.objectStoreNames.contains(LIB_STORE)) req.result.createObjectStore(LIB_STORE)
     }
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error)
@@ -184,6 +186,72 @@ export async function idbVersionList(): Promise<VersionMeta[]> {
           // 손상 엔트리 — 목록에서 제외
         }
         cur.continue()
+      }
+      req.onerror = () => reject(req.error)
+    })
+    return rows.sort((a, b) => b.at - a.at)
+  } finally {
+    db.close()
+  }
+}
+
+// ── 에셋 라이브러리 — 문서 간 재사용 그래픽 (SVG 원본 / 이미지 dataURI) ──
+export interface LibItem {
+  id: string
+  name: string
+  at: number
+  kind: 'svg' | 'image'
+  data: string
+  /** 이미지 원본 크기 (kind=image). */
+  w?: number
+  h?: number
+}
+
+export async function idbLibPut(item: LibItem): Promise<void> {
+  const db = await openDb()
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(LIB_STORE, 'readwrite')
+      tx.objectStore(LIB_STORE).put(JSON.stringify(item), item.id)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+  } finally {
+    db.close()
+  }
+}
+
+export async function idbLibDel(id: string): Promise<void> {
+  const db = await openDb()
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(LIB_STORE, 'readwrite')
+      tx.objectStore(LIB_STORE).delete(id)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+  } finally {
+    db.close()
+  }
+}
+
+export async function idbLibList(): Promise<LibItem[]> {
+  const db = await openDb()
+  try {
+    const rows: LibItem[] = await new Promise((resolve, reject) => {
+      const tx = db.transaction(LIB_STORE, 'readonly')
+      const req = tx.objectStore(LIB_STORE).getAll()
+      req.onsuccess = () => {
+        const out: LibItem[] = []
+        for (const raw of req.result as unknown[]) {
+          try {
+            const v = JSON.parse(String(raw)) as LibItem
+            if (v?.id && v?.data) out.push(v)
+          } catch {
+            // 손상 엔트리 — 제외
+          }
+        }
+        resolve(out)
       }
       req.onerror = () => reject(req.error)
     })

@@ -22,6 +22,7 @@ import {
   type CustomPayload,
 } from '../lib/customBuilder'
 import { t } from '../lib/i18n'
+import LibraryPanel from './LibraryPanel'
 
 /** Lottie 블렌드 모드 라벨 — 인덱스 = bm 값. */
 /**
@@ -156,6 +157,10 @@ export default function CustomBuilder() {
         }}
       />
       {error && <p className="panel__error">{error}</p>}
+
+      {/* 라이브러리 — 문서 간 재사용 그래픽 (properties '라이브러리에 저장'으로 채움) */}
+      <h4 className="grouphead">{t('라이브러리')}</h4>
+      <LibraryPanel />
 
       {active && layers.length > 0 && (
         <>
