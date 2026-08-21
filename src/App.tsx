@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useEditor, loadLastSession, hydrateSessions } from './store'
+import ShortcutsHelp from './components/ShortcutsHelp'
 import { setDragCursor } from './lib/cursor'
 import { getLang, setLangValue, t, type Lang } from './lib/i18n'
 import TemplateGallery from './components/TemplateGallery'
@@ -84,6 +85,7 @@ export default function App() {
   const { undo, redo, past, future, animationData } = useEditor()
   const mode = useEditor((s) => s.mode)
   const saveStatus = useEditor((s) => s.saveStatus)
+  const [helpOpen, setHelpOpen] = useState(false)
   const [tab, setTab] = useState<Tab>('edit')
   const [themePref, setThemePref] = useState<ThemePref>(initialThemePref)
   // 언어 — 전환 시 루트 key로 통째 리마운트해 모든 t()가 재평가된다
@@ -223,6 +225,13 @@ export default function App() {
         if (e.shiftKey) redo()
         else undo()
       }
+      // ? = 단축키 치트시트 토글
+      if (e.key === '?') {
+        e.preventDefault()
+        setHelpOpen((v) => !v)
+        return
+      }
+      if (e.key === 'Escape') setHelpOpen(false)
       // 스페이스: 재생/일시정지 (커스텀 빌더에선 프리뷰 토글 겸용)
       if (e.key === ' ') {
         const s = useEditor.getState()
@@ -290,6 +299,7 @@ export default function App() {
         </div>
       )}
 
+      {helpOpen && <ShortcutsHelp onClose={() => setHelpOpen(false)} />}
       <main
         className="layout"
         style={{
