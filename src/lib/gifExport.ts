@@ -16,6 +16,13 @@ export async function exportGif(
     import('lottie-web/build/player/lottie_canvas'),
     import('gifenc'),
   ])
+  // 인코딩은 워커에서 (프레임당 수십 ms 양자화가 메인 스레드를 막지 않게) — 실패 시 인라인 폴백
+  let worker: Worker | null = null
+  try {
+    worker = new Worker(new URL('./gifWorker.ts', import.meta.url), { type: 'module' })
+  } catch {
+    worker = null
+  }
   const scale = opts.scale ?? 1
   const fps = Math.max(5, Math.min(50, opts.fps ?? 30))
   const w = Math.round(anim.w * scale)
@@ -57,8 +64,8 @@ export async function exportGif(
       })
     })
 
-    const enc = gif.GIFEncoder()
     const delay = Math.round(1000 / fps)
+    const enc = worker ? null : gif.GIFEncoder()
     for (let i = 0; i < frames; i++) {
       const f = anim.ip + (i / frames) * totalF
       // 배경 → 프레임 렌더 (clearCanvas:false — 직접 지우고 깐다)
@@ -66,18 +73,40 @@ export async function exportGif(
       ctx.fillRect(0, 0, w, h)
       item.goToAndStop(f, true)
       const { data } = ctx.getImageData(0, 0, w, h)
-      const palette = gif.quantize(data, 256)
-      const index = gif.applyPalette(data, palette)
-      enc.writeFrame(index, w, h, { palette, delay })
+      if (worker) {
+        // 픽셀 버퍼 transferable 전송 + ack 백프레셔
+        const buf = data.buffer as ArrayBuffer
+        await new Promise<void>((resolve, reject) => {
+          worker!.onmessage = () => resolve()
+          worker!.onerror = (err) => reject(err)
+          worker!.postMessage({ type: 'frame', data: buf, w, h, delay }, [buf])
+        })
+      } else {
+        const palette = gif.quantize(data, 256)
+        const index = gif.applyPalette(data, palette)
+        enc!.writeFrame(index, w, h, { palette, delay })
+        await new Promise((r) => setTimeout(r, 0))
+      }
       opts.onProgress?.((i + 1) / frames)
-      // 인코딩이 메인 스레드 독점하지 않게 프레임마다 양보
-      await new Promise((r) => setTimeout(r, 0))
     }
-    enc.finish()
-    const bytes = enc.bytes()
+    if (worker) {
+      const bytes = await new Promise<Uint8Array>((resolve, reject) => {
+        worker!.onmessage = (e) => {
+          if ((e.data as { type?: string }).type === 'done')
+            resolve((e.data as { bytes: Uint8Array }).bytes)
+        }
+        worker!.onerror = (err) => reject(err)
+        worker!.postMessage({ type: 'finish' })
+      })
+      worker.terminate()
+      return new Blob([new Uint8Array(bytes).buffer as ArrayBuffer], { type: 'image/gif' })
+    }
+    enc!.finish()
+    const bytes = enc!.bytes()
     // Uint8Array<ArrayBufferLike> → BlobPart 호환 사본
     return new Blob([new Uint8Array(bytes).buffer as ArrayBuffer], { type: 'image/gif' })
   } finally {
+    worker?.terminate()
     try {
       item.destroy()
     } catch {
