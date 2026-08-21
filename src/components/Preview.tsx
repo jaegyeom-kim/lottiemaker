@@ -1035,6 +1035,39 @@ export default function Preview() {
     }
   })()
 
+  // 고정 가이드 드래그 — 룰러에서 끌어 생성, 라인 드래그로 이동, 룰러 밖 드롭 = 삭제
+  const guideDrag = useRef<{ axis: 'v' | 'h'; idx: number; moved: boolean } | null>(null)
+  const guideCanvasPos = (e: React.PointerEvent, axis: 'v' | 'h'): number | null => {
+    const rect = wrapRef.current?.getBoundingClientRect()
+    if (!rect) return null
+    const f = cw / rect.width
+    return axis === 'v' ? (e.clientX - rect.left) * f : (e.clientY - rect.top) * f
+  }
+  const guideMove = (e: React.PointerEvent) => {
+    const gd = guideDrag.current
+    if (!gd) return
+    e.stopPropagation()
+    const pos = guideCanvasPos(e, gd.axis)
+    if (pos === null) return
+    gd.moved = true
+    gd.idx = useEditor.getState().setGuideLive(gd.axis, gd.idx, pos)
+  }
+  const guideUp = (e: React.PointerEvent) => {
+    const gd = guideDrag.current
+    guideDrag.current = null
+    if (!gd) return
+    e.stopPropagation()
+    ;(e.currentTarget as Element).releasePointerCapture(e.pointerId)
+    if (!gd.moved) return
+    const pos = guideCanvasPos(e, gd.axis)
+    const st = useEditor.getState()
+    // 캔버스 밖으로 드롭 = 삭제 (Figma)
+    if (pos === null || pos < -1 || pos > (gd.axis === 'v' ? cw : ch) + 1) {
+      if (gd.idx >= 0) st.removeGuide(gd.axis, gd.idx)
+      else st.cancelEdit()
+    } else st.commitEdit()
+  }
+
   // 모션 패스 드래그 — 키 이동 / 공간 탄젠트 (⌥ = 반대쪽 비대칭)
   const mpDrag = useRef<{
     kind: 'key' | 'pto' | 'pti'
@@ -1712,6 +1745,61 @@ export default function Preview() {
             </button>
           </div>
         )}
+        {/* 눈금자 — 캔버스 좌표 눈금, 드래그로 고정 가이드 생성 */}
+        {templateId === '__custom' && mode === 'canvas' && animationData && !previewing && (() => {
+          const wrapEl = wrapRef.current
+          const stageEl = canvasRef.current
+          if (!wrapEl || !stageEl) return null
+          const wr = wrapEl.getBoundingClientRect()
+          const sr = stageEl.getBoundingClientRect()
+          const sx = wr.width / cw
+          const ox = wr.left - sr.left
+          const oy = wr.top - sr.top
+          const ticks: number[] = []
+          for (let v = 0; v <= cw; v += 50) ticks.push(v)
+          return (
+            <>
+              <div
+                className="ruler ruler--top"
+                title={t('드래그: 가로 가이드 생성')}
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return
+                  e.stopPropagation()
+                  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+                  guideDrag.current = { axis: 'h', idx: -1, moved: false }
+                }}
+                onPointerMove={guideMove}
+                onPointerUp={guideUp}
+                onPointerCancel={guideUp}
+              >
+                {ticks.map((v) => (
+                  <span key={v} className="ruler__tick" style={{ left: ox + v * sx }}>
+                    {v}
+                  </span>
+                ))}
+              </div>
+              <div
+                className="ruler ruler--left"
+                title={t('드래그: 세로 가이드 생성')}
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return
+                  e.stopPropagation()
+                  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+                  guideDrag.current = { axis: 'v', idx: -1, moved: false }
+                }}
+                onPointerMove={guideMove}
+                onPointerUp={guideUp}
+                onPointerCancel={guideUp}
+              >
+                {ticks.map((v) => (
+                  <span key={v} className="ruler__tick ruler__tick--v" style={{ top: oy + v * sx }}>
+                    {v}
+                  </span>
+                ))}
+              </div>
+            </>
+          )
+        })()}
         {/* 드로잉 툴바 — Figma UI3 방식: 캔버스 하단 중앙 플로팅 */}
         {templateId === '__custom' && mode === 'canvas' && animationData && (
           <div className="drawbar">
@@ -2080,6 +2168,45 @@ export default function Preview() {
               </span>
               {templateId === '__custom' && (
                 <>
+                  {/* 고정 가이드 — 룰러에서 생성, 드래그 이동, 룰러 밖 드롭 삭제 */}
+                  {!previewing &&
+                    (((sourceData as unknown as Record<string, unknown> | null)?.xguides as
+                      | { v: number[]; h: number[] }
+                      | undefined)?.v ?? []).map((gv, gi) => (
+                      <div
+                        key={`gv${gi}`}
+                        className="fixedguide fixedguide--v"
+                        style={{ left: `${(gv / cw) * 100}%` }}
+                        onPointerDown={(e) => {
+                          if (e.button !== 0) return
+                          e.stopPropagation()
+                          ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+                          guideDrag.current = { axis: 'v', idx: gi, moved: false }
+                        }}
+                        onPointerMove={guideMove}
+                        onPointerUp={guideUp}
+                        onPointerCancel={guideUp}
+                      />
+                    ))}
+                  {!previewing &&
+                    (((sourceData as unknown as Record<string, unknown> | null)?.xguides as
+                      | { v: number[]; h: number[] }
+                      | undefined)?.h ?? []).map((gh2, gi) => (
+                      <div
+                        key={`gh${gi}`}
+                        className="fixedguide fixedguide--h"
+                        style={{ top: `${(gh2 / ch) * 100}%` }}
+                        onPointerDown={(e) => {
+                          if (e.button !== 0) return
+                          e.stopPropagation()
+                          ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+                          guideDrag.current = { axis: 'h', idx: gi, moved: false }
+                        }}
+                        onPointerMove={guideMove}
+                        onPointerUp={guideUp}
+                        onPointerCancel={guideUp}
+                      />
+                    ))}
                   {guides.v !== null && (
                     <div className="snapguide snapguide--v" style={{ left: `${(guides.v / cw) * 100}%` }}>
                       <span className="snapguide__label">{guides.v}</span>
@@ -2385,6 +2512,12 @@ export default function Preview() {
                         if (src2) {
                           const selSet = useEditor.getState().customIdxs
                           const fr2 = Math.round(frameRef.current)
+                          // 고정 가이드도 스냅 타깃
+                          const xg = (src2 as unknown as Record<string, unknown>).xguides as
+                            | { v: number[]; h: number[] }
+                            | undefined
+                          if (xg?.v) lx.push(...xg.v)
+                          if (xg?.h) ly.push(...xg.h)
                           src2.layers.forEach((l, j) => {
                             if (j === hit || selSet.includes(j)) return
                             if ((l as Record<string, unknown>).hd === true) return

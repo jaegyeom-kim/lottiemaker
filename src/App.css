@@ -4220,3 +4220,88 @@ body.drag-cross * { cursor: crosshair !important; }
 .motionpath__tangent--auto {
   opacity: 0.45; /* 잠재(자동/시드) 탄젠트 — 드래그하면 수동 확정 */
 }
+
+/* 눈금자 + 고정 가이드 */
+.ruler {
+  position: absolute;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  z-index: 4;
+  overflow: hidden;
+  user-select: none;
+  touch-action: none;
+}
+.ruler--top {
+  top: 0;
+  left: 18px;
+  right: 0;
+  height: 18px;
+  cursor: row-resize;
+  border-bottom: 1px solid var(--line);
+}
+.ruler--left {
+  top: 18px;
+  left: 0;
+  bottom: 0;
+  width: 18px;
+  cursor: col-resize;
+  border-right: 1px solid var(--line);
+}
+.ruler__tick {
+  position: absolute;
+  top: 2px;
+  font-size: 9px;
+  color: var(--dim);
+  border-left: 1px solid var(--line);
+  padding-left: 2px;
+  height: 100%;
+  transform: translateX(-18px); /* --top은 left:18px 오프셋 보정 */
+}
+.ruler__tick--v {
+  left: 1px;
+  top: auto;
+  border-left: none;
+  border-top: 1px solid var(--line);
+  width: 100%;
+  height: auto;
+  padding-left: 0;
+  padding-top: 1px;
+  transform: translateY(-18px);
+  writing-mode: vertical-rl;
+}
+.fixedguide {
+  position: absolute;
+  z-index: 3;
+  background: transparent;
+}
+.fixedguide--v {
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  margin-left: -3px;
+  cursor: col-resize;
+}
+.fixedguide--h {
+  left: 0;
+  right: 0;
+  height: 7px;
+  margin-top: -3px;
+  cursor: row-resize;
+}
+.fixedguide--v::after,
+.fixedguide--h::after {
+  content: '';
+  position: absolute;
+  background: #37c5ab; /* 고정 가이드 = 청록 — 스냅(파랑)·모션패스(앰버)와 구분 */
+}
+.fixedguide--v::after {
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+.fixedguide--h::after {
+  top: 3px;
+  left: 0;
+  right: 0;
+  height: 1px;
+}

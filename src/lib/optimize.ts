@@ -35,6 +35,7 @@ export function optimizeLottie(doc: LottieJson): LottieJson {
   const assets = Array.isArray(out.assets) ? (out.assets as Record<string, unknown>[]) : []
   for (const a of assets) stripLayers(a.layers)
   delete out.xblank
+  delete out.xguides
 
   // 2) 미사용 에셋 제거 — 레이어(메인·에셋 내부)가 참조하는 refId만 유지
   const used = new Set<string>()

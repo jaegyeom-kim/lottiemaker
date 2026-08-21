@@ -332,6 +332,10 @@ interface EditorState {
   setKfChannelLive: (ch: KfChannel, frame: number, value: number | [number, number]) => void
   /** 위치 키의 공간 탄젠트(모션 패스 핸들) 라이브 편집 — null = 제거(직선). */
   setKfSpatialLive: (frame: number, pat: { pto?: [number, number] | null; pti?: [number, number] | null }) => void
+  /** 고정 가이드 라이브 편집 — index -1 = 추가. 릴리즈에 commitEdit. */
+  setGuideLive: (axis: 'v' | 'h', index: number, pos: number) => number
+  /** 가이드 제거 (즉시 히스토리 1회). */
+  removeGuide: (axis: 'v' | 'h', index: number) => void
   /** frame의 채널 키 제거 — 키가 비면 키 자체 삭제. */
   removeKfChannel: (ch: KfChannel, frame: number) => void
   /** 타임라인 키 다중 선택 (마키/클릭) — Delete·그룹 드래그 대상. */
@@ -2321,6 +2325,61 @@ export const useEditor = create<EditorState>((set, get) => {
       const next = withKfEdit(st, (xkf) => upsertKey(xkf, ch, frame, value), true)
       if (!next) return
       set({ ...next, editBaseline: st.editBaseline ?? snap(), future: [] })
+    },
+
+    setGuideLive: (axis, index, pos) => {
+      const st = get()
+      const baseline = st.editBaseline ?? snap()
+      const baseSrc = baseline.source ?? st.sourceData
+      if (!baseSrc) return -1
+      const src = cloneForLive(baseSrc)
+      // 가이드 = 문서 편집 — 빈 캔버스 마커 해제 (이후 레이어 추가가 문서를 교체하지 않게)
+      delete (src as unknown as Record<string, unknown>).xblank
+      const g = ((src as unknown as Record<string, unknown>).xguides ??= { v: [], h: [] }) as {
+        v: number[]
+        h: number[]
+      }
+      const arr = axis === 'v' ? g.v : g.h
+      let idx = index
+      const rounded = Math.round(pos * 10) / 10
+      if (idx < 0 || idx >= arr.length) {
+        arr.push(rounded)
+        idx = arr.length - 1
+      } else arr[idx] = rounded
+      const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
+      set({
+        animationData: applied,
+        sourceData: src,
+        colorGroups: st.colorGroups,
+        editBaseline: baseline,
+        future: [],
+      })
+      return idx
+    },
+
+    removeGuide: (axis, index) => {
+      const st = get()
+      // 라이브 드래그 중 삭제(룰러 밖 드롭) — 베이스라인 기준으로 재구성해 커밋
+      const baseline = st.editBaseline
+      const src = structuredClone(st.sourceData)
+      if (!src) return
+      const g = (src as unknown as Record<string, unknown>).xguides as
+        | { v: number[]; h: number[] }
+        | undefined
+      const arr = axis === 'v' ? g?.v : g?.h
+      if (!arr || index < 0 || index >= arr.length) {
+        if (baseline) get().cancelEdit()
+        return
+      }
+      arr.splice(index, 1)
+      const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
+      if (baseline) {
+        // 라이브 세션 종료 — 베이스라인을 과거로, 삭제본을 현재로
+        set({ animationData: applied, sourceData: src, colorGroups: st.colorGroups })
+        get().commitEdit()
+      } else {
+        push({ animationData: applied, sourceData: src, colorGroups: st.colorGroups })
+      }
     },
 
     setKfSpatialLive: (frame, pat) => {
