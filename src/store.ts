@@ -53,6 +53,14 @@ export interface LayerFill {
   angle?: number
 }
 
+/** 텍스트 레이어 메타 (layer.xtext) — properties에서 내용·크기·폰트 재생성용. */
+export interface TextMeta {
+  text: string
+  font: string
+  size: number
+  lh: number
+}
+
 /** 드로잉 도형 메타 (layer.xshape) — properties에서 크기·라운드 리빌드용. */
 export interface ShapeMeta {
   tool: 'rect' | 'ellipse' | 'polygon' | 'star'
@@ -251,7 +259,7 @@ interface EditorState {
   /** 빈 커스텀 캔버스로 시작 — 템플릿/그래픽 로드 없이 바로 드로잉. */
   newBlankCustom: () => void
   /** 커스텀 빌더: 그래픽 추가 — 세션 없으면 새 문서, 있으면 맨 위 레이어로. at = 배치 좌표. */
-  addCustomLayer: (payload: CustomPayload, name: string, at?: [number, number], size?: number, xshape?: ShapeMeta) => void
+  addCustomLayer: (payload: CustomPayload, name: string, at?: [number, number], size?: number, xshape?: ShapeMeta, xtext?: TextMeta) => void
   /** 선택 레이어의 그래픽을 통째 교체 (라이브) — 펜 드로잉 진행 중 갱신. 모션·이름·라벨 유지, commitEdit로 확정. */
   replaceCustomGraphicLive: (payload: CustomPayload, at: [number, number], size: number) => void
   /** 펜 패스 포인트 편집 (라이브) — 단일 sh 레이어의 로컬 경로 k 교체. xshape는 도형 리빌드 시 메타 동기용. */
@@ -260,6 +268,8 @@ interface EditorState {
   setLayerStroke: (li: number, opts: { w?: number; lc?: number }) => void
   /** 칠 — 단색(fl) ↔ 그라디언트(gf 선형/방사) 전환·색·각도. 로컬 bbox 기준 끝점. */
   setLayerFill: (li: number, fill: LayerFill) => void
+  /** 텍스트 레이어 재생성 — 그래픽 교체 + xtext 메타 동기 (언두 1회). li = 주 선택이어야 함. */
+  applyTextGraphic: (li: number, payload: CustomPayload, at: [number, number], size: number, xtext: TextMeta) => void
   /** 도형 지오메트리 리빌드 — xshape 메타 있는 레이어의 크기/라운드 (제자리 유지, 언두 1회). */
   setShapeGeom: (li: number, patch: Partial<Omit<ShapeMeta, 'tool'>>) => void
   /** 패스 애니메이션 토글 — on: 현재 패스로 재생헤드에 pk 키, off: 현재 프레임 형태로 고정. */
@@ -1330,7 +1340,7 @@ export const useEditor = create<EditorState>((set, get) => {
       set({ customIdx: 0, customIdxs: [], loop: false, playing: false })
     },
 
-    addCustomLayer: (payload, name, at, size, xshape) => {
+    addCustomLayer: (payload, name, at, size, xshape, xtext) => {
       const { templateId, sourceData, templateKnobs, knobValues } = get()
       const base: [number, number] = at ?? [256, 256]
       // 드로잉 툴은 그린 크기 그대로 생성 (기본은 240px)
@@ -1339,6 +1349,7 @@ export const useEditor = create<EditorState>((set, get) => {
         const doc = buildCustomDoc(payload, sel, base, name)
         ;(doc.layers[0] as Record<string, unknown>).xci = 0
         if (xshape) (doc.layers[0] as Record<string, unknown>).xshape = xshape
+        if (xtext) (doc.layers[0] as Record<string, unknown>).xtext = xtext
         // 커스텀은 timeStretch 노브 없음 — 컴포지션 길이는 setCompLength로 (절대 시간 유지)
         get().loadTemplate(doc, '__custom', [])
         // 편집 모드로 시작 — 재생(프리뷰) 버튼을 눌러야 루프 재생
@@ -1353,6 +1364,7 @@ export const useEditor = create<EditorState>((set, get) => {
       )
       layer.xci = nextXci(src)
       if (xshape) layer.xshape = xshape
+      if (xtext) layer.xtext = xtext
       if (asset) assets.push(asset)
       src.assets = assets
       src.layers = [layer as never, ...src.layers]
@@ -1574,6 +1586,21 @@ export const useEditor = create<EditorState>((set, get) => {
       if (!done) return
       const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
       push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
+    },
+
+    applyTextGraphic: (li, payload, at, size, xtext) => {
+      const st0 = get()
+      if (Math.min(st0.customIdx, (st0.sourceData?.layers.length ?? 1) - 1) !== li) return
+      get().replaceCustomGraphicLive(payload, at, size)
+      const st = get()
+      if (!st.sourceData) return
+      const src = structuredClone(st.sourceData)
+      ;(src.layers[li] as Record<string, unknown>).xtext = xtext
+      set({
+        sourceData: src,
+        animationData: applyKnobs(src, st.templateKnobs, st.knobValues),
+      })
+      get().commitEdit()
     },
 
     setLayerFill: (li, fill) => {
@@ -3007,8 +3034,15 @@ export function sessionPayload(): SavedSession | null {
   }
 }
 
+// 디바운스는 데이터(sourceData/knobs)가 실제로 바뀔 때만 리셋 — 선택·채널 공개 같은
+// UI 상태 변화가 타이머를 계속 밀어 저장을 굶기지 않게 (연속 조작 중 stale 세션 노출 방지)
+let lastSeenSource: unknown = Symbol('init')
+let lastSeenKnobs: unknown = Symbol('init')
 useEditor.subscribe((state) => {
   if (state.sourceData === lastSavedSource && state.knobValues === lastSavedKnobs) return
+  if (state.sourceData === lastSeenSource && state.knobValues === lastSeenKnobs) return
+  lastSeenSource = state.sourceData
+  lastSeenKnobs = state.knobValues
   clearTimeout(saveTimer)
   saveTimer = setTimeout(saveSessionNow, 800)
 })

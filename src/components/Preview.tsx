@@ -7,6 +7,7 @@ import {
 } from './icons'
 import { durationSec, parseLottie, type LottieJson } from '../lib/lottieUtils'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
+import { TextDialog } from './TextControls'
 import {
   layerHalfOf, layerAabbOf, layerBaseOf, layerRotationOf, normKf, kfValueAt, pathKAt,
   kfChannelKeys, normSel, animSpans, kfFallbackValue,
@@ -255,6 +256,9 @@ export default function Preview() {
     }
     dragOverlay.current = null
   }
+
+  // 텍스트 추가 다이얼로그 (드로잉 툴바 T)
+  const [textDlg, setTextDlg] = useState(false)
 
   // 어니언 스킨 토글 — 전후 프레임 고스트 (일시정지·비편집 중에만 렌더)
   const [onion, setOnion] = useState(() => {
@@ -1628,10 +1632,20 @@ export default function Preview() {
                 { id: 'star', glyph: <StarIcon />, tip: '별 — 드래그로 그리기' },
                 { id: 'line', glyph: <LineIcon />, tip: '선 (Q 순환) — 드래그로 그리기 · ⇧ 45° 스냅' },
                 { id: 'pen', glyph: <PenIcon />, tip: '펜 (G) — 클릭 = 점 · 클릭+드래그 = 곡선 · 그리는 중 앵커/핸들 드래그 편집 (⌥ = 한쪽 핸들만) · 시작점 클릭 = 닫기 · Enter/Esc = 완성' },
+                { id: 'text', glyph: <span className="drawbar__glyphT">T</span>, tip: '텍스트 — 폰트를 패스로 변환해 추가 (.ttf/.otf 업로드)' },
               ] as { id: string; glyph: ReactNode; tip: string }[]
             ).map((b) =>
               b.id === 'sep1' ? (
                 <span key={b.id} className="drawbar__sep" />
+              ) : b.id === 'text' ? (
+                <button
+                  key={b.id}
+                  className="drawbar__btn"
+                  title={t(b.tip)}
+                  onClick={() => setTextDlg(true)}
+                >
+                  {b.glyph}
+                </button>
               ) : (
                 <button
                   key={b.id}
@@ -1645,6 +1659,7 @@ export default function Preview() {
             )}
           </div>
         )}
+        {textDlg && <TextDialog onClose={() => setTextDlg(false)} />}
         {animationData ? (
           mode === 'mockup' ? (
             <MockupView />

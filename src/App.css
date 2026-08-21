@@ -4137,3 +4137,28 @@ body.drag-cross * { cursor: crosshair !important; }
   width: auto;
   min-width: 0;
 }
+
+/* 텍스트 툴 */
+.drawbar__glyphT {
+  font-weight: 700;
+  font-size: 15px;
+  line-height: 1;
+}
+.textdlg {
+  max-width: 420px;
+}
+.textdlg__text {
+  width: 100%;
+  resize: vertical;
+  margin: 8px 0;
+  font: inherit;
+}
+.fontpicker {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.fontpicker select {
+  flex: 1;
+  min-width: 0;
+}

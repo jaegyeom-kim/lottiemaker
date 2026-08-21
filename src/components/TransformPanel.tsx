@@ -1,4 +1,5 @@
-import { useEditor, type ShapeMeta } from '../store'
+import { useEditor, type ShapeMeta, type TextMeta } from '../store'
+import { TextSection } from './TextControls'
 import { rgbArrayToHex } from '../lib/lottieColors'
 import { t } from '../lib/i18n'
 import {
@@ -178,6 +179,11 @@ export default function TransformPanel() {
           </div>
         )
       })()}
+
+      {/* 텍스트 — xtext 레이어: 내용·크기·줄간격·폰트 재생성 */}
+      {selLayer.xtext != null && (
+        <TextSection idx={idx} meta={selLayer.xtext as TextMeta} />
+      )}
 
       {/* 칠 — 단색 ↔ 그라디언트 (선형/방사), 드로잉 레이어의 fl/gf */}
       {(() => {

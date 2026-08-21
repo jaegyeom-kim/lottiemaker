@@ -13,7 +13,7 @@ const idbRead = (key) =>
   page.evaluate(
     (k) =>
       new Promise((resolve) => {
-        const req = indexedDB.open('lottiemaker', 1)
+        const req = indexedDB.open('lottiemaker') // 버전 미지정 — 현재 버전으로
         req.onsuccess = () => {
           try {
             const tx = req.result.transaction('sessions', 'readonly')
