@@ -1,4 +1,5 @@
 import { useEditor, type ShapeMeta } from '../store'
+import { rgbArrayToHex } from '../lib/lottieColors'
 import { t } from '../lib/i18n'
 import {
   normSel, normKf, kfValueAt, kfChannelKeys, pkMismatch,
@@ -29,6 +30,7 @@ export default function TransformPanel() {
   const {
     setCustomChannelsLive, setKfChannelLive, commitEdit,
     nudgeCustomBase, setLayerBlend, setLayerStroke, setShapeGeom, togglePathKf, matchPathPoints,
+    setLayerFill,
   } = useEditor()
 
   const layers = sourceData?.layers ?? []
@@ -172,6 +174,77 @@ export default function TransformPanel() {
                   {t('포인트 수 맞추기')}
                 </button>
               </p>
+            )}
+          </div>
+        )
+      })()}
+
+      {/* 칠 — 단색 ↔ 그라디언트 (선형/방사), 드로잉 레이어의 fl/gf */}
+      {(() => {
+        let painter: Record<string, unknown> | null = null
+        const walkF = (items?: Record<string, unknown>[]) => {
+          for (const it of items ?? []) {
+            if ((it.ty === 'fl' || it.ty === 'gf') && !painter) painter = it
+            else if (it.ty === 'gr') walkF(it.it as Record<string, unknown>[])
+          }
+        }
+        walkF(((selLayer.shapes as Record<string, unknown>[] | undefined)?.[0] as Record<string, unknown> | undefined)?.it as Record<string, unknown>[])
+        if (!painter) return null
+        const pt = painter as Record<string, unknown>
+        const isG = pt.ty === 'gf'
+        const stops = isG
+          ? (((pt.g as Record<string, unknown>)?.k as Record<string, unknown>)?.k as number[] | undefined) ?? []
+          : []
+        const from = isG && stops.length >= 8 ? rgbArrayToHex([stops[1], stops[2], stops[3]]) : '#3380f5'
+        const to = isG && stops.length >= 8 ? rgbArrayToHex([stops[5], stops[6], stops[7]]) : '#9b6ee8'
+        const solidHex = !isG
+          ? rgbArrayToHex(((pt.c as Record<string, unknown>)?.k as number[] | undefined) ?? [0.2, 0.5, 0.96])
+          : from
+        const kind: 'solid' | 'linear' | 'radial' = !isG ? 'solid' : Number(pt.t) === 2 ? 'radial' : 'linear'
+        // 현재 각도 — s→e 벡터에서 역산
+        const sPt = ((pt.s as Record<string, unknown>)?.k as number[] | undefined) ?? [0, 0]
+        const ePt = ((pt.e as Record<string, unknown>)?.k as number[] | undefined) ?? [1, 0]
+        const angle = Math.round((Math.atan2(ePt[1] - sPt[1], ePt[0] - sPt[0]) * 180) / Math.PI)
+        return (
+          <div className="knob">
+            <div className="knob__head">
+              <span className="knob__name">{t('칠')}</span>
+              <select
+                className="input input--inline"
+                value={kind}
+                onChange={(e) => {
+                  const k = e.target.value as 'solid' | 'linear' | 'radial'
+                  if (k === 'solid') setLayerFill(idx, { kind: 'solid', hex: solidHex })
+                  else setLayerFill(idx, { kind: k, from: isG ? from : solidHex, to, angle: kind === 'solid' ? 0 : angle })
+                }}
+              >
+                <option value="solid">{t('단색')}</option>
+                <option value="linear">{t('선형 그라디언트')}</option>
+                <option value="radial">{t('방사 그라디언트')}</option>
+              </select>
+            </div>
+            {isG && (
+              <div className="posrow posrow--fill">
+                <input
+                  type="color"
+                  value={from}
+                  title={t('시작 색')}
+                  onChange={(e) => setLayerFill(idx, { kind, from: e.target.value, to, angle })}
+                />
+                <input
+                  type="color"
+                  value={to}
+                  title={t('끝 색')}
+                  onChange={(e) => setLayerFill(idx, { kind, from, to: e.target.value, angle })}
+                />
+                {kind === 'linear' && (
+                  <PosInput
+                    label={`${t('각도')} °`}
+                    value={angle}
+                    onCommit={(v) => setLayerFill(idx, { kind, from, to, angle: v })}
+                  />
+                )}
+              </div>
             )}
           </div>
         )

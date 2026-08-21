@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { LottieJson, LottieLayer } from './lib/lottieUtils'
-import { extractColorGroups, replaceColor, type ColorGroup } from './lib/lottieColors'
+import { extractColorGroups, replaceColor, hexToRgbArray, type ColorGroup } from './lib/lottieColors'
 import { toggleLayer as toggleLayerUtil, resize as resizeUtil } from './lib/lottieUtils'
 import { applyKnobs, type TemplateKnob } from './lib/lottieKnobs'
 import type { AiMotionPlan } from './lib/ai'
@@ -41,6 +41,16 @@ export interface PenPathK {
   i: [number, number][]
   o: [number, number][]
   c: boolean
+}
+
+/** 칠 스펙 — 단색 또는 2스톱 그라디언트 (선형/방사). */
+export interface LayerFill {
+  kind: 'solid' | 'linear' | 'radial'
+  hex?: string
+  from?: string
+  to?: string
+  /** 선형 각도 ° (0 = →). */
+  angle?: number
 }
 
 /** 드로잉 도형 메타 (layer.xshape) — properties에서 크기·라운드 리빌드용. */
@@ -248,6 +258,8 @@ interface EditorState {
   setPenPathLive: (li: number, k: PenPathK, xshape?: ShapeMeta) => void
   /** 선(스트로크) 옵션 — 두께/라인캡. */
   setLayerStroke: (li: number, opts: { w?: number; lc?: number }) => void
+  /** 칠 — 단색(fl) ↔ 그라디언트(gf 선형/방사) 전환·색·각도. 로컬 bbox 기준 끝점. */
+  setLayerFill: (li: number, fill: LayerFill) => void
   /** 도형 지오메트리 리빌드 — xshape 메타 있는 레이어의 크기/라운드 (제자리 유지, 언두 1회). */
   setShapeGeom: (li: number, patch: Partial<Omit<ShapeMeta, 'tool'>>) => void
   /** 패스 애니메이션 토글 — on: 현재 패스로 재생헤드에 pk 키, off: 현재 프레임 형태로 고정. */
@@ -1561,6 +1573,67 @@ export const useEditor = create<EditorState>((set, get) => {
       })
       if (!done) return
       const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
+      push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
+    },
+
+    setLayerFill: (li, fill) => {
+      const { sourceData, templateKnobs, knobValues } = get()
+      if (!sourceData?.layers[li] || lockedAt(sourceData, li)) return
+      const src = structuredClone(sourceData)
+      ensureLayerColors(src)
+      const layer = src.layers[li] as Record<string, unknown>
+      const group = (layer.shapes as Record<string, unknown>[] | undefined)?.[0]
+      if (!group?.it) return
+      // 첫 fl/gf 페인터 (그룹 재귀) — 교체 대상
+      let host: Record<string, unknown>[] | null = null
+      let idx = -1
+      const walk = (items: Record<string, unknown>[]) => {
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i]
+          if ((it.ty === 'fl' || it.ty === 'gf') && idx < 0) {
+            host = items
+            idx = i
+          } else if (it.ty === 'gr') walk(it.it as Record<string, unknown>[])
+        }
+      }
+      walk(group.it as Record<string, unknown>[])
+      if (!host || idx < 0) return
+      const prev = (host as Record<string, unknown>[])[idx]
+      const o = (prev.o as Record<string, unknown> | undefined) ?? { a: 0, k: 100 }
+      if (fill.kind === 'solid') {
+        const [r, g, b] = hexToRgbArray(fill.hex ?? '#3380f5')
+        ;(host as Record<string, unknown>[])[idx] = {
+          ty: 'fl', c: { a: 0, k: [r, g, b, 1] }, o, r: 1, nm: 'Fill',
+        }
+      } else {
+        // 끝점 — 로컬 bbox 중심에서 각도 방향으로 양끝 (방사는 중심→반지름)
+        const tr = (group.it as Record<string, unknown>[]).find((it) => it.ty === 'tr') as
+          | { a?: { k: number[] }; s?: { k: number[] } }
+          | undefined
+        const ta = tr?.a?.k ?? [0, 0]
+        const gsc = ((tr?.s?.k?.[0] as number | undefined) ?? 100) / 100 || 1
+        const cx = ta[0] + ((group.bboxCx as number | undefined) ?? 0) / gsc
+        const cy = ta[1] + ((group.bboxCy as number | undefined) ?? 0) / gsc
+        const hw = ((group.bboxW as number | undefined) ?? 100) / 2
+        const hh = ((group.bboxH as number | undefined) ?? 100) / 2
+        const rad = ((fill.angle ?? 0) * Math.PI) / 180
+        const dx = Math.cos(rad)
+        const dy = Math.sin(rad)
+        const L = Math.abs(dx) * hw + Math.abs(dy) * hh || Math.max(hw, hh)
+        const [r0, g0, b0] = hexToRgbArray(fill.from ?? '#3380f5')
+        const [r1, g1, b1] = hexToRgbArray(fill.to ?? '#9b6ee8')
+        const radial = fill.kind === 'radial'
+        ;(host as Record<string, unknown>[])[idx] = {
+          ty: 'gf',
+          o, r: 1, nm: 'Gradient Fill',
+          t: radial ? 2 : 1,
+          g: { p: 2, k: { a: 0, k: [0, r0, g0, b0, 1, r1, g1, b1] } },
+          s: { a: 0, k: radial ? [cx, cy] : [cx - dx * L, cy - dy * L] },
+          e: { a: 0, k: radial ? [cx + Math.max(hw, hh), cy] : [cx + dx * L, cy + dy * L] },
+          ...(radial ? { h: { a: 0, k: 0 }, a: { a: 0, k: 0 } } : {}),
+        }
+      }
+      const applied = applyKnobs(src, templateKnobs, knobValues)
       push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
     },
 

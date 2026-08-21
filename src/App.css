@@ -4118,3 +4118,22 @@ body.drag-cross * { cursor: crosshair !important; }
 .shortcuts__row span {
   color: var(--dim);
 }
+
+/* 칠 섹션 — 그라디언트 색·각도 행 */
+.posrow--fill {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.posrow--fill input[type='color'] {
+  width: 34px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: none;
+}
+.input--inline {
+  width: auto;
+  min-width: 0;
+}
