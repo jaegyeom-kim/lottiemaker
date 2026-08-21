@@ -191,6 +191,9 @@ export default function Preview() {
   const resizeDrag = useRef<{
     f: number; bx: number; by: number; startSize: number; startDist: number
     ox: number; oy: number
+    /** 오버레이 릴리즈 커밋용 — 마지막 크기/Alt 여부, 대상 레이어, 그랩 시점 박스. */
+    li: number; lastPx: number; lastAlt: boolean
+    cx: number; cy: number; hw: number; hh: number
   } | null>(null)
   // 캔버스 드래그 라이브 반영 — rAF 스로틀 (오버레이 폴백 경로)
   const liveRaf = useRef<number | null>(null)
@@ -209,7 +212,8 @@ export default function Preview() {
   // 드래그 중엔 lottie 내부 요소에 직접 translate, 릴리즈에 store 1회 커밋.
   const lottieInst = useRef<AnimationItem | null>(null)
   const dragOverlay = useRef<Map<Element, string> | null>(null)
-  const applyMoveOverlay = (dx: number, dy: number): boolean => {
+  /** 렌더된 레이어 <g>에 임의 변환 프리픽스 — only 지정 시 그 레이어만, 아니면 다중 선택 전체. */
+  const applyXformOverlay = (xf: string, only?: number): boolean => {
     const inst = lottieInst.current as unknown as {
       renderer?: { elements?: ({ layerElement?: SVGGElement } | null | undefined)[] }
     } | null
@@ -217,7 +221,7 @@ export default function Preview() {
     if (!els?.length) return false
     const st = useEditor.getState()
     const n = st.sourceData?.layers.length ?? 0
-    const sel = [...new Set(st.customIdxs)].filter(
+    const sel = [...new Set(only !== undefined ? [only] : st.customIdxs)].filter(
       (i) =>
         i >= 0 &&
         i < n &&
@@ -233,11 +237,13 @@ export default function Preview() {
       if (!dragOverlay.current.has(el))
         dragOverlay.current.set(el, el.getAttribute('transform') ?? '')
       const orig = dragOverlay.current.get(el)!
-      el.setAttribute('transform', `translate(${dx} ${dy})${orig ? ` ${orig}` : ''}`)
+      el.setAttribute('transform', `${xf}${orig ? ` ${orig}` : ''}`)
       applied++
     }
     return applied > 0
   }
+  const applyMoveOverlay = (dx: number, dy: number): boolean =>
+    applyXformOverlay(`translate(${dx} ${dy})`)
   /** restore=true(취소)면 원본 transform 복원, 커밋 경로면 재구축이 대체하므로 그대로 둔다. */
   const clearMoveOverlay = (restore: boolean) => {
     if (!dragOverlay.current) return
@@ -634,6 +640,7 @@ export default function Preview() {
           dragStart.current = null
           dragLast.current = null
           resizeDrag.current = null
+          clearMoveOverlay(false) // 복원은 cancelEdit 재구축이 대체 — 맵만 정리
           setGuides({ v: null, h: null })
           setDragCoord(null)
           setDragBox(null)
@@ -2055,6 +2062,8 @@ export default function Preview() {
                                     (e.clientY - rect.top) * (cw / rect.width) - b[1],
                                   ),
                                 ),
+                                li, lastPx: startSize, lastAlt: false,
+                                cx: selBox.x, cy: selBox.y, hw: selBox.hw, hh: selBox.hh,
                               }
                               ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
                             }}
@@ -2070,12 +2079,32 @@ export default function Preview() {
                                 Math.min(480, Math.max(40, (d.startSize * dist) / d.startDist)),
                               )
                               if (e.shiftKey) px = Math.round(px / 10) * 10 // Shift = 10px 스냅
+                              d.lastPx = px
+                              d.lastAlt = e.altKey
+                              const k = px / d.startSize
+                              // 고정점 — 기본: 반대 모서리, Alt: 기준점(앵커)
+                              const fx = e.altKey ? d.bx : d.bx + d.ox
+                              const fy = e.altKey ? d.by : d.by + d.oy
+                              // 라이브 미리보기 — 재구축 없이 <g>를 고정점 기준 스케일
+                              if (
+                                applyXformOverlay(
+                                  `translate(${fx} ${fy}) scale(${k}) translate(${-fx} ${-fy})`,
+                                  d.li,
+                                )
+                              ) {
+                                // 선택 박스도 같은 배율로 — store는 릴리즈에 1회
+                                setDragBox({
+                                  x: fx + (d.cx - fx) * k,
+                                  y: fy + (d.cy - fy) * k,
+                                  hw: d.hw * k,
+                                  hh: d.hh * k,
+                                })
+                                return
+                              }
+                              // 내부 API 불가 폴백 — 기존 라이브 경로
                               const stt = useEditor.getState()
                               stt.setCustomSizeLive(px)
                               if (!e.altKey) {
-                                // 기본: 반대 모서리 고정 — 크기 배율만큼 기준점 이동으로 보정.
-                                // Alt: 중심(앵커) 기준 — 기준점 고정.
-                                const k = px / d.startSize
                                 stt.setCustomBaseLive(
                                   d.bx + (1 - k) * d.ox,
                                   d.by + (1 - k) * d.oy,
@@ -2083,14 +2112,31 @@ export default function Preview() {
                               }
                             }}
                             onPointerUp={(e) => {
-                              if (!resizeDrag.current) return
+                              const d = resizeDrag.current
+                              if (!d) return
                               resizeDrag.current = null
+                              setDragBox(null)
                               ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
-                              useEditor.getState().commitEdit()
+                              // 오버레이 경로 — 릴리즈에 store 1회 반영 (재구축 1번)
+                              clearMoveOverlay(false)
+                              const stt = useEditor.getState()
+                              if (d.lastPx !== d.startSize) {
+                                stt.setCustomSizeLive(d.lastPx)
+                                if (!d.lastAlt) {
+                                  const k = d.lastPx / d.startSize
+                                  stt.setCustomBaseLive(
+                                    d.bx + (1 - k) * d.ox,
+                                    d.by + (1 - k) * d.oy,
+                                  )
+                                }
+                              }
+                              stt.commitEdit()
                             }}
                             onPointerCancel={() => {
                               resizeDrag.current = null
-                              useEditor.getState().commitEdit()
+                              setDragBox(null)
+                              clearMoveOverlay(true)
+                              useEditor.getState().cancelEdit()
                             }}
                           />
                         ))}

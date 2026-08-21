@@ -75,4 +75,39 @@ await page.mouse.up()
 await page.waitForTimeout(1300)
 const d3 = await sessionSource(page)
 ok(Math.abs(d3.layers[0].xbase[0] - base0[0]) < 0.5, 'Esc 취소 → store 무변경')
+
+// ── 리사이즈 핸들 드래그도 오버레이 — 재구축 없이 스케일, 릴리즈 1회 커밋 ──
+{
+  // 임포트 레이어는 bboxMax 메타가 없어 리사이즈 불가 — 사각형을 그려 대상 확보
+  await page.locator('.drawbar button[title*="사각형"]').click()
+  await page.mouse.move(...tc(300, 100))
+  await page.mouse.down()
+  await page.mouse.move(...tc(420, 200), { steps: 4 })
+  await page.mouse.up()
+  await page.waitForTimeout(1300)
+  const dR = await sessionSource(page)
+  const size0 = dR.layers[0].xsel.size
+  await page.evaluate(() => { window.__rebuilds = 0 })
+  const hb = await page.locator('.selhandle--se').boundingBox()
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2)
+  await page.mouse.down()
+  const t1 = Date.now()
+  let j = 0
+  while (Date.now() - t1 < 900) {
+    await page.mouse.move(hb.x + 40 + 25 * Math.sin(j / 4), hb.y + 40 + 25 * Math.cos(j / 4), { steps: 1 })
+    j++
+  }
+  await page.mouse.move(hb.x + 60, hb.y + 60, { steps: 2 })
+  await page.mouse.up()
+  await page.waitForTimeout(1300)
+  const rb2 = await page.evaluate(() => window.__rebuilds)
+  ok(rb2 <= 4, `리사이즈 중 재구축 억제 (${rb2}회)`)
+  const d4 = await sessionSource(page)
+  ok(d4.layers[0].xsel.size > size0 + 10, `릴리즈에 크기 반영 (${size0} → ${d4.layers[0].xsel.size})`)
+  // 반대 모서리(NW) 고정 — 코너 위치 보존 확인
+  await page.keyboard.press('Meta+z')
+  await page.waitForTimeout(1300)
+  const d5 = await sessionSource(page)
+  ok(Math.abs(d5.layers[0].xsel.size - size0) < 0.5, `⌘Z 1회 → 크기 원복 (${d5.layers[0].xsel.size})`)
+}
 await done(browser)
