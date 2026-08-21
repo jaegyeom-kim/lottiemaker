@@ -1,5 +1,5 @@
 // AI 모션 — API를 목으로 대체해 클라이언트 전체 흐름(요청 스펙 → 플랜 적용)을 검증.
-import { launchApp, checker, sessionSource } from './_helpers.mjs'
+import { launchApp, checker } from './_helpers.mjs'
 
 let capturedBody = null
 const { browser, page } = await launchApp({
@@ -43,13 +43,8 @@ if (capturedBody) {
   ok(capturedBody.tool_choice?.type === 'tool', 'tool_choice 강제')
   ok(capturedBody.thinking === undefined, 'thinking 필드 생략 (adaptive 기본)')
   ok(Array.isArray(capturedBody.tools) && capturedBody.tools[0]?.name === 'apply_motion', 'tools=apply_motion')
-  {
-    const dd = await sessionSource(page)
-    const keys = dd.layers[0].xkf.keys
-    ok(keys.some((k) => k.te === 100), 'AI ts/te 채널 적용 (트림)')
-    const ctxLayer = JSON.parse(capturedBody.messages[0].content.match(/<composition>\n([\s\S]*?)\n<\/composition>/)[1]).layers[0]
-    ok(typeof ctxLayer.kind === 'string', `컨텍스트에 레이어 kind (${ctxLayer.kind})`)
-  }
+  const ctxLayer = JSON.parse(capturedBody.messages[0].content.match(/<composition>\n([\s\S]*?)\n<\/composition>/)[1]).layers[0]
+  ok(typeof ctxLayer.kind === 'string', `컨텍스트에 레이어 kind (${ctxLayer.kind})`)
 }
 const msgText = await page.locator('.aipanel').textContent()
 ok(/적용|되돌릴/.test(msgText ?? ''), '성공 메시지 표시')
@@ -59,4 +54,5 @@ const d = await page.evaluate(
 )
 const kf = d?.layers?.[0]?.xkf
 ok(kf?.on === true && kf?.keys?.length === 2, `키프레임 적용 (${kf?.keys?.length ?? 0}개)`)
+ok(kf?.keys?.some((k) => k.te === 100), 'AI ts/te 채널 적용 (트림)')
 await done(browser)

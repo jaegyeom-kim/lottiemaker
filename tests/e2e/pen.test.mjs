@@ -255,7 +255,7 @@ const strokeKnob = page
   .first()
 ok((await strokeKnob.count()) === 1, "'선' 섹션 표시")
 await strokeKnob.locator('.posinput input').first().fill('20')
-await strokeKnob.locator('.posinput input').press('Enter')
+await strokeKnob.locator('.posinput input').first().press('Enter')
 await page.waitForTimeout(1300)
 const d3 = await src()
 const findSt = (items) => {
