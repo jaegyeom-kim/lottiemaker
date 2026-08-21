@@ -330,6 +330,8 @@ interface EditorState {
   /** 채널 키 업서트 — frame에 키 생성/갱신. */
   setKfChannel: (ch: KfChannel, frame: number, value: number | [number, number]) => void
   setKfChannelLive: (ch: KfChannel, frame: number, value: number | [number, number]) => void
+  /** 위치 키의 공간 탄젠트(모션 패스 핸들) 라이브 편집 — null = 제거(직선). */
+  setKfSpatialLive: (frame: number, pat: { pto?: [number, number] | null; pti?: [number, number] | null }) => void
   /** frame의 채널 키 제거 — 키가 비면 키 자체 삭제. */
   removeKfChannel: (ch: KfChannel, frame: number) => void
   /** 타임라인 키 다중 선택 (마키/클릭) — Delete·그룹 드래그 대상. */
@@ -2317,6 +2319,28 @@ export const useEditor = create<EditorState>((set, get) => {
     setKfChannelLive: (ch, frame, value) => {
       const st = get()
       const next = withKfEdit(st, (xkf) => upsertKey(xkf, ch, frame, value), true)
+      if (!next) return
+      set({ ...next, editBaseline: st.editBaseline ?? snap(), future: [] })
+    },
+
+    setKfSpatialLive: (frame, pat) => {
+      const st = get()
+      const next = withKfEdit(
+        st,
+        (xkf) => {
+          const k = xkf.keys.find((x) => Math.abs(x.t - frame) < 0.5 && x.p !== undefined)
+          if (!k) return
+          if (pat.pto !== undefined) {
+            if (pat.pto) k.pto = pat.pto
+            else delete k.pto
+          }
+          if (pat.pti !== undefined) {
+            if (pat.pti) k.pti = pat.pti
+            else delete k.pti
+          }
+        },
+        true,
+      )
       if (!next) return
       set({ ...next, editBaseline: st.editBaseline ?? snap(), future: [] })
     },

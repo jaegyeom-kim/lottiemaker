@@ -978,12 +978,107 @@ export default function Preview() {
     const t0 = pk[0].t
     const t1 = pk[pk.length - 1].t
     for (let f = t0; f <= t1; f += 2) dots.push(kfValueAt(xkf, 'p', f, fb) as [number, number])
+    // 곡선 경로 d + 공간 탄젠트 핸들 — 수동(pto/pti) 우선, smooth는 Catmull-Rom 폴백
+    const pts = pk.map((k) => k.p as [number, number])
+    const cr = (j: number): [number, number] => {
+      const p0 = pts[Math.max(0, j - 1)]
+      const p2 = pts[Math.min(pts.length - 1, j + 1)]
+      return [(p2[0] - p0[0]) / 2, (p2[1] - p0[1]) / 2]
+    }
+    let d = `M ${pts[0][0]} ${pts[0][1]}`
+    const handles: {
+      t: number
+      which: 'pto' | 'pti'
+      base: [number, number]
+      off: [number, number]
+      manual: boolean
+    }[] = []
+    for (let i = 0; i < pk.length - 1; i++) {
+      const a = pk[i]
+      const b = pk[i + 1]
+      const pa = pts[i]
+      const pb = pts[i + 1]
+      let to = a.pto ?? null
+      let ti = b.pti ?? null
+      if (xkf.smooth) {
+        if (!to) {
+          const m = cr(i)
+          to = [m[0] / 3, m[1] / 3]
+        }
+        if (!ti) {
+          const m = cr(i + 1)
+          ti = [-m[0] / 3, -m[1] / 3]
+        }
+      }
+      d += ` C ${pa[0] + (to?.[0] ?? 0)} ${pa[1] + (to?.[1] ?? 0)} ${pb[0] + (ti?.[0] ?? 0)} ${pb[1] + (ti?.[1] ?? 0)} ${pb[0]} ${pb[1]}`
+      // 핸들 표시 오프셋 — 탄젠트 없으면(직선) 세그먼트 방향 20%로 시드 (0길이는 못 잡음)
+      const dist = Math.hypot(pb[0] - pa[0], pb[1] - pa[1]) || 1
+      const dir: [number, number] = [(pb[0] - pa[0]) / dist, (pb[1] - pa[1]) / dist]
+      const seed = Math.min(40, dist * 0.2)
+      handles.push({
+        t: a.t, which: 'pto', base: pa,
+        off: to ?? [dir[0] * seed, dir[1] * seed], manual: !!to,
+      })
+      handles.push({
+        t: b.t, which: 'pti', base: pb,
+        off: ti ?? [-dir[0] * seed, -dir[1] * seed], manual: !!ti,
+      })
+    }
     return {
-      keys: pk.map((k) => k.p as [number, number]),
+      keys: pk.map((k) => ({ t: k.t, p: k.p as [number, number] })),
+      d,
+      handles,
       dots,
       cur: kfValueAt(xkf, 'p', Math.round(frame), fb) as [number, number],
+      firstT: pk[0].t,
+      lastT: pk[pk.length - 1].t,
     }
   })()
+
+  // 모션 패스 드래그 — 키 이동 / 공간 탄젠트 (⌥ = 반대쪽 비대칭)
+  const mpDrag = useRef<{
+    kind: 'key' | 'pto' | 'pti'
+    t: number
+    base: [number, number]
+    moved: boolean
+  } | null>(null)
+  const mpCanvasPt = (e: React.PointerEvent): [number, number] | null => {
+    const rect = wrapRef.current?.getBoundingClientRect()
+    if (!rect) return null
+    const f = cw / rect.width
+    return [(e.clientX - rect.left) * f, (e.clientY - rect.top) * f]
+  }
+  const mpMove = (e: React.PointerEvent) => {
+    const md = mpDrag.current
+    if (!md) return
+    e.stopPropagation()
+    const pt = mpCanvasPt(e)
+    if (!pt) return
+    md.moved = true
+    const st = useEditor.getState()
+    if (md.kind === 'key') {
+      st.setKfChannelLive('p', md.t, [Math.round(pt[0] * 10) / 10, Math.round(pt[1] * 10) / 10])
+      return
+    }
+    const off: [number, number] = [
+      Math.round((pt[0] - md.base[0]) * 10) / 10,
+      Math.round((pt[1] - md.base[1]) * 10) / 10,
+    ]
+    const isFirst = motionPath && Math.abs(md.t - motionPath.firstT) < 0.5
+    const isLast = motionPath && Math.abs(md.t - motionPath.lastT) < 0.5
+    const mirror: [number, number] = [-off[0], -off[1]]
+    if (md.kind === 'pto')
+      st.setKfSpatialLive(md.t, { pto: off, ...(!e.altKey && !isFirst ? { pti: mirror } : {}) })
+    else st.setKfSpatialLive(md.t, { pti: off, ...(!e.altKey && !isLast ? { pto: mirror } : {}) })
+  }
+  const mpUp = (e: React.PointerEvent) => {
+    const md = mpDrag.current
+    mpDrag.current = null
+    if (!md) return
+    e.stopPropagation()
+    ;(e.currentTarget as Element).releasePointerCapture(e.pointerId)
+    if (md.moved) useEditor.getState().commitEdit()
+  }
 
   // 어니언 스킨 고스트 프레임 — 현재 기준 전후 (±6, ±12f)
   const onionFrames = (() => {
@@ -1711,24 +1806,58 @@ export default function Preview() {
                   className="preview__lottiefill"
                 />
               </div>
-              {/* 모션 패스 — 위치 키 경로 (점선) + 프레임 점 + 키 마커 + 현재 위치 */}
+              {/* 모션 패스 — 곡선 경로 + 프레임 점 + 드래그 가능한 키/공간 탄젠트 (AE) */}
               {motionPath && (
                 <svg className="motionpath" viewBox={`0 0 ${cw} ${ch}`}>
-                  <polyline
-                    className="motionpath__line"
-                    points={motionPath.keys.map(([x, y]) => `${x},${y}`).join(' ')}
-                  />
+                  <path className="motionpath__line" d={motionPath.d} fill="none" />
                   {motionPath.dots.map(([x, y], i) => (
                     <circle key={i} className="motionpath__dot" cx={x} cy={y} r={1.4} />
                   ))}
-                  {motionPath.keys.map(([x, y], i) => (
+                  {tool === 'move' &&
+                    motionPath.handles.map((h, i) => (
+                      <g key={`h${i}`} className={`motionpath__tangent ${h.manual ? '' : 'motionpath__tangent--auto'}`}>
+                        <line
+                          x1={h.base[0]}
+                          y1={h.base[1]}
+                          x2={h.base[0] + h.off[0]}
+                          y2={h.base[1] + h.off[1]}
+                        />
+                        <circle
+                          className="motionpath__handle"
+                          cx={h.base[0] + h.off[0]}
+                          cy={h.base[1] + h.off[1]}
+                          r={4}
+                          onPointerDown={(e) => {
+                            if (e.button !== 0) return
+                            e.stopPropagation()
+                            e.preventDefault()
+                            ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
+                            mpDrag.current = { kind: h.which, t: h.t, base: h.base, moved: false }
+                          }}
+                          onPointerMove={mpMove}
+                          onPointerUp={mpUp}
+                          onPointerCancel={mpUp}
+                        />
+                      </g>
+                    ))}
+                  {motionPath.keys.map((k, i) => (
                     <rect
                       key={`k${i}`}
                       className="motionpath__key"
-                      x={x - 3}
-                      y={y - 3}
-                      width={6}
-                      height={6}
+                      x={k.p[0] - 3.5}
+                      y={k.p[1] - 3.5}
+                      width={7}
+                      height={7}
+                      onPointerDown={(e) => {
+                        if (e.button !== 0 || tool !== 'move') return
+                        e.stopPropagation()
+                        e.preventDefault()
+                        ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
+                        mpDrag.current = { kind: 'key', t: k.t, base: k.p, moved: false }
+                      }}
+                      onPointerMove={mpMove}
+                      onPointerUp={mpUp}
+                      onPointerCancel={mpUp}
                     />
                   ))}
                   <circle

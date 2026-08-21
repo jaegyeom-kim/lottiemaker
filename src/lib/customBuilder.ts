@@ -384,6 +384,10 @@ export interface KfKey {
   te?: number
   /** 패스 모핑 키 — 레이어 로컬 패스 지오메트리 (단일 sh 레이어 전용). */
   pk?: PathShapeK
+  /** 위치 키의 공간 탄젠트 (모션 패스) — 나가는 핸들 오프셋 (키 기준 상대). */
+  pto?: [number, number]
+  /** 위치 키의 공간 탄젠트 — 들어오는 핸들 오프셋 (키 기준 상대, 이전 키 쪽). */
+  pti?: [number, number]
   /** 이 키에서 시작하는 구간의 채널별 이징 오버라이드 — 없으면 레이어 기본. */
   e?: Partial<Record<KfChannel, Bezier4>>
 }
@@ -505,17 +509,30 @@ export function kfValueAt(
       const vb = val(b)
       if (Array.isArray(va) && Array.isArray(vb)) {
         // 곡선 경로면 렌더와 같은 공간 베지어로 (박스/모션패스 오버레이 일치)
-        if (ch === 'p' && xkf.smooth) {
-          const pts = keys.map((k) => k.p as [number, number])
-          const m1 = crTangent(pts, i)
-          const m2 = crTangent(pts, i + 1)
-          const c1: [number, number] = [va[0] + m1[0] / 3, va[1] + m1[1] / 3]
-          const c2: [number, number] = [vb[0] - m2[0] / 3, vb[1] - m2[1] / 3]
-          const u = 1 - f
-          return [
-            u * u * u * va[0] + 3 * u * u * f * c1[0] + 3 * u * f * f * c2[0] + f * f * f * vb[0],
-            u * u * u * va[1] + 3 * u * u * f * c1[1] + 3 * u * f * f * c2[1] + f * f * f * vb[1],
-          ]
+        // — 키의 수동 탄젠트(pto/pti) 우선, smooth는 Catmull-Rom 폴백
+        if (ch === 'p') {
+          let to = a.pto ?? null
+          let ti = b.pti ?? null
+          if (xkf.smooth) {
+            const pts = keys.map((k) => k.p as [number, number])
+            if (!to) {
+              const m1 = crTangent(pts, i)
+              to = [m1[0] / 3, m1[1] / 3]
+            }
+            if (!ti) {
+              const m2 = crTangent(pts, i + 1)
+              ti = [-m2[0] / 3, -m2[1] / 3]
+            }
+          }
+          if (to || ti) {
+            const c1: [number, number] = [va[0] + (to?.[0] ?? 0), va[1] + (to?.[1] ?? 0)]
+            const c2: [number, number] = [vb[0] + (ti?.[0] ?? 0), vb[1] + (ti?.[1] ?? 0)]
+            const u = 1 - f
+            return [
+              u * u * u * va[0] + 3 * u * u * f * c1[0] + 3 * u * f * f * c2[0] + f * f * f * vb[0],
+              u * u * u * va[1] + 3 * u * u * f * c1[1] + 3 * u * f * f * c2[1] + f * f * f * vb[1],
+            ]
+          }
         }
         return [va[0] + (vb[0] - va[0]) * f, va[1] + (vb[1] - va[1]) * f]
       }
@@ -553,14 +570,25 @@ export function buildKfKs(
         s: toArr(x[ch] as never),
       }
     })
-    // 곡선 모션 패스 — 위치 키에 공간 접선(to/ti) 부여 (Catmull-Rom)
-    if (ch === 'p' && xkf.smooth && keys.length >= 2) {
+    // 곡선 모션 패스 — 공간 접선(to/ti): 키의 수동 탄젠트(pto/pti) 우선,
+    // smooth 모드는 Catmull-Rom 자동값으로 폴백
+    if (ch === 'p' && keys.length >= 2) {
       const pts = keys.map((x) => x.p as [number, number])
       for (let i = 0; i < keys.length - 1; i++) {
-        const m1 = crTangent(pts, i)
-        const m2 = crTangent(pts, i + 1)
-        k[i].to = [R(m1[0] / 3), R(m1[1] / 3), 0]
-        k[i].ti = [R(-m2[0] / 3), R(-m2[1] / 3), 0]
+        let to = keys[i].pto ?? null
+        let ti = keys[i + 1].pti ?? null
+        if (xkf.smooth) {
+          if (!to) {
+            const m1 = crTangent(pts, i)
+            to = [m1[0] / 3, m1[1] / 3]
+          }
+          if (!ti) {
+            const m2 = crTangent(pts, i + 1)
+            ti = [-m2[0] / 3, -m2[1] / 3]
+          }
+        }
+        if (to) k[i].to = [R(to[0]), R(to[1]), 0]
+        if (ti) k[i].ti = [R(ti[0]), R(ti[1]), 0]
       }
     }
     return { a: 1, k }

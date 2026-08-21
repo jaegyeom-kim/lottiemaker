@@ -4199,3 +4199,24 @@ body.drag-cross * { cursor: crosshair !important; }
   border-radius: 4px;
   padding: 1px 5px;
 }
+
+/* 모션 패스 편집 — 키/탄젠트 드래그 */
+.motionpath__key {
+  pointer-events: auto;
+  cursor: move;
+}
+.motionpath__handle {
+  pointer-events: auto;
+  cursor: grab;
+  fill: #fff;
+  stroke: #e5a64b; /* 모션 패스 시스템 컬러(앰버)와 통일 */
+  stroke-width: 1.5;
+}
+.motionpath__tangent line {
+  stroke: #e5a64b;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.motionpath__tangent--auto {
+  opacity: 0.45; /* 잠재(자동/시드) 탄젠트 — 드래그하면 수동 확정 */
+}
