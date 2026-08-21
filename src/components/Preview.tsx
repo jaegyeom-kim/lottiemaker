@@ -1676,6 +1676,15 @@ export default function Preview() {
                   : { aspectRatio: `${cw} / ${ch}` }
               }
             >
+              {/* 빈 캔버스 시작 힌트 — 레이어가 생기면 사라짐 */}
+              {templateId === '__custom' && (sourceData?.layers.length ?? 0) === 0 && !penPts.length && (
+                <div className="canvashint">
+                  <p>{t('드래그로 도형을 그리거나, 그래픽을 끌어다 놓으세요')}</p>
+                  <p className="canvashint__keys">
+                    <kbd>Q</kbd> {t('도형')} · <kbd>G</kbd> {t('펜')} · <kbd>T</kbd> {t('텍스트')} · <kbd>?</kbd> {t('단축키')}
+                  </p>
+                </div>
+              )}
               {/* 어니언 스킨 — 전후 프레임 고스트 (과거 흑백 / 미래 컬러) */}
               {onionFrames.map((g) => (
                 <div key={g.f} className={`onionghost ${g.past ? 'onionghost--past' : ''}`}>

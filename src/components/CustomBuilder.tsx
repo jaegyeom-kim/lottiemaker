@@ -720,9 +720,43 @@ export function PosInput({
     if (v !== null && Math.abs(v - rounded) > 1e-9) onCommit(v)
   }
 
+  // 스크러비 넘버 — 라벨 좌우 드래그로 값 조절 (⇧ ×10 · ⌥ ×0.1), 릴리즈에 커밋
+  const scrub = useRef<{ x0: number; v0: number; last: number; moved: boolean } | null>(null)
+
   return (
     <label className="posinput">
-      <span className="posinput__label">{label}</span>
+      <span
+        className="posinput__label posinput__label--scrub"
+        title={t('드래그로 값 조절 (⇧ ×10 · ⌥ ×0.1)')}
+        onPointerDown={(e) => {
+          scrub.current = { x0: e.clientX, v0: rounded, last: rounded, moved: false }
+          ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+        }}
+        onPointerMove={(e) => {
+          const sc = scrub.current
+          if (!sc) return
+          const dx = e.clientX - sc.x0
+          if (Math.abs(dx) > 2) sc.moved = true
+          if (!sc.moved) return
+          const step = e.shiftKey ? 10 : e.altKey ? 0.1 : 1
+          sc.last = Math.round((sc.v0 + dx * step) * 10) / 10
+          setFocused(true)
+          setDraft(String(sc.last))
+        }}
+        onPointerUp={(e) => {
+          const sc = scrub.current
+          scrub.current = null
+          ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+          setFocused(false)
+          if (sc?.moved && Math.abs(sc.last - rounded) > 1e-9) onCommit(sc.last)
+        }}
+        onPointerCancel={() => {
+          scrub.current = null
+          setFocused(false)
+        }}
+      >
+        {label}
+      </span>
       <input
         type="text"
         inputMode="decimal"

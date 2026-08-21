@@ -4162,3 +4162,40 @@ body.drag-cross * { cursor: crosshair !important; }
   flex: 1;
   min-width: 0;
 }
+
+/* 스크러비 넘버 — 라벨 드래그로 값 조절 */
+.posinput__label--scrub {
+  cursor: ew-resize;
+  user-select: none;
+  touch-action: none;
+}
+
+/* 빈 캔버스 시작 힌트 */
+.canvashint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  pointer-events: none;
+  color: var(--dim);
+  text-align: center;
+  z-index: 1;
+}
+.canvashint p {
+  margin: 0;
+  font-size: 13px;
+}
+.canvashint__keys {
+  opacity: 0.85;
+}
+.canvashint kbd {
+  font-family: inherit;
+  font-size: 11px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
