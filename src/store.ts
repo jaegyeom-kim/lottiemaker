@@ -7,6 +7,7 @@ import type { AiMotionPlan } from './lib/ai'
 import { convertLottieToCustom, convertLottieToScenes, hasPrecomps } from './lib/lottieImport'
 import { t } from './lib/i18n'
 import { growCubicBbox, shapeGeomK } from './lib/drawTools'
+import { idbGet, idbSet, idbDel } from './lib/sessionStore'
 import {
   buildAnimKs, buildCustomDoc, buildCustomLayer, animSpans, normSel,
   normKf, buildKfKs, kfValueAt,
@@ -110,14 +111,45 @@ function initialMode(): SaveKind {
   }
 }
 
-/** 저장된 세션 읽기 — 손상/버전 불일치는 무시. */
-export function loadSavedSession(kind: SaveKind): SavedSession | null {
+function parseSession(raw: string | null): SavedSession | null {
   try {
-    const raw = localStorage.getItem(SAVE_KEYS[kind])
     if (!raw) return null
     const s = JSON.parse(raw) as SavedSession
     if (s.v !== 1 || !s.sourceData?.layers) return null
     return s
+  } catch {
+    return null
+  }
+}
+
+/** IDB에서 미리 읽어둔 세션 — 동기 호출부(setMode 등)를 위한 인메모리 캐시. */
+const sessionCache: Partial<Record<SaveKind, SavedSession | null>> = {}
+
+/** 부팅 시 1회 — IDB 세션을 캐시로 하이드레이션 (없으면 localStorage 폴백). */
+export async function hydrateSessions(): Promise<void> {
+  for (const kind of ['template', 'custom'] as const) {
+    let ses: SavedSession | null = null
+    try {
+      ses = parseSession(await idbGet(SAVE_KEYS[kind]))
+    } catch {
+      // IDB 불가(프라이빗 모드 등) — localStorage만 사용
+    }
+    if (!ses) {
+      try {
+        ses = parseSession(localStorage.getItem(SAVE_KEYS[kind]))
+      } catch {
+        ses = null
+      }
+    }
+    sessionCache[kind] = ses
+  }
+}
+
+/** 저장된 세션 읽기 — 하이드레이션 후엔 캐시(IDB 포함), 이전엔 localStorage. */
+export function loadSavedSession(kind: SaveKind): SavedSession | null {
+  if (kind in sessionCache) return sessionCache[kind] ?? null
+  try {
+    return parseSession(localStorage.getItem(SAVE_KEYS[kind]))
   } catch {
     return null
   }
@@ -2830,6 +2862,8 @@ function saveSessionNow() {
       // 부팅 직후·모드 전환·외부 파일 열기의 빈 상태(히스토리 없음)는 저장본을 지우지 않는다.
       if (s.mode === 'custom' && (s.past.length > 0 || s.future.length > 0)) {
         localStorage.removeItem(SAVE_KEYS.custom)
+        sessionCache.custom = null
+        void idbDel(SAVE_KEYS.custom).catch(() => {})
       }
       setSaveStatus('skipped')
       return
@@ -2854,16 +2888,31 @@ function saveSessionNow() {
     const payload = sessionPayload()
     if (!payload) return
     const str = JSON.stringify(payload)
-    if (str.length > 4_500_000) {
-      // 쿼터 보호 — 저장 못 했음을 배지로 알린다 (.lmproj 저장 유도)
-      setSaveStatus('blocked')
-      return
-    }
-    localStorage.setItem(SAVE_KEYS[kind], str)
+    sessionCache[kind] = payload
     localStorage.setItem(LAST_KEY, kind)
-    setSaveStatus('saved')
+    // 주 저장소 = IndexedDB (용량 제한 없음). localStorage는 소형 미러 —
+    // 동기 부팅 폴백용. 대형 세션은 미러 대신 IDB만 (낡은 소형 미러 제거).
+    if (str.length <= 4_500_000) {
+      try {
+        localStorage.setItem(SAVE_KEYS[kind], str)
+      } catch {
+        localStorage.removeItem(SAVE_KEYS[kind])
+      }
+    } else {
+      localStorage.removeItem(SAVE_KEYS[kind])
+    }
+    idbSet(SAVE_KEYS[kind], str)
+      .then(() => setSaveStatus('saved'))
+      .catch(() => {
+        // IDB 실패 — 미러가 저장됐으면 saved, 아니면 blocked
+        setSaveStatus(
+          str.length <= 4_500_000 && localStorage.getItem(SAVE_KEYS[kind]) === str
+            ? 'saved'
+            : 'blocked',
+        )
+      })
   } catch {
-    // 쿼터 초과·프라이빗 모드 등 — 편집엔 영향 없지만 배지로 알린다
+    // 프라이빗 모드 등 — 편집엔 영향 없지만 배지로 알린다
     setSaveStatus('blocked')
   }
 }

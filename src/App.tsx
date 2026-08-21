@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { useEditor, loadLastSession } from './store'
+import { useEditor, loadLastSession, hydrateSessions } from './store'
 import { setDragCursor } from './lib/cursor'
 import { getLang, setLangValue, t, type Lang } from './lib/i18n'
 import TemplateGallery from './components/TemplateGallery'
@@ -202,12 +202,14 @@ export default function App() {
 
   // 시작 시 자동 저장된 작업 복원 (한 번만)
   useEffect(() => {
-    const s = useEditor.getState()
-    if (!s.animationData) {
-      const saved = loadLastSession()
-      if (saved) s.restoreSession(saved)
-      else s.newBlankCustom() // 첫 실행 — 로드 없이 빈 커스텀 캔버스로 바로 시작
-    }
+    void hydrateSessions().then(() => {
+      const s = useEditor.getState()
+      if (!s.animationData) {
+        const saved = loadLastSession()
+        if (saved) s.restoreSession(saved)
+        else s.newBlankCustom() // 첫 실행 — 로드 없이 빈 커스텀 캔버스로 바로 시작
+      }
+    })
   }, [])
 
   useEffect(() => {
