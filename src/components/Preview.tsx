@@ -58,6 +58,8 @@ export default function Preview() {
   const dragStart = useRef<{
     x: number; y: number; bx: number; by: number; f: number; hw: number; hh: number
     ox: number; oy: number
+    /** 다른 레이어의 스냅 타깃 (중앙·양끝) — 그랩 시점에 1회 수집 (스마트 가이드). */
+    lx: number[]; ly: number[]
   } | null>(null)
   const dragLast = useRef<{ tx: number; ty: number } | null>(null)
   const [guides, setGuides] = useState<{ v: number | null; h: number | null }>({ v: null, h: null })
@@ -1061,6 +1063,7 @@ export default function Preview() {
     half: number,
     snapDist: number,
     size: number = cw,
+    layerTargets: number[] = [],
   ): { shift: number; guide: number } | null => {
     const CENTER_TARGETS = [size / 2, 0, size / 4, (3 * size) / 4, size]
     const EDGE_TARGETS = [0, size / 2, size]
@@ -1074,6 +1077,10 @@ export default function Preview() {
     consider(t, CENTER_TARGETS)
     consider(t - half, EDGE_TARGETS)
     consider(t + half, EDGE_TARGETS)
+    // 스마트 가이드 — 다른 레이어 중앙/엣지에 내 중앙·양끝 흡착 (Figma)
+    consider(t, layerTargets)
+    consider(t - half, layerTargets)
+    consider(t + half, layerTargets)
     return best
   }
 
@@ -2172,10 +2179,30 @@ export default function Preview() {
                         const aabb = src2
                           ? layerAabbOf(src2, hit, Math.round(frameRef.current))
                           : { half: [60, 60] as [number, number], offset: [0, 0] as [number, number] }
+                        // 스마트 가이드 타깃 — 드래그 대상(다중 선택 포함)·숨김 제외한
+                        // 모든 레이어의 중앙/엣지 좌표 (그랩 시점 1회 수집)
+                        const lx: number[] = []
+                        const ly: number[] = []
+                        if (src2) {
+                          const selSet = useEditor.getState().customIdxs
+                          const fr2 = Math.round(frameRef.current)
+                          src2.layers.forEach((l, j) => {
+                            if (j === hit || selSet.includes(j)) return
+                            if ((l as Record<string, unknown>).hd === true) return
+                            const b2 = layerBaseOf(src2, j, fr2)
+                            if (!b2) return
+                            const ab = layerAabbOf(src2, j, fr2)
+                            const cx2 = b2[0] + ab.offset[0]
+                            const cy2 = b2[1] + ab.offset[1]
+                            lx.push(cx2, cx2 - ab.half[0], cx2 + ab.half[0])
+                            ly.push(cy2, cy2 - ab.half[1], cy2 + ab.half[1])
+                          })
+                        }
                         dragStart.current = {
                           x: e.clientX, y: e.clientY, bx: base[0], by: base[1], f,
                           hw: aabb.half[0], hh: aabb.half[1],
                           ox: aabb.offset[0], oy: aabb.offset[1],
+                          lx, ly,
                         }
                         dragLast.current = { tx: base[0], ty: base[1] }
                         setDragCoord({ x: base[0], y: base[1] })
@@ -2212,9 +2239,9 @@ export default function Preview() {
                         if (!(e.metaKey || e.ctrlKey)) {
                           // 화면 10px 기준 흡착 — 시각적 중심/모서리 기준 (앵커 오프셋 반영)
                           const snapDist = 10 * d.f
-                          const sx = snapAxis(tx + d.ox, d.hw, snapDist)
+                          const sx = snapAxis(tx + d.ox, d.hw, snapDist, cw, d.lx)
                           if (sx) { tx += sx.shift; gv = sx.guide }
-                          const sy = snapAxis(ty + d.oy, d.hh, snapDist, ch)
+                          const sy = snapAxis(ty + d.oy, d.hh, snapDist, ch, d.ly)
                           if (sy) { ty += sy.shift; gh = sy.guide }
                         }
                         setGuides({ v: gv, h: gh })
