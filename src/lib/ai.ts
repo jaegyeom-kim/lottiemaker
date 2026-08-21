@@ -8,7 +8,7 @@ import { t } from './i18n'
 
 const KEY_STORAGE = 'lottiemaker.anthropic.key'
 const MODEL = 'claude-sonnet-5'
-const CHANNELS: KfChannel[] = ['p', 's', 'r', 'o']
+const CHANNELS: KfChannel[] = ['p', 's', 'r', 'o', 'ts', 'te']
 
 export function getAiKey(): string {
   try {
@@ -113,9 +113,16 @@ export function summarizeDoc(src: LottieJson, selectedIdxs: number[], playhead: 
       const base: [number, number] = Array.isArray(layer.xbase)
         ? [(layer.xbase as number[])[0], (layer.xbase as number[])[1]]
         : [256, 256]
+      const kind = layer.xtext
+        ? 'text'
+        : (layer.xshape as { tool?: string } | undefined)?.tool ??
+          (typeof layer.xsrc === 'string' ? 'path' : layer.refId ? 'image' : 'shape')
+      const hasStroke = JSON.stringify(layer.shapes ?? '').includes('"ty":"st"')
       return {
         index: i,
         name: String(layer.nm ?? `레이어 ${i + 1}`),
+        kind,
+        hasStroke,
         selected: sel.has(i),
         center: [Math.round(base[0]), Math.round(base[1])],
         sizeLongPx: Math.round(xsel.size),
@@ -151,7 +158,12 @@ export function sanitizePlan(raw: unknown, layerCount: number, op: number): AiMo
       if (fin(rk.s)) key.s = clamp(rk.s, 0, 1000)
       if (fin(rk.r)) key.r = clamp(rk.r, -3600, 3600)
       if (fin(rk.o)) key.o = clamp(rk.o, 0, 100)
-      if (key.p === undefined && key.s === undefined && key.r === undefined && key.o === undefined)
+      if (fin(rk.ts)) key.ts = clamp(rk.ts, 0, 100)
+      if (fin(rk.te)) key.te = clamp(rk.te, 0, 100)
+      if (
+        key.p === undefined && key.s === undefined && key.r === undefined &&
+        key.o === undefined && key.ts === undefined && key.te === undefined
+      )
         continue
       if (rk.e && typeof rk.e === 'object') {
         const e: Partial<Record<KfChannel, Bezier4>> = {}
@@ -239,6 +251,8 @@ const MOTION_TOOL = {
                   s: { type: 'number', description: 'uniform scale percent, 100 = natural' },
                   r: { type: 'number', description: 'rotation degrees, clockwise' },
                   o: { type: 'number', description: 'opacity percent 0..100' },
+                  ts: { type: 'number', description: 'trim-path start percent 0..100 (shape layers) — animate 0->N with te for draw-on effects' },
+                  te: { type: 'number', description: 'trim-path end percent 0..100 (shape layers)' },
                   e: {
                     type: 'object',
                     properties: { p: BEZ_SCHEMA, s: BEZ_SCHEMA, r: BEZ_SCHEMA, o: BEZ_SCHEMA },
@@ -273,6 +287,8 @@ Craft guidelines:
 - Bounce = several keys with decreasing amplitude, ease-out falling / ease-in rising, not one curve.
 - When the request implies sequence over multiple layers, stagger their key times (e.g. 4-8 frame offsets).
 - Off-canvas start/end positions are fine for entries/exits; settled poses should sit inside the canvas.
+- ts/te animate the trim path (draw-on): typical draw effect = te 0->100 (ts 0 static). Shape/path layers only — never on image layers. Great for strokes (hasStroke: true) and pen paths (kind: path).
+- kind tells you what each layer is (rect/ellipse/star/text/path/image) — match layers to the request by kind and name.
 - If specific layers are selected (selected: true), animate those; otherwise animate the layers that best match the request (all if it is global).
 - Keep motion within the composition length. End settled unless a loop is asked; for loops make the last key equal the first key of that channel.
 - note: one short Korean sentence.`

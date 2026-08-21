@@ -423,7 +423,7 @@ function AiMotionPanel() {
   const [keyDraft, setKeyDraft] = useState('')
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string; undoable?: boolean } | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
   // 언마운트 시 진행 중 요청 정리
@@ -467,9 +467,12 @@ function AiMotionPanel() {
       if (applied === 0) {
         setMsg({ kind: 'err', text: t('적용된 레이어가 없습니다 — 대상 레이어가 잠겨 있는지 확인하세요') })
       } else {
+        // 미리보기 — 적용 직후 1회 재생, 메시지에 되돌리기 액션
+        useEditor.getState().replay()
         setMsg({
           kind: 'ok',
-          text: t('{note} — ⌘Z로 되돌릴 수 있어요').replace('{note}', plan.note ?? t('모션 적용됨')),
+          text: plan.note ?? t('모션 적용됨'),
+          undoable: true,
         })
       }
     } catch (e) {
@@ -507,7 +510,22 @@ function AiMotionPanel() {
             </button>
           )}
         </div>
-        {msg && <p className={msg.kind === 'err' ? 'panel__error' : 'aipanel__ok'}>{msg.text}</p>}
+        {msg && (
+          <p className={msg.kind === 'err' ? 'panel__error' : 'aipanel__ok'}>
+            {msg.text}
+            {msg.undoable && (
+              <button
+                className="linkbtn"
+                onClick={() => {
+                  useEditor.getState().undo()
+                  setMsg(null)
+                }}
+              >
+                {t('되돌리기')}
+              </button>
+            )}
+          </p>
+        )}
         {editKey && apiKey && (
           <button
             className="aipanel__keybtn"
@@ -569,7 +587,20 @@ function AiMotionPanel() {
         </button>
       </div>
       {msg && (
-        <p className={msg.kind === 'err' ? 'panel__error' : 'aipanel__ok'}>{msg.text}</p>
+        <p className={msg.kind === 'err' ? 'panel__error' : 'aipanel__ok'}>
+          {msg.text}
+          {msg.undoable && (
+            <button
+              className="linkbtn"
+              onClick={() => {
+                useEditor.getState().undo()
+                setMsg(null)
+              }}
+            >
+              {t('되돌리기')}
+            </button>
+          )}
+        </p>
       )}
       <p className="knob__note">
         {t('선택한 레이어가 있으면 그 레이어 위주로, 없으면 요청에 맞는 레이어에 적용합니다. 결과는 일반 키프레임이라 그대로 수정할 수 있습니다 (⌘Enter = 생성).')}
