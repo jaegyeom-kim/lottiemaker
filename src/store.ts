@@ -25,7 +25,8 @@ const HISTORY_CAP = 50
  * data만 저장하면 undo 후 노브 조작이 어긋난다 — 셋을 함께 스냅샷.
  */
 interface Snapshot {
-  /** null = 빈 작업공간(커스텀 전체 삭제 등) — undo/redo가 빈 상태를 오갈 수 있어야 한다. */
+  /** 렌더 문서 — source가 있으면 생략(null)하고 복원 시 applyKnobs로 재계산 (히스토리 메모리 절반).
+   *  source도 null이면 빈 작업공간 (커스텀 전체 삭제 등). */
   data: LottieJson | null
   source: LottieJson | null
   knobValues: Record<string, number | string>
@@ -418,10 +419,16 @@ export const useEditor = create<EditorState>((set, get) => {
   const snap = (): Snapshot => {
     const { animationData, sourceData, knobValues, templateKnobs, customIdx, templateId } = get()
     return {
-      data: animationData, source: sourceData, knobValues, templateKnobs,
+      // source가 있으면 data는 재계산 가능 — 저장 생략 (히스토리 스텝당 문서 1부만)
+      data: sourceData ? null : animationData,
+      source: sourceData, knobValues, templateKnobs,
       customIdx, customIdxs: get().customIdxs, templateId,
     }
   }
+
+  /** 스냅샷의 렌더 문서 복원 — 생략된 data는 source에서 재계산. */
+  const snapData = (sn: Snapshot): LottieJson | null =>
+    sn.source ? applyKnobs(sn.source, sn.templateKnobs, sn.knobValues) : sn.data
 
   /**
    * 라이브 편집용 문서 클론 — 레이어만 깊복사, 에셋 배열(대용량 base64)은 공유.
@@ -1110,13 +1117,14 @@ export const useEditor = create<EditorState>((set, get) => {
     cancelEdit: () => {
       const b = get().editBaseline
       if (!b) return
+      const bData = snapData(b)
       set({
-        animationData: b.data,
+        animationData: bData,
         sourceData: b.source,
         knobValues: b.knobValues,
         templateKnobs: b.templateKnobs,
         customIdx: b.customIdx ?? get().customIdx,
-        colorGroups: b.data ? extractColorGroups(b.data) : [],
+        colorGroups: bData ? extractColorGroups(bData) : [],
         editBaseline: null,
       })
     },
@@ -2976,15 +2984,16 @@ export const useEditor = create<EditorState>((set, get) => {
       if (!past.length) return
       const cur = snap()
       const prev = past[past.length - 1]
+      const prevData = snapData(prev)
       set({
-        animationData: prev.data,
+        animationData: prevData,
         sourceData: prev.source,
         knobValues: prev.knobValues,
         templateKnobs: prev.templateKnobs,
         customIdx: prev.customIdx ?? 0,
         customIdxs: prev.customIdxs ?? [prev.customIdx ?? 0],
         templateId: prev.templateId,
-        colorGroups: prev.data ? extractColorGroups(prev.data) : [],
+        colorGroups: prevData ? extractColorGroups(prevData) : [],
         past: past.slice(0, -1),
         future: [cur, ...future].slice(0, HISTORY_CAP),
         kfSel: [], // 스냅샷엔 키 선택이 없음 — 낡은 인덱스로 남지 않게 정리
@@ -2997,15 +3006,16 @@ export const useEditor = create<EditorState>((set, get) => {
       if (!future.length) return
       const cur = snap()
       const next = future[0]
+      const nextData = snapData(next)
       set({
-        animationData: next.data,
+        animationData: nextData,
         sourceData: next.source,
         knobValues: next.knobValues,
         templateKnobs: next.templateKnobs,
         customIdx: next.customIdx ?? 0,
         customIdxs: next.customIdxs ?? [next.customIdx ?? 0],
         templateId: next.templateId,
-        colorGroups: next.data ? extractColorGroups(next.data) : [],
+        colorGroups: nextData ? extractColorGroups(nextData) : [],
         future: future.slice(1),
         past: [...past.slice(-HISTORY_CAP + 1), cur],
         kfSel: [],
