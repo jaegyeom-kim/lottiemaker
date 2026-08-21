@@ -272,6 +272,8 @@ interface EditorState {
   removeLayerStroke: (li: number) => void
   /** 칠 — 단색(fl) ↔ 그라디언트(gf 선형/방사) 전환·색·각도. 로컬 bbox 기준 끝점. */
   setLayerFill: (li: number, fill: LayerFill) => void
+  /** 그라디언트 끝점 직접 이동 (라이브, 레이어 로컬 좌표) — 캔버스 라인 드래그용. */
+  setLayerFillPointsLive: (li: number, pts: { s?: [number, number]; e?: [number, number] }) => void
   /** 텍스트 레이어 재생성 — 그래픽 교체 + xtext 메타 동기 (언두 1회). li = 주 선택이어야 함. */
   applyTextGraphic: (li: number, payload: CustomPayload, at: [number, number], size: number, xtext: TextMeta) => void
   /** 도형 지오메트리 리빌드 — xshape 메타 있는 레이어의 크기/라운드 (제자리 유지, 언두 1회). */
@@ -1689,6 +1691,38 @@ export const useEditor = create<EditorState>((set, get) => {
       strip(group.it as Record<string, unknown>[])
       const applied = applyKnobs(src, templateKnobs, knobValues)
       push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
+    },
+
+    setLayerFillPointsLive: (li, pts) => {
+      const st = get()
+      const baseline = st.editBaseline ?? snap()
+      const baseSrc = baseline.source ?? st.sourceData
+      if (!baseSrc?.layers[li] || lockedAt(baseSrc, li)) return
+      const src = cloneForLive(baseSrc)
+      ensureLayerColors(src)
+      const layer = src.layers[li] as Record<string, unknown>
+      const group = (layer.shapes as Record<string, unknown>[] | undefined)?.[0]
+      if (!group?.it) return
+      let gf: Record<string, unknown> | null = null
+      const walk = (items: Record<string, unknown>[]) => {
+        for (const it of items) {
+          if (it.ty === 'gf' && !gf) gf = it
+          else if (it.ty === 'gr') walk(it.it as Record<string, unknown>[])
+        }
+      }
+      walk(group.it as Record<string, unknown>[])
+      if (!gf) return
+      const R1 = (v: number) => Math.round(v * 10) / 10
+      if (pts.s) (gf as Record<string, unknown>).s = { a: 0, k: [R1(pts.s[0]), R1(pts.s[1])] }
+      if (pts.e) (gf as Record<string, unknown>).e = { a: 0, k: [R1(pts.e[0]), R1(pts.e[1])] }
+      const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
+      set({
+        animationData: applied,
+        sourceData: src,
+        colorGroups: st.colorGroups,
+        editBaseline: baseline,
+        future: [],
+      })
     },
 
     setLayerFill: (li, fill) => {

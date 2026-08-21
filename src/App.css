@@ -4408,3 +4408,30 @@ body.drag-cross * { cursor: crosshair !important; }
   justify-content: space-between;
   gap: 8px;
 }
+
+/* 그라디언트 라인 (피그마) */
+.gradline {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 3;
+}
+.gradline__line {
+  stroke: #fff;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.7));
+}
+.gradline__knob {
+  pointer-events: auto;
+  cursor: grab;
+  stroke: #fff;
+  stroke-width: 2;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
+}
+.gradline__knob:active {
+  cursor: grabbing;
+}

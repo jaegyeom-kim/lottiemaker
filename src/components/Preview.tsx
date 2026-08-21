@@ -1035,6 +1035,94 @@ export default function Preview() {
     }
   })()
 
+  // ── 그라디언트 라인 (피그마) — 선택 레이어의 gf 끝점을 캔버스에서 직접 드래그 ──
+  const [gradM, setGradM] = useState<DOMMatrix | null>(null)
+  const gradDrag = useRef<{ which: 's' | 'e'; li: number; moved: boolean } | null>(null)
+  const gradIdx = Math.min(customIdx, (sourceData?.layers.length ?? 1) - 1)
+  /** 선택 레이어의 gf 페인터 — {s, e, from, to, radial} (없으면 null). */
+  const gradInfo = (() => {
+    if (templateId !== '__custom' || previewing || tool !== 'move' || drawTool) return null
+    const lr = sourceData?.layers[gradIdx] as Record<string, unknown> | undefined
+    const group = (lr?.shapes as Record<string, unknown>[] | undefined)?.[0]
+    if (!group?.it) return null
+    let gf: Record<string, unknown> | null = null
+    const walk = (items: Record<string, unknown>[]) => {
+      for (const it of items) {
+        if (it.ty === 'gf' && !gf) gf = it
+        else if (it.ty === 'gr') walk(it.it as Record<string, unknown>[])
+      }
+    }
+    walk(group.it as Record<string, unknown>[])
+    if (!gf) return null
+    const g = gf as Record<string, unknown>
+    const sPt = ((g.s as Record<string, unknown>)?.k as number[] | undefined) ?? [0, 0]
+    const ePt = ((g.e as Record<string, unknown>)?.k as number[] | undefined) ?? [100, 0]
+    const stops = (((g.g as Record<string, unknown>)?.k as Record<string, unknown>)?.k as number[] | undefined) ?? []
+    const hex = (i: number) =>
+      stops.length >= i + 4
+        ? `rgb(${Math.round(stops[i + 1] * 255)},${Math.round(stops[i + 2] * 255)},${Math.round(stops[i + 3] * 255)})`
+        : '#888'
+    return {
+      li: gradIdx,
+      s: [sPt[0], sPt[1]] as [number, number],
+      e: [ePt[0], ePt[1]] as [number, number],
+      from: hex(0),
+      to: hex(4),
+      radial: Number(g.t) === 2,
+    }
+  })()
+  const hasGrad = !!gradInfo
+  // 로컬→캔버스 행렬 — 렌더된 path CTM (editM과 동일 방식, 이동 툴 전용)
+  useEffect(() => {
+    if (!hasGrad) {
+      setGradM(null)
+      return
+    }
+    const raf = requestAnimationFrame(() => {
+      const wrap = wrapRef.current
+      if (!wrap) return
+      const inst = lottieInst.current as unknown as {
+        renderer?: { elements?: ({ layerElement?: SVGGElement } | null | undefined)[] }
+      } | null
+      const layerG = inst?.renderer?.elements?.[gradIdx]?.layerElement
+      const el = layerG?.isConnected ? layerG.querySelector('path') : null
+      const ctm = el?.getScreenCTM()
+      if (!ctm) {
+        setGradM(null)
+        return
+      }
+      const rect = wrap.getBoundingClientRect()
+      const f = cw / rect.width
+      setGradM(new DOMMatrix().scale(f).translate(-rect.left, -rect.top).multiply(DOMMatrix.fromMatrix(ctm)))
+    })
+    return () => cancelAnimationFrame(raf)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasGrad, gradIdx, zoom, pan, animationData])
+  const gradMove = (e: React.PointerEvent) => {
+    const gd = gradDrag.current
+    if (!gd || !gradM) return
+    e.stopPropagation()
+    const rect = wrapRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const f = cw / rect.width
+    const cvs = new DOMPoint((e.clientX - rect.left) * f, (e.clientY - rect.top) * f)
+    const local = cvs.matrixTransform(gradM.inverse())
+    gd.moved = true
+    useEditor.getState().setLayerFillPointsLive(gd.li, { [gd.which]: [local.x, local.y] } as {
+      s?: [number, number]
+      e?: [number, number]
+    })
+  }
+  const gradUp = (e: React.PointerEvent) => {
+    const gd = gradDrag.current
+    gradDrag.current = null
+    if (!gd) return
+    e.stopPropagation()
+    ;(e.currentTarget as Element).releasePointerCapture(e.pointerId)
+    if (gd.moved) useEditor.getState().commitEdit()
+  }
+
+
   // 고정 가이드 드래그 — 룰러에서 끌어 생성, 라인 드래그로 이동, 룰러 밖 드롭 = 삭제
   const guideDrag = useRef<{ axis: 'v' | 'h'; idx: number; moved: boolean } | null>(null)
   const guideCanvasPos = (e: React.PointerEvent, axis: 'v' | 'h'): number | null => {
@@ -1898,6 +1986,45 @@ export default function Preview() {
                   className="preview__lottiefill"
                 />
               </div>
+              {/* 그라디언트 라인 (피그마) — 시작/끝 노브 드래그로 gf s/e 직접 이동 */}
+              {gradInfo && gradM && !dragBox && (() => {
+                const sP = new DOMPoint(gradInfo.s[0], gradInfo.s[1]).matrixTransform(gradM)
+                const eP = new DOMPoint(gradInfo.e[0], gradInfo.e[1]).matrixTransform(gradM)
+                const grab = (which: 's' | 'e') => (ev: React.PointerEvent) => {
+                  if (ev.button !== 0) return
+                  ev.stopPropagation()
+                  ev.preventDefault()
+                  ;(ev.currentTarget as Element).setPointerCapture(ev.pointerId)
+                  gradDrag.current = { which, li: gradInfo.li, moved: false }
+                }
+                return (
+                  <svg className="gradline" viewBox={`0 0 ${cw} ${ch}`}>
+                    <line className="gradline__line" x1={sP.x} y1={sP.y} x2={eP.x} y2={eP.y} />
+                    <circle
+                      className="gradline__knob"
+                      cx={sP.x}
+                      cy={sP.y}
+                      r={6}
+                      style={{ fill: gradInfo.from }}
+                      onPointerDown={grab('s')}
+                      onPointerMove={gradMove}
+                      onPointerUp={gradUp}
+                      onPointerCancel={gradUp}
+                    />
+                    <circle
+                      className="gradline__knob"
+                      cx={eP.x}
+                      cy={eP.y}
+                      r={6}
+                      style={{ fill: gradInfo.to }}
+                      onPointerDown={grab('e')}
+                      onPointerMove={gradMove}
+                      onPointerUp={gradUp}
+                      onPointerCancel={gradUp}
+                    />
+                  </svg>
+                )
+              })()}
               {/* 모션 패스 — 곡선 경로 + 프레임 점 + 드래그 가능한 키/공간 탄젠트 (AE) */}
               {motionPath && (
                 <svg className="motionpath" viewBox={`0 0 ${cw} ${ch}`}>

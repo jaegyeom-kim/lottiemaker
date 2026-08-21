@@ -65,6 +65,29 @@ d = await src()
 pt = painterOf(d)
 ok(Math.abs(pt.g.k.k[5] - 1) < 0.02 && pt.g.k.k[6] < 0.2, `끝 색 반영 (r=${pt.g.k.k[5].toFixed(2)})`)
 
+// ── 그라디언트 라인 (피그마) — 캔버스 노브 드래그로 끝점 직접 이동 ──
+ok((await page.locator('.gradline').count()) === 1, '그라디언트 라인 표시')
+ok((await page.locator('.gradline__knob').count()) === 2, '시작/끝 노브 2개')
+{
+  const before = painterOf(await src())
+  const knob = await (await page.$$('.gradline__knob'))[1].boundingBox()
+  await page.mouse.move(knob.x + knob.width / 2, knob.y + knob.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(knob.x + knob.width / 2 + 60, knob.y + knob.height / 2 - 40, { steps: 6 })
+  await page.mouse.up()
+  await page.waitForTimeout(1300)
+  const after = painterOf(await src())
+  const dx = after.e.k[0] - before.e.k[0]
+  const dy = after.e.k[1] - before.e.k[1]
+  ok(dx > 40 && dy < -20, `끝점 노브 드래그 반영 (Δ${dx.toFixed(0)},${dy.toFixed(0)})`)
+  ok(JSON.stringify(after.s.k) === JSON.stringify(before.s.k), '시작점 불변')
+  // 언두 1회 = 드래그 전
+  await page.keyboard.press('Meta+z')
+  await page.waitForTimeout(1300)
+  const undone = painterOf(await src())
+  ok(JSON.stringify(undone.e.k) === JSON.stringify(before.e.k), '⌘Z → 끝점 원복')
+}
+
 // 방사 전환
 await fillKnob.locator('select').selectOption('radial')
 await page.waitForTimeout(1300)
