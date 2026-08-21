@@ -1,4 +1,15 @@
 import { useEffect, useState } from 'react'
+
+/** 최근 사용 색 — 문서 간 공유 (localStorage, 최대 12, 최신 앞). */
+const RECENT_KEY = 'lottiemaker.recentColors'
+function loadRecents(): string[] {
+  try {
+    const arr = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]')
+    return Array.isArray(arr) ? arr.filter((h) => /^#[0-9a-f]{6}$/.test(h)).slice(0, 12) : []
+  } catch {
+    return []
+  }
+}
 import { evalNumExpr } from '../lib/num'
 import { t } from '../lib/i18n'
 import { useEditor } from '../store'
@@ -19,6 +30,20 @@ function colorAtPath(doc: unknown, path: (string | number)[]): string | null {
 export default function ColorEditor() {
   const { colorGroups, setColorLive, commitEdit, animationData, setSize } = useEditor()
   const pristineData = useEditor((s) => s.pristineData)
+  // 스와치 적용 대상 — 마지막으로 만진 색 그룹
+  const [active, setActive] = useState(0)
+  const [recents, setRecents] = useState<string[]>(loadRecents)
+  const addRecent = (hex: string) => {
+    setRecents((prev) => {
+      const next = [hex, ...prev.filter((h) => h !== hex)].slice(0, 12)
+      try {
+        localStorage.setItem(RECENT_KEY, JSON.stringify(next))
+      } catch {
+        // 저장 불가 환경 — 무시
+      }
+      return next
+    })
+  }
 
   if (!animationData) return null
 
@@ -55,18 +80,27 @@ export default function ColorEditor() {
             const changed = byOrig ? [...byOrig.keys()].some((oh) => oh !== g.hex) : false
             return (
               // key는 인덱스 — hex를 key로 쓰면 드래그 중 리마운트로 네이티브 피커가 닫힌다
-              <div key={i} className="colors__item" title={t('{n}곳에서 사용').replace('{n}', String(g.refs.length))}>
+              <div
+                key={i}
+                className={`colors__item ${i === active ? 'colors__item--active' : ''}`}
+                title={t('{n}곳에서 사용').replace('{n}', String(g.refs.length))}
+                onPointerDown={() => setActive(i)}
+              >
                 <input
                   type="color"
                   value={g.hex}
                   onChange={(e) => setColorLive(g, e.target.value)}
-                  onBlur={commitEdit}
+                  onBlur={(e) => {
+                    commitEdit()
+                    addRecent(e.target.value)
+                  }}
                 />
                 <HexInput
                   value={g.hex}
                   onCommit={(hex) => {
                     setColorLive(g, hex)
                     commitEdit()
+                    addRecent(hex)
                   }}
                 />
                 <span className="colors__count">{g.refs.length}</span>
@@ -83,6 +117,29 @@ export default function ColorEditor() {
             )
           })}
         </div>
+      )}
+
+      {recents.length > 0 && colorGroups.length > 0 && (
+        <>
+          <h3 className="panel__label">{t('최근 색')}</h3>
+          <div className="swatches">
+            {recents.map((hex) => (
+              <button
+                key={hex}
+                className="swatches__chip"
+                style={{ background: hex }}
+                title={`${hex} → ${t('선택 그룹에 적용')}`}
+                onClick={() => {
+                  const g = colorGroups[Math.min(active, colorGroups.length - 1)]
+                  if (!g) return
+                  setColorLive(g, hex)
+                  commitEdit()
+                  addRecent(hex)
+                }}
+              />
+            ))}
+          </div>
+        </>
       )}
 
       <h3 className="panel__label">{t('크기')}</h3>

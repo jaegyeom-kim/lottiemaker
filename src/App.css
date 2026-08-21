@@ -4027,3 +4027,28 @@ body.drag-cross * { cursor: crosshair !important; }
   color: var(--amber, #e5a64b);
   cursor: help;
 }
+
+/* 최근 색 스와치 — 클릭 = 활성(마지막으로 만진) 색 그룹에 적용 */
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 10px;
+}
+.swatches__chip {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  padding: 0;
+}
+.swatches__chip:hover {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+.colors__item--active input[type='color'] {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+  border-radius: 6px;
+}
