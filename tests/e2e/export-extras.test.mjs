@@ -44,4 +44,22 @@ const buf = fs.readFileSync(path2)
 ok(buf.slice(0, 6).toString('latin1').startsWith('GIF8'), 'GIF 시그니처')
 ok(buf.length > 2000, `GIF 크기 (${(buf.length / 1024).toFixed(1)}KB)`)
 
+// 프레임 PNG — 시그니처 + 크기
+const [dl3] = await Promise.all([
+  page.waitForEvent('download'),
+  page.locator('button', { hasText: '프레임 PNG' }).click(),
+])
+const png = fs.readFileSync(await dl3.path())
+ok(png.slice(1, 4).toString('latin1') === 'PNG', 'PNG 시그니처')
+ok(png.length > 500, `PNG 크기 (${(png.length / 1024).toFixed(1)}KB)`)
+
+// PNG 시퀀스 — zip 시그니처
+const [dl4] = await Promise.all([
+  page.waitForEvent('download', { timeout: 120000 }),
+  page.locator('button', { hasText: 'PNG 시퀀스' }).click(),
+])
+const zip = fs.readFileSync(await dl4.path())
+ok(zip.slice(0, 2).toString('latin1') === 'PK', 'zip 시그니처')
+ok(zip.includes('frame_0001.png'), '시퀀스 엔트리 존재')
+
 await done(browser)

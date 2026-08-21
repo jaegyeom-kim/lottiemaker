@@ -7,6 +7,7 @@ import { exportWebM, webmSupported } from '../lib/videoExport'
 import { exportGif } from '../lib/gifExport'
 import VersionPanel from './VersionPanel'
 import { optimizeLottie } from '../lib/optimize'
+import { exportFramePng, exportPngSequence } from '../lib/pngExport'
 import Section from './Section'
 import { DownloadIcon, CopyIcon, MovieIcon, CodeIcon, SaveIcon } from './icons'
 
@@ -41,6 +42,28 @@ export default function ExportPanel() {
   const finalData = () => (optimize ? optimizeLottie(rawData()) : rawData())
 
   const [gifBusy, setGifBusy] = useState<number | null>(null)
+  const [pngBusy, setPngBusy] = useState<number | null>(null)
+  const curFrame = useEditor((s) => s.curFrame)
+  const savePngFrame = async () => {
+    try {
+      saveBlob(await exportFramePng(finalData(), curFrame), `${fileName}_${curFrame}f.png`)
+    } catch (err) {
+      setVideoErr(err instanceof Error ? err.message : String(err))
+    }
+  }
+  const savePngSeq = async () => {
+    if (pngBusy !== null) return
+    setVideoErr('')
+    setPngBusy(0)
+    try {
+      const blob = await exportPngSequence(finalData(), { onProgress: setPngBusy })
+      saveBlob(blob, `${fileName}_seq.zip`)
+    } catch (err) {
+      setVideoErr(err instanceof Error ? err.message : String(err))
+    } finally {
+      setPngBusy(null)
+    }
+  }
   const saveGif = async () => {
     if (gifBusy !== null) return
     setVideoErr('')
@@ -157,6 +180,26 @@ lottie.loadAnimation({
           {recording !== null
             ? t('녹화 중 {pct}%').replace('{pct}', String(Math.round(recording * 100)))
             : t('WebM 영상')}
+        </button>
+      </div>
+      <div className="exportrow">
+        <button
+          className="btn btn--secondary"
+          title={t('현재 프레임을 투명 배경 PNG로 (2x)')}
+          onClick={savePngFrame}
+        >
+          <DownloadIcon /> {t('프레임 PNG')}
+        </button>
+        <button
+          className="btn btn--secondary"
+          disabled={pngBusy !== null}
+          title={t('전체 프레임을 PNG 시퀀스 zip으로 (30fps, 투명 배경)')}
+          onClick={savePngSeq}
+        >
+          <DownloadIcon />{' '}
+          {pngBusy !== null
+            ? t('시퀀스 {pct}%').replace('{pct}', String(Math.round(pngBusy * 100)))
+            : t('PNG 시퀀스')}
         </button>
       </div>
       <div className="exportrow">

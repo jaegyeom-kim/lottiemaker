@@ -40,7 +40,7 @@ interface ZipEntry {
 }
 
 /** 표준 zip 생성 — local file headers + central directory + EOCD. */
-async function buildZip(files: { name: string; data: Uint8Array }[]): Promise<Blob> {
+export async function buildZip(files: { name: string; data: Uint8Array }[]): Promise<Blob> {
   const enc = new TextEncoder()
   const entries: ZipEntry[] = []
   const chunks: Uint8Array[] = []
