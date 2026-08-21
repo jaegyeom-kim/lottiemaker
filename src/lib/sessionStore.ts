@@ -4,6 +4,7 @@
 const DB_NAME = 'lottiemaker'
 const STORE = 'sessions'
 const FONT_STORE = 'fonts'
+const VER_STORE = 'versions'
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -11,10 +12,11 @@ function openDb(): Promise<IDBDatabase> {
       reject(new Error('no indexedDB'))
       return
     }
-    const req = indexedDB.open(DB_NAME, 2)
+    const req = indexedDB.open(DB_NAME, 3)
     req.onupgradeneeded = () => {
       if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE)
       if (!req.result.objectStoreNames.contains(FONT_STORE)) req.result.createObjectStore(FONT_STORE)
+      if (!req.result.objectStoreNames.contains(VER_STORE)) req.result.createObjectStore(VER_STORE)
     }
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error)
@@ -101,6 +103,91 @@ export async function idbFontList(): Promise<string[]> {
       req.onsuccess = () => resolve((req.result as IDBValidKey[]).map(String))
       req.onerror = () => reject(req.error)
     })
+  } finally {
+    db.close()
+  }
+}
+
+// ── 버전 스냅샷 — 수동 저장 포인트 (이름 + 시각 + 세션 페이로드) ──
+export interface VersionMeta {
+  id: string
+  name: string
+  at: number
+  bytes: number
+}
+
+export async function idbVersionPut(id: string, value: string): Promise<void> {
+  const db = await openDb()
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(VER_STORE, 'readwrite')
+      tx.objectStore(VER_STORE).put(value, id)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+  } finally {
+    db.close()
+  }
+}
+
+export async function idbVersionGet(id: string): Promise<string | null> {
+  const db = await openDb()
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(VER_STORE, 'readonly')
+      const req = tx.objectStore(VER_STORE).get(id)
+      req.onsuccess = () => resolve(typeof req.result === 'string' ? req.result : null)
+      req.onerror = () => reject(req.error)
+    })
+  } finally {
+    db.close()
+  }
+}
+
+export async function idbVersionDel(id: string): Promise<void> {
+  const db = await openDb()
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(VER_STORE, 'readwrite')
+      tx.objectStore(VER_STORE).delete(id)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+  } finally {
+    db.close()
+  }
+}
+
+/** 메타 목록 — 최신순. 값 전체를 읽지 않도록 커서 없이 keys + 미리 저장한 메타 파싱. */
+export async function idbVersionList(): Promise<VersionMeta[]> {
+  const db = await openDb()
+  try {
+    const rows: VersionMeta[] = await new Promise((resolve, reject) => {
+      const tx = db.transaction(VER_STORE, 'readonly')
+      const req = tx.objectStore(VER_STORE).openCursor()
+      const out: VersionMeta[] = []
+      req.onsuccess = () => {
+        const cur = req.result
+        if (!cur) {
+          resolve(out)
+          return
+        }
+        try {
+          const v = JSON.parse(String(cur.value)) as { name?: string; at?: number }
+          out.push({
+            id: String(cur.key),
+            name: String(v.name ?? cur.key),
+            at: Number(v.at ?? 0),
+            bytes: String(cur.value).length,
+          })
+        } catch {
+          // 손상 엔트리 — 목록에서 제외
+        }
+        cur.continue()
+      }
+      req.onerror = () => reject(req.error)
+    })
+    return rows.sort((a, b) => b.at - a.at)
   } finally {
     db.close()
   }

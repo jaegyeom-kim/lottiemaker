@@ -4305,3 +4305,46 @@ body.drag-cross * { cursor: crosshair !important; }
   right: 0;
   height: 1px;
 }
+
+/* 버전 스냅샷 */
+.versions__save {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.versions__save .input {
+  flex: 1;
+  min-width: 0;
+}
+.versions__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow: auto;
+}
+.versions__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.versions__meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.versions__meta span {
+  color: var(--dim);
+  font-size: 11px;
+}
+.versions__del {
+  color: var(--dim);
+}

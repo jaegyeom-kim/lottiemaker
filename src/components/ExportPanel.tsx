@@ -5,6 +5,7 @@ import { bakeSpeed, download, durationSec } from '../lib/lottieUtils'
 import { buildDotLottie, saveBlob } from '../lib/dotlottie'
 import { exportWebM, webmSupported } from '../lib/videoExport'
 import { exportGif } from '../lib/gifExport'
+import VersionPanel from './VersionPanel'
 import { optimizeLottie } from '../lib/optimize'
 import Section from './Section'
 import { DownloadIcon, CopyIcon, MovieIcon, CodeIcon, SaveIcon } from './icons'
@@ -176,6 +177,9 @@ lottie.loadAnimation({
         <CodeIcon /> {copied === 'code' ? t('복사됨 ✓') : t('lottie-web 코드 복사')}
       </button>
         </div>
+      </Section>
+      <Section key="exp-ver" id="exp-ver" title="버전">
+        <VersionPanel />
       </Section>
       <Section key="exp-proj" id="exp-proj" title="프로젝트">
         <div className="panel__section">
