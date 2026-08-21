@@ -4,6 +4,8 @@ import { t } from '../lib/i18n'
 import { bakeSpeed, download, durationSec } from '../lib/lottieUtils'
 import { buildDotLottie, saveBlob } from '../lib/dotlottie'
 import { exportWebM, webmSupported } from '../lib/videoExport'
+import { exportGif } from '../lib/gifExport'
+import { optimizeLottie } from '../lib/optimize'
 import Section from './Section'
 import { DownloadIcon, CopyIcon, MovieIcon, CodeIcon, SaveIcon } from './icons'
 
@@ -26,6 +28,7 @@ export default function ExportPanel() {
     URL.revokeObjectURL(url)
   }
   const [applySpeed, setApplySpeed] = useState(false)
+  const [optimize, setOptimize] = useState(true)
   const [copied, setCopied] = useState<'json' | 'code' | null>(null)
   const [recording, setRecording] = useState<number | null>(null)
   const [videoErr, setVideoErr] = useState('')
@@ -33,7 +36,24 @@ export default function ExportPanel() {
 
   if (!animationData) return null
 
-  const finalData = () => (applySpeed && speed !== 1 ? bakeSpeed(animationData, speed) : animationData)
+  const rawData = () => (applySpeed && speed !== 1 ? bakeSpeed(animationData, speed) : animationData)
+  const finalData = () => (optimize ? optimizeLottie(rawData()) : rawData())
+
+  const [gifBusy, setGifBusy] = useState<number | null>(null)
+  const saveGif = async () => {
+    if (gifBusy !== null) return
+    setVideoErr('')
+    setGifBusy(0)
+    try {
+      const solidBg = bg === 'checker' ? '#ffffff' : bg
+      const blob = await exportGif(finalData(), { bg: solidBg, onProgress: setGifBusy })
+      saveBlob(blob, `${fileName}.gif`)
+    } catch (err) {
+      setVideoErr(err instanceof Error ? err.message : String(err))
+    } finally {
+      setGifBusy(null)
+    }
+  }
 
   const recordWebm = async () => {
     if (recording !== null) return
@@ -98,6 +118,14 @@ lottie.loadAnimation({
           {t('현재 배속({speed}x)을 파일에 적용').replace('{speed}', String(speed))}
         </label>
       )}
+      <label className="check" title={t('소수점 3자리 라운딩 + 미사용 에셋·에디터 메타 제거 — 시각 결과 동일')}>
+        <input type="checkbox" checked={optimize} onChange={(e) => setOptimize(e.target.checked)} />
+        {t('최적화')}{' '}
+        <span className="panel__hint">
+          {(JSON.stringify(optimizeLottie(rawData())).length / 1024).toFixed(1)}KB /{' '}
+          {(JSON.stringify(rawData()).length / 1024).toFixed(1)}KB
+        </span>
+      </label>
       <div className="exportrow">
         <button className="btn btn--primary" onClick={() => download(finalData(), fileName)}>
           <DownloadIcon /> {t('JSON 다운로드')}
@@ -128,6 +156,19 @@ lottie.loadAnimation({
           {recording !== null
             ? t('녹화 중 {pct}%').replace('{pct}', String(Math.round(recording * 100)))
             : t('WebM 영상')}
+        </button>
+      </div>
+      <div className="exportrow">
+        <button
+          className="btn btn--secondary btn--full"
+          disabled={gifBusy !== null}
+          title={t('프레임 단위로 정확히 뽑아 GIF 인코딩 (배경색 포함, 30fps)')}
+          onClick={saveGif}
+        >
+          <MovieIcon />{' '}
+          {gifBusy !== null
+            ? t('GIF 인코딩 {pct}%').replace('{pct}', String(Math.round(gifBusy * 100)))
+            : t('GIF 저장')}
         </button>
       </div>
       {videoErr && <p className="panel__error">{videoErr}</p>}
