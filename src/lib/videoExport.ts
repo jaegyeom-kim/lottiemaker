@@ -19,7 +19,7 @@ export function webmSupported(): boolean {
  */
 export async function exportWebM(
   anim: LottieJson,
-  opts: { bg: string; scale?: number; onProgress?: (f: number) => void },
+  opts: { bg: string; onProgress?: (f: number) => void },
 ): Promise<Blob> {
   const lottie = (await import('lottie-web/build/player/lottie_canvas')).default
   return new Promise((resolve, reject) => {
@@ -27,9 +27,8 @@ export async function exportWebM(
       reject(new Error(t('이 브라우저는 WebM 녹화를 지원하지 않습니다 (Chrome/Edge 권장)')))
       return
     }
-    const scale = opts.scale ?? 2
-    const w = Math.round(anim.w * scale)
-    const h = Math.round(anim.h * scale)
+    const w = Math.round(anim.w * 2)
+    const h = Math.round(anim.h * 2)
     const durMs = ((anim.op - anim.ip) / anim.fr) * 1000
 
     // lottie가 그리는 캔버스(A) + 배경 깔고 합성해 녹화하는 캔버스(B)
