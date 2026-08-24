@@ -2499,7 +2499,9 @@ export default function Preview() {
                       })}
                   {/* 앵커 포인트 마커 (⊕) — 바운딩박스와 함께, 앵커 툴에서 드래그 대상 표시.
                       펜 모드에선 숨김 — 패스 앵커와 혼동 방지 */}
-                  {anchorPt && !dragBox && drawTool !== 'pen' && (
+                  {/* 그라디언트 라인 표시 중엔 마커 숨김 — 중심에서 겹쳐 서로 가림.
+                      앵커 툴(Y)에선 그라디언트 라인이 안 뜨므로 마커가 다시 보인다 */}
+                  {anchorPt && !dragBox && drawTool !== 'pen' && !(gradInfo && gradM) && (
                     <svg
                       className={`anchorpoint ${tool === 'anchor' ? 'anchorpoint--active' : ''}`}
                       viewBox="0 0 24 24"

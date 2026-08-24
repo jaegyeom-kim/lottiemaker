@@ -88,6 +88,15 @@ ok((await page.locator('.gradline__knob').count()) === 2, '시작/끝 노브 2�
   ok(JSON.stringify(undone.e.k) === JSON.stringify(before.e.k), '⌘Z → 끝점 원복')
 }
 
+// 그라디언트 라인 표시 중 = 앵커 마커 숨김 (겹침 방지), Y 툴 = 마커 복귀 + 라인 숨김
+ok((await page.locator('.anchorpoint').count()) === 0, '그라디언트 중 앵커 마커 숨김')
+await page.keyboard.press('y')
+await page.waitForTimeout(250)
+ok((await page.locator('.anchorpoint').count()) === 1, 'Y 툴 → 마커 복귀')
+ok((await page.locator('.gradline').count()) === 0, 'Y 툴 → 그라디언트 라인 숨김')
+await page.keyboard.press('v')
+await page.waitForTimeout(250)
+
 // ── 멀티 스톱 — 패널 추가·라인 클릭 추가·스톱 슬라이드·삭제 ──
 {
   // 패널 '+ 스톱 추가' → 3스톱
