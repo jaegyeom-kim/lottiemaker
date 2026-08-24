@@ -248,11 +248,17 @@ export default function TransformPanel() {
               </select>
             </div>
             {isG && (() => {
-              // 스톱 목록 [{t, hex}] — g.k.k = [t,r,g,b]×N
-              const list: { t: number; hex: string }[] = []
-              for (let i = 0; i + 3 < stops.length; i += 4)
-                list.push({ t: stops[i], hex: rgbArrayToHex([stops[i + 1], stops[i + 2], stops[i + 3]]) })
-              const commitStops = (next: { t: number; hex: string }[]) => {
+              // 스톱 목록 [{t, hex, a}] — 색 p×4 + 알파쌍 [t,o]×p (없으면 전부 1)
+              const pCount = Number((pt.g as Record<string, unknown>)?.p) || Math.floor(stops.length / 4)
+              const alphaPairs = stops.slice(pCount * 4)
+              const list: { t: number; hex: string; a: number }[] = []
+              for (let i = 0; i < pCount; i++)
+                list.push({
+                  t: stops[i * 4],
+                  hex: rgbArrayToHex([stops[i * 4 + 1], stops[i * 4 + 2], stops[i * 4 + 3]]),
+                  a: alphaPairs.length > i * 2 + 1 ? alphaPairs[i * 2 + 1] : 1,
+                })
+              const commitStops = (next: { t: number; hex: string; a?: number }[]) => {
                 setLayerFillStopsLive(idx, next)
                 commitEdit()
               }
@@ -270,7 +276,10 @@ export default function TransformPanel() {
                 const pa = [1, 3, 5].map((o) => parseInt(a.hex.slice(o, o + 2), 16))
                 const pb = [1, 3, 5].map((o) => parseInt(b.hex.slice(o, o + 2), 16))
                 const mixHex = `#${pa.map((v, j) => Math.round((v + pb[j]) / 2).toString(16).padStart(2, '0')).join('')}`
-                commitStops([...list, { t: Math.round(((a.t + b.t) / 2) * 1000) / 1000, hex: mixHex }])
+                commitStops([
+                  ...list,
+                  { t: Math.round(((a.t + b.t) / 2) * 1000) / 1000, hex: mixHex, a: (a.a + b.a) / 2 },
+                ])
               }
               return (
                 <>
@@ -292,6 +301,13 @@ export default function TransformPanel() {
                         value={Math.round(sp.t * 100)}
                         onCommit={(v) =>
                           commitStops(list.map((x, j) => (j === i ? { ...x, t: Math.max(0, Math.min(100, v)) / 100 } : x)))
+                        }
+                      />
+                      <PosInput
+                        label="A"
+                        value={Math.round(sp.a * 100)}
+                        onCommit={(v) =>
+                          commitStops(list.map((x, j) => (j === i ? { ...x, a: Math.max(0, Math.min(100, v)) / 100 } : x)))
                         }
                       />
                       <button

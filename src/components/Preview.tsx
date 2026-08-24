@@ -1035,13 +1035,16 @@ export default function Preview() {
     const sPt = ((g.s as Record<string, unknown>)?.k as number[] | undefined) ?? [0, 0]
     const ePt = ((g.e as Record<string, unknown>)?.k as number[] | undefined) ?? [100, 0]
     const stops = (((g.g as Record<string, unknown>)?.k as Record<string, unknown>)?.k as number[] | undefined) ?? []
-    const stopList: { t: number; hex: string }[] = []
-    for (let i = 0; i + 3 < stops.length; i += 4) {
+    const pCount = Number((g.g as Record<string, unknown>)?.p) || Math.floor(stops.length / 4)
+    const alphaPairs = stops.slice(pCount * 4)
+    const stopList: { t: number; hex: string; a: number }[] = []
+    for (let i = 0; i < pCount; i++) {
       stopList.push({
-        t: stops[i],
-        hex: `#${[stops[i + 1], stops[i + 2], stops[i + 3]]
+        t: stops[i * 4],
+        hex: `#${[stops[i * 4 + 1], stops[i * 4 + 2], stops[i * 4 + 3]]
           .map((v) => Math.round(v * 255).toString(16).padStart(2, '0'))
           .join('')}`,
+        a: alphaPairs.length > i * 2 + 1 ? alphaPairs[i * 2 + 1] : 1,
       })
     }
     if (!stopList.length) return null
@@ -2024,7 +2027,10 @@ export default function Preview() {
                     .map((v, j) => Math.round(v + (pb[j] - v) * u).toString(16).padStart(2, '0'))
                     .join('')}`
                   const st2 = useEditor.getState()
-                  st2.setLayerFillStopsLive(gradInfo.li, [...list.map((x) => ({ ...x })), { t: tv, hex: hx }])
+                  st2.setLayerFillStopsLive(gradInfo.li, [
+                    ...list.map((x) => ({ ...x })),
+                    { t: tv, hex: hx, a: a.a + (b.a - a.a) * u },
+                  ])
                   st2.commitEdit()
                 }
                 return (
@@ -2051,7 +2057,7 @@ export default function Preview() {
                           cx={px}
                           cy={py}
                           r={4.5}
-                          style={{ fill: sp2.hex }}
+                          style={{ fill: sp2.hex, fillOpacity: sp2.a }}
                           onPointerDown={(ev) => {
                             if (ev.button !== 0) return
                             ev.stopPropagation()

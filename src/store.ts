@@ -274,8 +274,8 @@ interface EditorState {
   setLayerFill: (li: number, fill: LayerFill) => void
   /** 그라디언트 끝점 직접 이동 (라이브, 레이어 로컬 좌표) — 캔버스 라인 드래그용. */
   setLayerFillPointsLive: (li: number, pts: { s?: [number, number]; e?: [number, number] }) => void
-  /** 그라디언트 스톱 목록 교체 (라이브) — 정렬·클램프 후 gf.g 재구성. 호출자가 commitEdit. */
-  setLayerFillStopsLive: (li: number, stops: { t: number; hex: string }[]) => void
+  /** 그라디언트 스톱 목록 교체 (라이브) — 정렬·클램프 후 gf.g 재구성 (a = 스톱 불투명 0..1). */
+  setLayerFillStopsLive: (li: number, stops: { t: number; hex: string; a?: number }[]) => void
   /** 텍스트 레이어 재생성 — 그래픽 교체 + xtext 메타 동기 (언두 1회). li = 주 선택이어야 함. */
   applyTextGraphic: (li: number, payload: CustomPayload, at: [number, number], size: number, xtext: TextMeta) => void
   /** 도형 지오메트리 리빌드 — xshape 메타 있는 레이어의 크기/라운드 (제자리 유지, 언두 1회). */
@@ -1680,12 +1680,13 @@ export const useEditor = create<EditorState>((set, get) => {
           .map((x) => ({
             t: Math.round(Math.max(0, Math.min(1, x.t)) * 1000) / 1000,
             rgb: hexToRgbArray(x.hex),
+            a: Math.round(Math.max(0, Math.min(1, x.a ?? 1)) * 1000) / 1000,
           }))
           .sort((a, b) => a.t - b.t)
-        ;(gf as Record<string, unknown>).g = {
-          p: sorted.length,
-          k: { a: 0, k: sorted.flatMap((x) => [x.t, x.rgb[0], x.rgb[1], x.rgb[2]]) },
-        }
+        // 알파 스톱은 색 스톱 뒤에 [t, o] 쌍으로 — 전부 불투명이면 생략 (표준 로티)
+        const k = sorted.flatMap((x) => [x.t, x.rgb[0], x.rgb[1], x.rgb[2]])
+        if (sorted.some((x) => x.a < 1)) k.push(...sorted.flatMap((x) => [x.t, x.a]))
+        ;(gf as Record<string, unknown>).g = { p: sorted.length, k: { a: 0, k } }
       })
     },
 

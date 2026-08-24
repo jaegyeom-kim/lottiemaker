@@ -143,6 +143,25 @@ await page.waitForTimeout(250)
   await page.waitForTimeout(1300)
 }
 
+// ── 스톱 불투명 — A% 입력 → 알파 스톱 쌍 기록 + 렌더 생존 ──
+{
+  const aIn = fillKnob.locator('.posinput', { hasText: /^A/ }).first().locator('input')
+  await aIn.fill('30')
+  await aIn.press('Enter')
+  await page.waitForTimeout(1300)
+  const pt3 = painterOf(await src())
+  const kArr = pt3.g.k.k
+  ok(kArr.length === pt3.g.p * 4 + pt3.g.p * 2, `알파 스톱 쌍 기록 (len=${kArr.length}, p=${pt3.g.p})`)
+  ok(Math.abs(kArr[pt3.g.p * 4 + 1] - 0.3) < 0.01, `첫 스톱 A=0.3 (${kArr[pt3.g.p * 4 + 1]})`)
+  ok((await page.locator('.preview__lottiewrap svg').count()) >= 1, '알파 그라디언트 렌더 생존')
+  // 100으로 되돌리면 알파 쌍 제거 (표준 컴팩트)
+  await aIn.fill('100')
+  await aIn.press('Enter')
+  await page.waitForTimeout(1300)
+  const pt4 = painterOf(await src())
+  ok(pt4.g.k.k.length === pt4.g.p * 4, '전 스톱 불투명 → 알파 쌍 생략')
+}
+
 // 방사 전환
 await fillKnob.locator('select').selectOption('radial')
 await page.waitForTimeout(1300)
