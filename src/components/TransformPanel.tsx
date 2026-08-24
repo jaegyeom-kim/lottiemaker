@@ -32,7 +32,7 @@ export default function TransformPanel() {
   const {
     setCustomChannelsLive, setKfChannelLive, commitEdit,
     nudgeCustomBase, setLayerBlend, setLayerStroke, setShapeGeom, togglePathKf, matchPathPoints,
-    setLayerFill, addLayerStroke, removeLayerStroke,
+    setLayerFill, setLayerFillStopsLive, addLayerStroke, removeLayerStroke,
   } = useEditor()
 
   const layers = sourceData?.layers ?? []
@@ -261,29 +261,79 @@ export default function TransformPanel() {
                 <option value="radial">{t('방사 그라디언트')}</option>
               </select>
             </div>
-            {isG && (
-              <div className="posrow posrow--fill">
-                <input
-                  type="color"
-                  value={from}
-                  title={t('시작 색')}
-                  onChange={(e) => setLayerFill(idx, { kind, from: e.target.value, to, angle })}
-                />
-                <input
-                  type="color"
-                  value={to}
-                  title={t('끝 색')}
-                  onChange={(e) => setLayerFill(idx, { kind, from, to: e.target.value, angle })}
-                />
-                {kind === 'linear' && (
-                  <PosInput
-                    label={`${t('각도')} °`}
-                    value={angle}
-                    onCommit={(v) => setLayerFill(idx, { kind, from, to, angle: v })}
-                  />
-                )}
-              </div>
-            )}
+            {isG && (() => {
+              // 스톱 목록 [{t, hex}] — g.k.k = [t,r,g,b]×N
+              const list: { t: number; hex: string }[] = []
+              for (let i = 0; i + 3 < stops.length; i += 4)
+                list.push({ t: stops[i], hex: rgbArrayToHex([stops[i + 1], stops[i + 2], stops[i + 3]]) })
+              const commitStops = (next: { t: number; hex: string }[]) => {
+                setLayerFillStopsLive(idx, next)
+                commitEdit()
+              }
+              // 새 스톱 — 가장 넓은 구간의 중간, 색은 이웃 보간
+              const addStop = () => {
+                let gi = 0
+                let gap = -1
+                for (let i = 0; i < list.length - 1; i++)
+                  if (list[i + 1].t - list[i].t > gap) {
+                    gap = list[i + 1].t - list[i].t
+                    gi = i
+                  }
+                const a = list[gi]
+                const b = list[gi + 1]
+                const pa = [1, 3, 5].map((o) => parseInt(a.hex.slice(o, o + 2), 16))
+                const pb = [1, 3, 5].map((o) => parseInt(b.hex.slice(o, o + 2), 16))
+                const mixHex = `#${pa.map((v, j) => Math.round((v + pb[j]) / 2).toString(16).padStart(2, '0')).join('')}`
+                commitStops([...list, { t: Math.round(((a.t + b.t) / 2) * 1000) / 1000, hex: mixHex }])
+              }
+              return (
+                <>
+                  {list.map((sp, i) => (
+                    <div className="posrow posrow--fill" key={i}>
+                      <input
+                        type="color"
+                        value={sp.hex}
+                        title={t('스톱 색')}
+                        onChange={(e) =>
+                          setLayerFillStopsLive(
+                            idx,
+                            list.map((x, j) => (j === i ? { ...x, hex: e.target.value } : x)),
+                          )
+                        }
+                        onBlur={commitEdit}
+                      />
+                      <PosInput
+                        label="%"
+                        value={Math.round(sp.t * 100)}
+                        onCommit={(v) =>
+                          commitStops(list.map((x, j) => (j === i ? { ...x, t: Math.max(0, Math.min(100, v)) / 100 } : x)))
+                        }
+                      />
+                      <button
+                        className="linkbtn"
+                        disabled={list.length <= 2}
+                        title={t('스톱 삭제')}
+                        onClick={() => commitStops(list.filter((_, j) => j !== i))}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                  <div className="posrow posrow--fill">
+                    <button className="linkbtn" onClick={addStop}>
+                      {t('+ 스톱 추가')}
+                    </button>
+                    {kind === 'linear' && (
+                      <PosInput
+                        label={`${t('각도')} °`}
+                        value={angle}
+                        onCommit={(v) => setLayerFill(idx, { kind, from, to, angle: v })}
+                      />
+                    )}
+                  </div>
+                </>
+              )
+            })()}
           </div>
         )
       })()}

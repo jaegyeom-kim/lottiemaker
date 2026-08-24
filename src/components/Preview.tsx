@@ -1037,7 +1037,16 @@ export default function Preview() {
 
   // ── 그라디언트 라인 (피그마) — 선택 레이어의 gf 끝점을 캔버스에서 직접 드래그 ──
   const [gradM, setGradM] = useState<DOMMatrix | null>(null)
-  const gradDrag = useRef<{ which: 's' | 'e'; li: number; moved: boolean } | null>(null)
+  const gradDrag = useRef<{
+    which: 's' | 'e' | 'stop'
+    li: number
+    moved: boolean
+    /** stop 드래그용 — 그랩 시점 스톱 목록(hex 포함)과 대상 인덱스, 로컬 s/e. */
+    stopIdx?: number
+    stops?: { t: number; hex: string }[]
+    ls?: [number, number]
+    le?: [number, number]
+  } | null>(null)
   const gradIdx = Math.min(customIdx, (sourceData?.layers.length ?? 1) - 1)
   /** 선택 레이어의 gf 페인터 — {s, e, from, to, radial} (없으면 null). */
   const gradInfo = (() => {
@@ -1062,12 +1071,21 @@ export default function Preview() {
       stops.length >= i + 4
         ? `rgb(${Math.round(stops[i + 1] * 255)},${Math.round(stops[i + 2] * 255)},${Math.round(stops[i + 3] * 255)})`
         : '#888'
+    const stopList: { t: number; css: string; hex: string }[] = []
+    for (let i = 0; i + 3 < stops.length; i += 4) {
+      const to255 = (v: number) => Math.round(v * 255)
+      const hx = `#${[stops[i + 1], stops[i + 2], stops[i + 3]]
+        .map((v) => to255(v).toString(16).padStart(2, '0'))
+        .join('')}`
+      stopList.push({ t: stops[i], css: hex(i), hex: hx })
+    }
     return {
       li: gradIdx,
       s: [sPt[0], sPt[1]] as [number, number],
       e: [ePt[0], ePt[1]] as [number, number],
       from: hex(0),
-      to: hex(4),
+      to: hex((stopList.length - 1) * 4),
+      stops: stopList,
       radial: Number(g.t) === 2,
     }
   })()
@@ -1108,6 +1126,18 @@ export default function Preview() {
     const cvs = new DOMPoint((e.clientX - rect.left) * f, (e.clientY - rect.top) * f)
     const local = cvs.matrixTransform(gradM.inverse())
     gd.moved = true
+    if (gd.which === 'stop') {
+      // 라인 축 투영 → t (피그마 스톱 슬라이드)
+      if (!gd.stops || gd.stopIdx === undefined || !gd.ls || !gd.le) return
+      const ex = gd.le[0] - gd.ls[0]
+      const ey = gd.le[1] - gd.ls[1]
+      const len2 = ex * ex + ey * ey || 1
+      const tv = Math.max(0, Math.min(1, ((local.x - gd.ls[0]) * ex + (local.y - gd.ls[1]) * ey) / len2))
+      const next = gd.stops.map((x, j) => (j === gd.stopIdx ? { ...x, t: tv } : x))
+      gd.stops = next
+      useEditor.getState().setLayerFillStopsLive(gd.li, next)
+      return
+    }
     useEditor.getState().setLayerFillPointsLive(gd.li, { [gd.which]: [local.x, local.y] } as {
       s?: [number, number]
       e?: [number, number]
@@ -1997,9 +2027,90 @@ export default function Preview() {
                   ;(ev.currentTarget as Element).setPointerCapture(ev.pointerId)
                   gradDrag.current = { which, li: gradInfo.li, moved: false }
                 }
+                const addStopAt = (ev: React.PointerEvent) => {
+                  if (ev.button !== 0) return
+                  ev.stopPropagation()
+                  const rect = wrapRef.current?.getBoundingClientRect()
+                  if (!rect) return
+                  const f = cw / rect.width
+                  const local = new DOMPoint(
+                    (ev.clientX - rect.left) * f,
+                    (ev.clientY - rect.top) * f,
+                  ).matrixTransform(gradM.inverse())
+                  const ex = gradInfo.e[0] - gradInfo.s[0]
+                  const ey = gradInfo.e[1] - gradInfo.s[1]
+                  const len2 = ex * ex + ey * ey || 1
+                  const tv = Math.max(
+                    0.02,
+                    Math.min(0.98, ((local.x - gradInfo.s[0]) * ex + (local.y - gradInfo.s[1]) * ey) / len2),
+                  )
+                  // 이웃 스톱 색 보간
+                  const list = gradInfo.stops.map((x) => ({ t: x.t, hex: x.hex }))
+                  const sorted = [...list].sort((a, b) => a.t - b.t)
+                  let a = sorted[0]
+                  let b = sorted[sorted.length - 1]
+                  for (let i = 0; i < sorted.length - 1; i++)
+                    if (sorted[i].t <= tv && tv <= sorted[i + 1].t) {
+                      a = sorted[i]
+                      b = sorted[i + 1]
+                      break
+                    }
+                  const u = b.t === a.t ? 0.5 : (tv - a.t) / (b.t - a.t)
+                  const pa = [1, 3, 5].map((o) => parseInt(a.hex.slice(o, o + 2), 16))
+                  const pb = [1, 3, 5].map((o) => parseInt(b.hex.slice(o, o + 2), 16))
+                  const hx = `#${pa
+                    .map((v, j) => Math.round(v + (pb[j] - v) * u).toString(16).padStart(2, '0'))
+                    .join('')}`
+                  const st2 = useEditor.getState()
+                  st2.setLayerFillStopsLive(gradInfo.li, [...list, { t: tv, hex: hx }])
+                  st2.commitEdit()
+                }
                 return (
                   <svg className="gradline" viewBox={`0 0 ${cw} ${ch}`}>
                     <line className="gradline__line" x1={sP.x} y1={sP.y} x2={eP.x} y2={eP.y} />
+                    {/* 히트 라인 — 클릭 = 그 지점에 스톱 추가 (피그마) */}
+                    <line
+                      className="gradline__hit"
+                      x1={sP.x}
+                      y1={sP.y}
+                      x2={eP.x}
+                      y2={eP.y}
+                      onPointerDown={addStopAt}
+                    />
+                    {/* 중간 스톱 노브 — 라인 축으로만 슬라이드 */}
+                    {gradInfo.stops.map((sp2, i) => {
+                      if (sp2.t <= 0.001 || sp2.t >= 0.999) return null
+                      const px = sP.x + (eP.x - sP.x) * sp2.t
+                      const py = sP.y + (eP.y - sP.y) * sp2.t
+                      return (
+                        <circle
+                          key={`st${i}`}
+                          className="gradline__knob gradline__knob--stop"
+                          cx={px}
+                          cy={py}
+                          r={4.5}
+                          style={{ fill: sp2.css }}
+                          onPointerDown={(ev) => {
+                            if (ev.button !== 0) return
+                            ev.stopPropagation()
+                            ev.preventDefault()
+                            ;(ev.currentTarget as Element).setPointerCapture(ev.pointerId)
+                            gradDrag.current = {
+                              which: 'stop',
+                              li: gradInfo.li,
+                              moved: false,
+                              stopIdx: i,
+                              stops: gradInfo.stops.map((x) => ({ t: x.t, hex: x.hex })),
+                              ls: gradInfo.s,
+                              le: gradInfo.e,
+                            }
+                          }}
+                          onPointerMove={gradMove}
+                          onPointerUp={gradUp}
+                          onPointerCancel={gradUp}
+                        />
+                      )
+                    })}
                     <circle
                       className="gradline__knob"
                       cx={sP.x}

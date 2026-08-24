@@ -4435,3 +4435,14 @@ body.drag-cross * { cursor: crosshair !important; }
 .gradline__knob:active {
   cursor: grabbing;
 }
+
+/* 그라디언트 히트 라인 — 클릭 = 스톱 추가 */
+.gradline__hit {
+  stroke: transparent;
+  stroke-width: 12;
+  pointer-events: stroke;
+  cursor: copy;
+}
+.gradline__knob--stop {
+  stroke-width: 1.5;
+}

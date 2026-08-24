@@ -274,6 +274,8 @@ interface EditorState {
   setLayerFill: (li: number, fill: LayerFill) => void
   /** 그라디언트 끝점 직접 이동 (라이브, 레이어 로컬 좌표) — 캔버스 라인 드래그용. */
   setLayerFillPointsLive: (li: number, pts: { s?: [number, number]; e?: [number, number] }) => void
+  /** 그라디언트 스톱 목록 교체 (라이브) — 정렬·클램프 후 gf.g 재구성. 호출자가 commitEdit. */
+  setLayerFillStopsLive: (li: number, stops: { t: number; hex: string }[]) => void
   /** 텍스트 레이어 재생성 — 그래픽 교체 + xtext 메타 동기 (언두 1회). li = 주 선택이어야 함. */
   applyTextGraphic: (li: number, payload: CustomPayload, at: [number, number], size: number, xtext: TextMeta) => void
   /** 도형 지오메트리 리빌드 — xshape 메타 있는 레이어의 크기/라운드 (제자리 유지, 언두 1회). */
@@ -1693,6 +1695,46 @@ export const useEditor = create<EditorState>((set, get) => {
       push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
     },
 
+    setLayerFillStopsLive: (li, stops) => {
+      if (stops.length < 2) return
+      const st = get()
+      const baseline = st.editBaseline ?? snap()
+      const baseSrc = baseline.source ?? st.sourceData
+      if (!baseSrc?.layers[li] || lockedAt(baseSrc, li)) return
+      const src = cloneForLive(baseSrc)
+      ensureLayerColors(src)
+      const layer = src.layers[li] as Record<string, unknown>
+      const group = (layer.shapes as Record<string, unknown>[] | undefined)?.[0]
+      if (!group?.it) return
+      let gf: Record<string, unknown> | null = null
+      const walk = (items: Record<string, unknown>[]) => {
+        for (const it of items) {
+          if (it.ty === 'gf' && !gf) gf = it
+          else if (it.ty === 'gr') walk(it.it as Record<string, unknown>[])
+        }
+      }
+      walk(group.it as Record<string, unknown>[])
+      if (!gf) return
+      const sorted = stops
+        .map((x) => ({
+          t: Math.round(Math.max(0, Math.min(1, x.t)) * 1000) / 1000,
+          rgb: hexToRgbArray(x.hex),
+        }))
+        .sort((a, b) => a.t - b.t)
+      ;(gf as Record<string, unknown>).g = {
+        p: sorted.length,
+        k: { a: 0, k: sorted.flatMap((x) => [x.t, x.rgb[0], x.rgb[1], x.rgb[2]]) },
+      }
+      const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
+      set({
+        animationData: applied,
+        sourceData: src,
+        colorGroups: st.colorGroups,
+        editBaseline: baseline,
+        future: [],
+      })
+    },
+
     setLayerFillPointsLive: (li, pts) => {
       const st = get()
       const baseline = st.editBaseline ?? snap()
@@ -1772,11 +1814,21 @@ export const useEditor = create<EditorState>((set, get) => {
         const [r0, g0, b0] = hexToRgbArray(fill.from ?? '#3380f5')
         const [r1, g1, b1] = hexToRgbArray(fill.to ?? '#9b6ee8')
         const radial = fill.kind === 'radial'
+        // 기존 그라디언트의 스톱은 종류 전환에도 보존 (멀티 스톱 유실 방지)
+        const prevStops =
+          prev.ty === 'gf'
+            ? ((((prev.g as Record<string, unknown>)?.k as Record<string, unknown>)?.k as
+                | number[]
+                | undefined) ?? null)
+            : null
         ;(host as Record<string, unknown>[])[idx] = {
           ty: 'gf',
           o, r: 1, nm: 'Gradient Fill',
           t: radial ? 2 : 1,
-          g: { p: 2, k: { a: 0, k: [0, r0, g0, b0, 1, r1, g1, b1] } },
+          g:
+            prevStops && prevStops.length >= 8
+              ? { p: Math.floor(prevStops.length / 4), k: { a: 0, k: [...prevStops] } }
+              : { p: 2, k: { a: 0, k: [0, r0, g0, b0, 1, r1, g1, b1] } },
           s: { a: 0, k: radial ? [cx, cy] : [cx - dx * L, cy - dy * L] },
           e: { a: 0, k: radial ? [cx + Math.max(hw, hh), cy] : [cx + dx * L, cy + dy * L] },
           ...(radial ? { h: { a: 0, k: 0 }, a: { a: 0, k: 0 } } : {}),

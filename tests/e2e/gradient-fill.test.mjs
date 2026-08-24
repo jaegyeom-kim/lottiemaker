@@ -88,6 +88,53 @@ ok((await page.locator('.gradline__knob').count()) === 2, '시작/끝 노브 2�
   ok(JSON.stringify(undone.e.k) === JSON.stringify(before.e.k), '⌘Z → 끝점 원복')
 }
 
+// ── 멀티 스톱 — 패널 추가·라인 클릭 추가·스톱 슬라이드·삭제 ──
+{
+  // 패널 '+ 스톱 추가' → 3스톱
+  await fillKnob.locator('.linkbtn', { hasText: '스톱 추가' }).click()
+  await page.waitForTimeout(1300)
+  let pt2 = painterOf(await src())
+  ok(pt2.g.p === 3 && pt2.g.k.k.length === 12, `패널 스톱 추가 → 3스톱 (p=${pt2.g.p})`)
+  ok((await page.locator('.gradline__knob--stop').count()) === 1, '캔버스 중간 스톱 노브')
+  // 렌더 — linearGradient stop 3개
+  ok((await page.locator('.preview__lottiewrap linearGradient stop').count()) >= 3, '렌더 스톱 3개')
+
+  // 중간 스톱 슬라이드 — t 변경
+  const t0 = pt2.g.k.k[4]
+  const kb = await page.locator('.gradline__knob--stop').boundingBox()
+  await page.mouse.move(kb.x + kb.width / 2, kb.y + kb.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(kb.x + kb.width / 2, kb.y + kb.height / 2 + 60, { steps: 6 })
+  await page.mouse.up()
+  await page.waitForTimeout(1300)
+  pt2 = painterOf(await src())
+  ok(Math.abs(pt2.g.k.k[4] - t0) > 0.1, `스톱 슬라이드 t ${t0} → ${pt2.g.k.k[4]}`)
+
+  // 라인 클릭 = 스톱 추가 → 4스톱
+  const line = await page.locator('.gradline__hit').boundingBox()
+  await page.mouse.click(line.x + line.width * 0.5, line.y + line.height * 0.25)
+  await page.waitForTimeout(1300)
+  pt2 = painterOf(await src())
+  ok(pt2.g.p === 4, `라인 클릭 → 4스톱 (p=${pt2.g.p})`)
+
+  // 패널 ✕ 삭제 → 3스톱, 언두 → 4스톱
+  await page.locator('.knob', { hasText: /^칠/ }).locator('button[title*="삭제"]').nth(1).click()
+  await page.waitForTimeout(1300)
+  pt2 = painterOf(await src())
+  ok(pt2.g.p === 3, `스톱 삭제 → 3 (p=${pt2.g.p})`)
+  await page.keyboard.press('Meta+z')
+  await page.waitForTimeout(1300)
+  pt2 = painterOf(await src())
+  ok(pt2.g.p === 4, '⌘Z → 4스톱 복원')
+  // 종류 전환에도 스톱 보존
+  await fillKnob.locator('select').selectOption('radial')
+  await page.waitForTimeout(1300)
+  pt2 = painterOf(await src())
+  ok(pt2.t === 2 && pt2.g.p === 4, `방사 전환에도 스톱 보존 (p=${pt2.g.p})`)
+  await fillKnob.locator('select').selectOption('linear')
+  await page.waitForTimeout(1300)
+}
+
 // 방사 전환
 await fillKnob.locator('select').selectOption('radial')
 await page.waitForTimeout(1300)
