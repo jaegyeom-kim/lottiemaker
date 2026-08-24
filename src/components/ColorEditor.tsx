@@ -13,6 +13,7 @@ function loadRecents(): string[] {
 import { t } from '../lib/i18n'
 import { useEditor } from '../store'
 import { PosInput } from './CustomBuilder'
+import { ColorSwatch } from './ColorPicker'
 import { rgbArrayToHex, type ColorGroup, type ColorRef } from '../lib/lottieColors'
 
 /** 경로를 따라가 색상 배열을 hex로 — 원본(pristine) 색 조회용. */
@@ -86,13 +87,13 @@ export default function ColorEditor() {
                 title={t('{n}곳에서 사용').replace('{n}', String(g.refs.length))}
                 onPointerDown={() => setActive(i)}
               >
-                <input
-                  type="color"
+                <ColorSwatch
                   value={g.hex}
-                  onChange={(e) => setColorLive(g, e.target.value)}
-                  onBlur={(e) => {
+                  title={t('클릭 = 컬러 피커')}
+                  onLive={(hex) => setColorLive(g, hex)}
+                  onCommit={(hex) => {
                     commitEdit()
-                    addRecent(e.target.value)
+                    addRecent(hex)
                   }}
                 />
                 <HexInput

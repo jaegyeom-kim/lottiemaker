@@ -4457,3 +4457,105 @@ body.drag-cross * { cursor: crosshair !important; }
   width: 14px;
   height: 14px;
 }
+
+/* 피그마식 컬러 피커 */
+.cpicker {
+  position: fixed;
+  z-index: 100;
+  width: 240px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cpicker__sv {
+  position: relative;
+  height: 160px;
+  border-radius: 6px;
+  cursor: crosshair;
+  touch-action: none;
+  background-image:
+    linear-gradient(to top, #000, transparent),
+    linear-gradient(to right, #fff, transparent);
+}
+.cpicker__svknob {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.cpicker__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cpicker__hue {
+  position: relative;
+  flex: 1;
+  height: 12px;
+  border-radius: 6px;
+  cursor: ew-resize;
+  touch-action: none;
+  background: linear-gradient(
+    to right,
+    #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%
+  );
+}
+.cpicker__hueknob {
+  position: absolute;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.cpicker__eye {
+  width: 26px;
+  height: 26px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+}
+.cpicker__eye svg {
+  width: 100%;
+  height: 100%;
+}
+.cpicker__label {
+  font-size: 11px;
+  color: var(--dim);
+}
+.cpicker__hex {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--fg);
+  padding: 4px 8px;
+  text-transform: uppercase;
+}
+.cswatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  padding: 0;
+  flex: 0 0 auto;
+}

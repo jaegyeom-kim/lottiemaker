@@ -10,6 +10,7 @@ import {
 import { PosInput } from './CustomBuilder'
 import AnchorControls from './AnchorControls'
 import { AddIcon, CloseIcon } from './icons'
+import { ColorSwatch } from './ColorPicker'
 
 /** xshape.tool → 표시 라벨. */
 const TOOL_LABELS: Record<string, string> = {
@@ -275,17 +276,16 @@ export default function TransformPanel() {
                 <>
                   {list.map((sp, i) => (
                     <div className="posrow posrow--fill" key={i}>
-                      <input
-                        type="color"
+                      <ColorSwatch
                         value={sp.hex}
                         title={t('스톱 색')}
-                        onChange={(e) =>
+                        onLive={(hex) =>
                           setLayerFillStopsLive(
                             idx,
-                            list.map((x, j) => (j === i ? { ...x, hex: e.target.value } : x)),
+                            list.map((x, j) => (j === i ? { ...x, hex } : x)),
                           )
                         }
-                        onBlur={commitEdit}
+                        onCommit={() => commitEdit()}
                       />
                       <PosInput
                         label="%"

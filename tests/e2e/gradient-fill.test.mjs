@@ -52,14 +52,13 @@ d = await src()
 pt = painterOf(d)
 ok(Math.abs(pt.e.k[0] - pt.s.k[0]) < 1 && pt.e.k[1] > pt.s.k[1], '90° → 세로 끝점')
 
-// 끝 색 변경
-const toPicker = fillKnob.locator('input[type=color]').nth(1)
-await toPicker.evaluate((el) => {
-  // React 컨트롤드 인풋 — 네이티브 세터 + input 이벤트로 onChange 트리거
-  const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
-  set.call(el, '#ff2200')
-  el.dispatchEvent(new Event('input', { bubbles: true }))
-})
+// 끝 색 변경 — 피그마식 피커: 스와치 클릭 → hex 입력 → Esc(커밋)
+await fillKnob.locator('.cswatch').nth(1).click()
+await page.waitForTimeout(200)
+const hexIn = page.locator('.cpicker__hex')
+await hexIn.fill('FF2200')
+await hexIn.press('Enter')
+await page.keyboard.press('Escape')
 await page.waitForTimeout(1300)
 d = await src()
 pt = painterOf(d)
