@@ -424,6 +424,24 @@ function AiMotionPanel() {
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string; undoable?: boolean } | null>(null)
+
+  // 결과/에러 메시지 + 되돌리기 — 두 렌더 분기 공용
+  const msgEl = msg && (
+    <p className={msg.kind === 'err' ? 'panel__error' : 'aipanel__ok'}>
+      {msg.text}
+      {msg.undoable && (
+        <button
+          className="linkbtn"
+          onClick={() => {
+            useEditor.getState().undo()
+            setMsg(null)
+          }}
+        >
+          {t('되돌리기')}
+        </button>
+      )}
+    </p>
+  )
   const abortRef = useRef<AbortController | null>(null)
 
   // 언마운트 시 진행 중 요청 정리
@@ -510,22 +528,7 @@ function AiMotionPanel() {
             </button>
           )}
         </div>
-        {msg && (
-          <p className={msg.kind === 'err' ? 'panel__error' : 'aipanel__ok'}>
-            {msg.text}
-            {msg.undoable && (
-              <button
-                className="linkbtn"
-                onClick={() => {
-                  useEditor.getState().undo()
-                  setMsg(null)
-                }}
-              >
-                {t('되돌리기')}
-              </button>
-            )}
-          </p>
-        )}
+        {msgEl}
         {editKey && apiKey && (
           <button
             className="aipanel__keybtn"
@@ -586,22 +589,7 @@ function AiMotionPanel() {
           {t('키 관리')}
         </button>
       </div>
-      {msg && (
-        <p className={msg.kind === 'err' ? 'panel__error' : 'aipanel__ok'}>
-          {msg.text}
-          {msg.undoable && (
-            <button
-              className="linkbtn"
-              onClick={() => {
-                useEditor.getState().undo()
-                setMsg(null)
-              }}
-            >
-              {t('되돌리기')}
-            </button>
-          )}
-        </p>
-      )}
+      {msgEl}
       <p className="knob__note">
         {t('선택한 레이어가 있으면 그 레이어 위주로, 없으면 요청에 맞는 레이어에 적용합니다. 결과는 일반 키프레임이라 그대로 수정할 수 있습니다 (⌘Enter = 생성).')}
       </p>

@@ -22,32 +22,33 @@ const TL_W_DEF = 150
 const TL_W_MIN = 80
 const TL_W_MAX = 320
 
-function loadLabelW(): number {
+/** localStorage 픽셀 값 로더 — 범위 밖/손상은 기본값. */
+function loadPx(key: string, def: number, min: number, max: number): number {
   try {
-    const v = Number(localStorage.getItem(TL_W_KEY))
-    return Number.isFinite(v) && v >= TL_W_MIN && v <= TL_W_MAX ? v : TL_W_DEF
+    const v = Number(localStorage.getItem(key))
+    return Number.isFinite(v) && v >= min && v <= max ? v : def
   } catch {
-    return TL_W_DEF
+    return def
   }
 }
+const loadLabelW = () => loadPx(TL_W_KEY, TL_W_DEF, TL_W_MIN, TL_W_MAX)
 const TL_H_DEF = 210
 const TL_H_MIN = 120
 const TL_H_MAX = 480
 
-function loadTlHeight(): number {
-  try {
-    const v = Number(localStorage.getItem(TL_H_KEY))
-    return Number.isFinite(v) && v >= TL_H_MIN && v <= TL_H_MAX ? v : TL_H_DEF
-  } catch {
-    return TL_H_DEF
-  }
-}
+const loadTlHeight = () => loadPx(TL_H_KEY, TL_H_DEF, TL_H_MIN, TL_H_MAX)
 
 /** 트랙 매트 종류 라벨 — tt 값 인덱스. */
 const MATTE_LABELS = ['없음', '알파', '알파 반전', '루마', '루마 반전']
 
 /** 키프레임 레이어 트리의 프로퍼티 행 (Figma Motion 방식). */
 const KF_CHANNELS = KF_CHANNEL_DEFS
+
+/** 채널 행 표시 조건 — 라벨/트랙 양쪽 동일 필터 (행 정렬 유지). */
+const chVisible = (ch: KfChannel, xkf: CustomKf, ty: number) =>
+  ch === 'pk'
+    ? kfChannelKeys(xkf, ch).length > 0
+    : !(ch === 'ts' || ch === 'te') || ty === 4 || kfChannelKeys(xkf, ch).length > 0
 
 type DragMode = 'move' | 'left' | 'right' | 'in-edge' | 'out-edge'
 
@@ -866,13 +867,7 @@ export default function Timeline({
                 </div>
                 {open &&
                   KF_CHANNELS.filter(
-                    ({ ch }) =>
-                      shownChs.includes(ch) &&
-                      (ch === 'pk'
-                        ? kfChannelKeys(xkfL, ch).length > 0
-                        : !(ch === 'ts' || ch === 'te') ||
-                          Number(lr.ty) === 4 ||
-                          kfChannelKeys(xkfL, ch).length > 0),
+                    ({ ch }) => shownChs.includes(ch) && chVisible(ch, xkfL, Number(lr.ty)),
                   ).map(
                     ({ ch, label }) => {
                     const keys = kfChannelKeys(xkfL, ch)
@@ -1098,13 +1093,7 @@ export default function Timeline({
               {/* 프로퍼티 레인 — 키가 있는 채널만 (AE 'U' 방식). 라벨 쪽과 같은 필터로 행 정렬 유지 */}
               {open &&
                 KF_CHANNELS.filter(
-                  ({ ch }) =>
-                    shownChs.includes(ch) &&
-                    (ch === 'pk'
-                      ? kfChannelKeys(xkf, ch).length > 0
-                      : !(ch === 'ts' || ch === 'te') ||
-                        Number(lrT.ty) === 4 ||
-                        kfChannelKeys(xkf, ch).length > 0),
+                  ({ ch }) => shownChs.includes(ch) && chVisible(ch, xkf, Number(lrT.ty)),
                 ).map(
                   ({ ch, label }) => {
                   const keys = kfChannelKeys(xkf, ch)

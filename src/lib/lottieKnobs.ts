@@ -170,6 +170,12 @@ interface Keyframe {
   [key: string]: unknown
 }
 
+/** 3채널 이징 오브젝트 — coinSpins/burstStyle 공용. */
+const e3 = (ox: number, oy: number, ix: number, iy: number) => ({
+  i: { x: [ix, ix, ix], y: [iy, iy, iy] },
+  o: { x: [ox, ox, ox], y: [oy, oy, oy] },
+})
+
 export function applyKnobs(
   base: LottieJson,
   knobs: TemplateKnob[],
@@ -634,10 +640,7 @@ export function applyKnobs(
         const coin = layers.find((l) => l.nm === 'Coin')
         const sideL = layers.find((l) => l.nm === 'Side')
         if (!coin || !sideL) break
-        const e3 = (ox: number, oy: number, ix: number, iy: number) => ({
-          i: { x: [ix, ix, ix], y: [iy, iy, iy] },
-          o: { x: [ox, ox, ox], y: [oy, oy, oy] },
-        })
+
         // 1. 코인 스케일/워블 재생성 — 첫 플립은 20f 축소, 이후는 12f
         const sK: Keyframe[] = [{ ...e3(0.42, 0, 0.999, 1), t: 0, s: [100, 100, 100] } as Keyframe]
         const pK: Keyframe[] = [{ ...e3(0.42, 0, 0.999, 1), t: 0, s: [256, 256, 0] } as Keyframe]
@@ -797,10 +800,7 @@ export function applyKnobs(
         break
       }
       case 'burstStyle': {
-        const e3 = (ox: number, oy: number, ix: number, iy: number) => ({
-          i: { x: [ix, ix, ix], y: [iy, iy, iy] },
-          o: { x: [ox, ox, ox], y: [oy, oy, oy] },
-        })
+
         const e1 = (ox: number, oy: number, ix: number, iy: number) => ({
           i: { x: [ix], y: [iy] },
           o: { x: [ox], y: [oy] },

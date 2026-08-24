@@ -589,7 +589,3 @@ const DICT: Record<string, string> = {
   '엘라스틱': 'Elastic',
 }
 
-/** 사전 병합 — 분할 정의용 (모듈 초기화 시에만 호출). */
-export function extendDict(entries: Record<string, string>) {
-  Object.assign(DICT, entries)
-}

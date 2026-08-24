@@ -448,6 +448,28 @@ function crTangent(pts: [number, number][], j: number): [number, number] {
   return [(p2[0] - p0[0]) / 2, (p2[1] - p0[1]) / 2]
 }
 
+/** 위치 구간 i의 공간 접선 — 수동(pto/pti) 우선, smooth는 Catmull-Rom 폴백. */
+export function segTangents(
+  keys: KfKey[],
+  i: number,
+  smooth: boolean | undefined,
+): { to: [number, number] | null; ti: [number, number] | null } {
+  let to = keys[i].pto ?? null
+  let ti = keys[i + 1].pti ?? null
+  if (smooth) {
+    const pts = keys.map((k) => k.p as [number, number])
+    if (!to) {
+      const m = crTangent(pts, i)
+      to = [m[0] / 3, m[1] / 3]
+    }
+    if (!ti) {
+      const m = crTangent(pts, i + 1)
+      ti = [-m[0] / 3, -m[1] / 3]
+    }
+  }
+  return { to, ti }
+}
+
 export type KfChannel = 'p' | 's' | 'r' | 'o' | 'ts' | 'te' | 'pk'
 
 /** 타임라인 키 선택 항목 — 레이어 인덱스 + 채널 + 시각. */
@@ -511,19 +533,7 @@ export function kfValueAt(
         // 곡선 경로면 렌더와 같은 공간 베지어로 (박스/모션패스 오버레이 일치)
         // — 키의 수동 탄젠트(pto/pti) 우선, smooth는 Catmull-Rom 폴백
         if (ch === 'p') {
-          let to = a.pto ?? null
-          let ti = b.pti ?? null
-          if (xkf.smooth) {
-            const pts = keys.map((k) => k.p as [number, number])
-            if (!to) {
-              const m1 = crTangent(pts, i)
-              to = [m1[0] / 3, m1[1] / 3]
-            }
-            if (!ti) {
-              const m2 = crTangent(pts, i + 1)
-              ti = [-m2[0] / 3, -m2[1] / 3]
-            }
-          }
+          const { to, ti } = segTangents(keys, i, xkf.smooth)
           if (to || ti) {
             const c1: [number, number] = [va[0] + (to?.[0] ?? 0), va[1] + (to?.[1] ?? 0)]
             const c2: [number, number] = [vb[0] + (ti?.[0] ?? 0), vb[1] + (ti?.[1] ?? 0)]
@@ -573,20 +583,8 @@ export function buildKfKs(
     // 곡선 모션 패스 — 공간 접선(to/ti): 키의 수동 탄젠트(pto/pti) 우선,
     // smooth 모드는 Catmull-Rom 자동값으로 폴백
     if (ch === 'p' && keys.length >= 2) {
-      const pts = keys.map((x) => x.p as [number, number])
       for (let i = 0; i < keys.length - 1; i++) {
-        let to = keys[i].pto ?? null
-        let ti = keys[i + 1].pti ?? null
-        if (xkf.smooth) {
-          if (!to) {
-            const m1 = crTangent(pts, i)
-            to = [m1[0] / 3, m1[1] / 3]
-          }
-          if (!ti) {
-            const m2 = crTangent(pts, i + 1)
-            ti = [-m2[0] / 3, -m2[1] / 3]
-          }
-        }
+        const { to, ti } = segTangents(keys, i, xkf.smooth)
         if (to) k[i].to = [R(to[0]), R(to[1]), 0]
         if (ti) k[i].ti = [R(ti[0]), R(ti[1]), 0]
       }

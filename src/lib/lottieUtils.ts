@@ -1,4 +1,5 @@
 // Lottie JSON 구조 유틸리티: 검증, 레이어 조작, 크기/속도 변경.
+import { saveBlob } from './dotlottie'
 import { t } from './i18n'
 
 export interface LottieJson {
@@ -92,11 +93,8 @@ export function durationSec(data: LottieJson): number {
 }
 
 export function download(data: LottieJson, fileName: string) {
-  const blob = new Blob([JSON.stringify(data)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = fileName.endsWith('.json') ? fileName : `${fileName}.json`
-  a.click()
-  URL.revokeObjectURL(url)
+  saveBlob(
+    new Blob([JSON.stringify(data)], { type: 'application/json' }),
+    fileName.endsWith('.json') ? fileName : `${fileName}.json`,
+  )
 }

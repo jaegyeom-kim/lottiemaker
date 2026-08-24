@@ -143,20 +143,8 @@ function evalProp(r: PropRead, t: number, dflt: number[]): number[] {
   return dflt
 }
 
-type Mat = [number, number, number, number, number, number] // a b c d tx ty
-
-const matMul = (m: Mat, n: Mat): Mat => [
-  m[0] * n[0] + m[2] * n[1],
-  m[1] * n[0] + m[3] * n[1],
-  m[0] * n[2] + m[2] * n[3],
-  m[1] * n[2] + m[3] * n[3],
-  m[0] * n[4] + m[2] * n[5] + m[4],
-  m[1] * n[4] + m[3] * n[5] + m[5],
-]
-const matApply = (m: Mat, x: number, y: number): [number, number] => [
-  m[0] * x + m[2] * y + m[4],
-  m[1] * x + m[3] * y + m[5],
-]
+// 2×3 행렬 유틸 — svgImport와 공유
+import { mul as matMul, apply as matApply, type Mat } from './svgImport'
 
 interface TR {
   p: PropRead
@@ -741,6 +729,17 @@ function convertRecs(recs: FlatRec[], C: ConvCtx): void {
 }
 
 /** 로티 문서 → 커스텀 레이어 세트 (프리컴프 평탄화 모드). */
+/** 소스 문서 배치 파라미터 — 캔버스 맞춤 배율/오프셋 + 에셋 id 맵 (두 변환기 공용). */
+function docParams(src: LottieJson, srcAssets: Record<string, unknown>[]) {
+  const k = CANVAS / Math.max(src.w || CANVAS, src.h || CANVAS)
+  return {
+    k,
+    offX: (CANVAS - (src.w || CANVAS) * k) / 2,
+    offY: (CANVAS - (src.h || CANVAS) * k) / 2,
+    assetsById: new Map(srcAssets.map((a) => [String(a.id), a] as const)),
+  }
+}
+
 export function convertLottieToCustom(src: LottieJson): LottieImportResult {
   const warnings = new Set<string>()
   const srcAssets = (src.assets as Record<string, unknown>[] | undefined) ?? []
@@ -749,11 +748,7 @@ export function convertLottieToCustom(src: LottieJson): LottieImportResult {
   const ip0 = src.ip || 0
   const op = Math.round(clamp((src.op - ip0) * tScale, 30, 360))
   if ((src.op - ip0) * tScale > 360) warnings.add('6초 초과 — 컴포지션이 6초로 잘렸습니다')
-  const k = CANVAS / Math.max(src.w || CANVAS, src.h || CANVAS)
-  const offX = (CANVAS - (src.w || CANVAS) * k) / 2
-  const offY = (CANVAS - (src.h || CANVAS) * k) / 2
-  const assetsById = new Map<string, Record<string, unknown>>()
-  for (const a of srcAssets) assetsById.set(String(a.id), a)
+  const { k, offX, offY, assetsById } = docParams(src, srcAssets)
   const counter = { skipped: 0 }
   const recs = flattenLayers(
     src.layers as Record<string, unknown>[],
@@ -810,11 +805,7 @@ export function convertLottieToScenes(src: LottieJson): LottieScenesResult {
   const ip0 = src.ip || 0
   const op = Math.round(clamp((src.op - ip0) * tScale, 30, 360))
   if ((src.op - ip0) * tScale > 360) warnings.add('6초 초과 — 컴포지션이 6초로 잘렸습니다')
-  const k = CANVAS / Math.max(src.w || CANVAS, src.h || CANVAS)
-  const offX = (CANVAS - (src.w || CANVAS) * k) / 2
-  const offY = (CANVAS - (src.h || CANVAS) * k) / 2
-  const assetsById = new Map<string, Record<string, unknown>>()
-  for (const a of srcAssets) assetsById.set(String(a.id), a)
+  const { k, offX, offY, assetsById } = docParams(src, srcAssets)
 
   // 도달 가능한 comp 에셋 → 씬 (BFS, 최대 24)
   const sceneIds = new Map<string, string>()

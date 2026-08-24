@@ -9,7 +9,7 @@ import { durationSec, parseLottie, type LottieJson } from '../lib/lottieUtils'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
 import { TextDialog } from './TextControls'
 import {
-  layerHalfOf, layerAabbOf, layerBaseOf, layerRotationOf, normKf, kfValueAt, pathKAt, findSinglePathShape, collectShapeItems,
+  layerHalfOf, layerAabbOf, layerBaseOf, layerRotationOf, normKf, kfValueAt, pathKAt, findSinglePathShape, collectShapeItems, segTangents,
   kfChannelKeys, normSel, animSpans, kfFallbackValue,
   type CustomPayload, type CustomKf, type CustomSel, type KfChannel,
 } from '../lib/customBuilder'
@@ -972,13 +972,8 @@ export default function Preview() {
     const t0 = pk[0].t
     const t1 = pk[pk.length - 1].t
     for (let f = t0; f <= t1; f += 2) dots.push(kfValueAt(xkf, 'p', f, fb) as [number, number])
-    // 곡선 경로 d + 공간 탄젠트 핸들 — 수동(pto/pti) 우선, smooth는 Catmull-Rom 폴백
+    // 곡선 경로 d + 공간 탄젠트 핸들 — segTangents(수동 우선, smooth 폴백) 공용
     const pts = pk.map((k) => k.p as [number, number])
-    const cr = (j: number): [number, number] => {
-      const p0 = pts[Math.max(0, j - 1)]
-      const p2 = pts[Math.min(pts.length - 1, j + 1)]
-      return [(p2[0] - p0[0]) / 2, (p2[1] - p0[1]) / 2]
-    }
     let d = `M ${pts[0][0]} ${pts[0][1]}`
     const handles: {
       t: number
@@ -992,18 +987,7 @@ export default function Preview() {
       const b = pk[i + 1]
       const pa = pts[i]
       const pb = pts[i + 1]
-      let to = a.pto ?? null
-      let ti = b.pti ?? null
-      if (xkf.smooth) {
-        if (!to) {
-          const m = cr(i)
-          to = [m[0] / 3, m[1] / 3]
-        }
-        if (!ti) {
-          const m = cr(i + 1)
-          ti = [-m[0] / 3, -m[1] / 3]
-        }
-      }
+      const { to, ti } = segTangents(pk, i, xkf.smooth)
       d += ` C ${pa[0] + (to?.[0] ?? 0)} ${pa[1] + (to?.[1] ?? 0)} ${pb[0] + (ti?.[0] ?? 0)} ${pb[1] + (ti?.[1] ?? 0)} ${pb[0]} ${pb[1]}`
       // 핸들 표시 오프셋 — 탄젠트 없으면(직선) 세그먼트 방향 20%로 시드 (0길이는 못 잡음)
       const dist = Math.hypot(pb[0] - pa[0], pb[1] - pa[1]) || 1
@@ -2391,43 +2375,30 @@ export default function Preview() {
                 <>
                   {/* 고정 가이드 — 룰러에서 생성, 드래그 이동, 룰러 밖 드롭 삭제 */}
                   {!previewing &&
-                    (((sourceData as unknown as Record<string, unknown> | null)?.xguides as
-                      | { v: number[]; h: number[] }
-                      | undefined)?.v ?? []).map((gv, gi) => (
-                      <div
-                        key={`gv${gi}`}
-                        className="fixedguide fixedguide--v"
-                        style={{ left: `${(gv / cw) * 100}%` }}
-                        onPointerDown={(e) => {
-                          if (e.button !== 0) return
-                          e.stopPropagation()
-                          ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-                          guideDrag.current = { axis: 'v', idx: gi, moved: false }
-                        }}
-                        onPointerMove={guideMove}
-                        onPointerUp={guideUp}
-                        onPointerCancel={guideUp}
-                      />
-                    ))}
-                  {!previewing &&
-                    (((sourceData as unknown as Record<string, unknown> | null)?.xguides as
-                      | { v: number[]; h: number[] }
-                      | undefined)?.h ?? []).map((gh2, gi) => (
-                      <div
-                        key={`gh${gi}`}
-                        className="fixedguide fixedguide--h"
-                        style={{ top: `${(gh2 / ch) * 100}%` }}
-                        onPointerDown={(e) => {
-                          if (e.button !== 0) return
-                          e.stopPropagation()
-                          ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-                          guideDrag.current = { axis: 'h', idx: gi, moved: false }
-                        }}
-                        onPointerMove={guideMove}
-                        onPointerUp={guideUp}
-                        onPointerCancel={guideUp}
-                      />
-                    ))}
+                    (['v', 'h'] as const).map((axis) => {
+                      const xg = (sourceData as unknown as Record<string, unknown> | null)
+                        ?.xguides as { v: number[]; h: number[] } | undefined
+                      return (xg?.[axis] ?? []).map((pos, gi) => (
+                        <div
+                          key={`g${axis}${gi}`}
+                          className={`fixedguide fixedguide--${axis}`}
+                          style={
+                            axis === 'v'
+                              ? { left: `${(pos / cw) * 100}%` }
+                              : { top: `${(pos / ch) * 100}%` }
+                          }
+                          onPointerDown={(e) => {
+                            if (e.button !== 0) return
+                            e.stopPropagation()
+                            ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+                            guideDrag.current = { axis, idx: gi, moved: false }
+                          }}
+                          onPointerMove={guideMove}
+                          onPointerUp={guideUp}
+                          onPointerCancel={guideUp}
+                        />
+                      ))
+                    })}
                   {guides.v !== null && (
                     <div className="snapguide snapguide--v" style={{ left: `${(guides.v / cw) * 100}%` }}>
                       <span className="snapguide__label">{guides.v}</span>
