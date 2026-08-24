@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { evalNumExpr } from '../lib/num'
+import { PosInput } from './CustomBuilder'
 import { useEditor } from '../store'
 import { FONT_PRESETS, type TemplateKnob } from '../lib/lottieKnobs'
 import { t } from '../lib/i18n'
@@ -105,14 +105,12 @@ export default function TemplateOptions() {
           <div key={k.id} className="knob">
             <div className="knob__head">
               <span className="knob__name">{t(k.label)}</span>
-              <KnobValueInput
+              <PosInput
+                label={t(k.unit)}
                 value={num}
-                min={k.min}
-                max={k.max}
-                step={k.step}
-                unit={k.unit}
                 onCommit={(v) => {
-                  setKnobLive(k.id, v)
+                  const dec = k.step < 1 ? (String(k.step).split('.')[1]?.length ?? 1) : 0
+                  setKnobLive(k.id, Number(Math.min(k.max, Math.max(k.min, v)).toFixed(dec)))
                   commitEdit()
                 }}
               />
@@ -225,56 +223,3 @@ function FontPicker({
  * 직접 입력 필드 — blur/Enter에서만 커밋, min/max 클램프. 빈 값은 원복.
  * 소수 스텝 노브(재생 길이 0.1s 등)는 스텝 소수 자릿수로 반올림 — 정수 강제 금지.
  */
-function KnobValueInput({
-  value,
-  min,
-  max,
-  step,
-  unit,
-  onCommit,
-}: {
-  value: number
-  min: number
-  max: number
-  step: number
-  unit: string
-  onCommit: (v: number) => void
-}) {
-  const [draft, setDraft] = useState(String(value))
-
-  useEffect(() => {
-    setDraft(String(value))
-  }, [value])
-
-  const decimals = step < 1 ? (String(step).split('.')[1]?.length ?? 1) : 0
-
-  const commit = () => {
-    // 산술 입력 지원 — "100+50", "*2", "/4"
-    const v = evalNumExpr(draft, value)
-    if (v !== null) {
-      const clamped = Number(Math.min(max, Math.max(min, v)).toFixed(decimals))
-      if (clamped !== value) {
-        onCommit(clamped)
-        return
-      }
-    }
-    setDraft(String(value))
-  }
-
-  return (
-    <span className="knob__valinput">
-      <input
-        type="text"
-        inputMode="decimal"
-        title={t('산술 입력 가능 — 100+50, *2, /4')}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-        }}
-      />
-      <span className="knob__unit">{t(unit)}</span>
-    </span>
-  )
-}

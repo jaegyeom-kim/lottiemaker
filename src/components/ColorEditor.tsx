@@ -10,9 +10,9 @@ function loadRecents(): string[] {
     return []
   }
 }
-import { evalNumExpr } from '../lib/num'
 import { t } from '../lib/i18n'
 import { useEditor } from '../store'
+import { PosInput } from './CustomBuilder'
 import { rgbArrayToHex, type ColorGroup, type ColorRef } from '../lib/lottieColors'
 
 /** 경로를 따라가 색상 배열을 hex로 — 원본(pristine) 색 조회용. */
@@ -144,9 +144,9 @@ export default function ColorEditor() {
 
       <h3 className="panel__label">{t('크기')}</h3>
       <div className="sizerow">
-        <SizeInput value={animationData.w} onCommit={(v) => setSize(v, animationData.h)} />
+        <PosInput label="W" value={animationData.w} onCommit={(v) => setSize(Math.max(16, Math.min(4096, Math.round(v))), animationData.h)} />
         <span>×</span>
-        <SizeInput value={animationData.h} onCommit={(v) => setSize(animationData.w, v)} />
+        <PosInput label="H" value={animationData.h} onCommit={(v) => setSize(animationData.w, Math.max(16, Math.min(4096, Math.round(v))))} />
         <span className="panel__hint">px · {animationData.fr}fps</span>
       </div>
     </div>
@@ -194,34 +194,3 @@ function HexInput({ value, onCommit }: { value: string; onCommit: (hex: string) 
   )
 }
 
-/** 키 입력마다 커밋하지 않고 blur/Enter에서만 반영 — 빈 값이 1px로 강제되는 문제 방지. */
-function SizeInput({ value, onCommit }: { value: number; onCommit: (v: number) => void }) {
-  const [draft, setDraft] = useState(String(value))
-
-  useEffect(() => {
-    setDraft(String(value))
-  }, [value])
-
-  const commit = () => {
-    const v = evalNumExpr(draft, value)
-    if (v !== null && v >= 16 && v <= 4096) {
-      if (Math.round(v) !== value) onCommit(Math.round(v))
-    } else {
-      setDraft(String(value))
-    }
-  }
-
-  return (
-    <input
-      type="text"
-      inputMode="decimal"
-      title={t('산술 입력 가능 — 512+128, /2')}
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-      }}
-    />
-  )
-}

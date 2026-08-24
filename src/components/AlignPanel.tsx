@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import type { ReactElement } from 'react'
 import { useEditor } from '../store'
-import { evalNumExpr } from '../lib/num'
 import { t } from '../lib/i18n'
+import { PosInput } from './CustomBuilder'
 
 const I = (d: string) => (
   <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
@@ -120,32 +120,18 @@ function PatternDuplicate({ disabled }: { disabled: boolean }) {
   const [ds, setDs] = useState(0)
   const [dop, setDop] = useState(0)
 
-  const Field = ({
-    label,
-    value,
-    onChange,
-  }: {
-    label: string
-    value: number
-    onChange: (v: number) => void
-  }) => (
-    <label className="patfield">
-      <span>{label}</span>
-      <NumField value={value} onCommit={onChange} />
-    </label>
-  )
 
   return (
     <>
       <h3 className="panel__label">{t('패턴 복제')}</h3>
       <div className="patgrid">
-        <Field label={t('개수')} value={count} onChange={(v) => setCount(Math.max(2, Math.min(12, Math.round(v))))} />
-        <Field label={t('X 간격')} value={dx} onChange={setDx} />
-        <Field label={t('Y 간격')} value={dy} onChange={setDy} />
-        <Field label={t('회전 +°')} value={drot} onChange={setDrot} />
-        <Field label={t('시간차 f')} value={dt} onChange={(v) => setDt(Math.round(v))} />
-        <Field label={t('크기 +%')} value={ds} onChange={(v) => setDs(Math.max(-90, Math.min(200, v)))} />
-        <Field label={t('투명 +%')} value={dop} onChange={(v) => setDop(Math.max(-100, Math.min(100, v)))} />
+        <PosInput label={t('개수')} value={count} onCommit={(v) => setCount(Math.max(2, Math.min(12, Math.round(v))))} />
+        <PosInput label={t('X 간격')} value={dx} onCommit={setDx} />
+        <PosInput label={t('Y 간격')} value={dy} onCommit={setDy} />
+        <PosInput label={t('회전 +°')} value={drot} onCommit={setDrot} />
+        <PosInput label={t('시간차 f')} value={dt} onCommit={(v) => setDt(Math.round(v))} />
+        <PosInput label={t('크기 +%')} value={ds} onCommit={(v) => setDs(Math.max(-90, Math.min(200, v)))} />
+        <PosInput label={t('투명 +%')} value={dop} onCommit={(v) => setDop(Math.max(-100, Math.min(100, v)))} />
         <button
           className="btn btn--secondary"
           disabled={disabled}
@@ -162,25 +148,3 @@ function PatternDuplicate({ disabled }: { disabled: boolean }) {
   )
 }
 
-/** 소형 숫자 입력 — 산술 지원. */
-function NumField({ value, onCommit }: { value: number; onCommit: (v: number) => void }) {
-  const [draft, setDraft] = useState<string | null>(null)
-  const commit = () => {
-    if (draft === null) return
-    const v = evalNumExpr(draft, value)
-    setDraft(null)
-    if (v !== null) onCommit(v)
-  }
-  return (
-    <input
-      type="text"
-      inputMode="decimal"
-      value={draft ?? String(value)}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-      }}
-    />
-  )
-}
