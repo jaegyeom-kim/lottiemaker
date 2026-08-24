@@ -15,100 +15,55 @@ function openDb(): Promise<IDBDatabase> {
     }
     const req = indexedDB.open(DB_NAME, 4)
     req.onupgradeneeded = () => {
-      if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE)
-      if (!req.result.objectStoreNames.contains(FONT_STORE)) req.result.createObjectStore(FONT_STORE)
-      if (!req.result.objectStoreNames.contains(VER_STORE)) req.result.createObjectStore(VER_STORE)
-      if (!req.result.objectStoreNames.contains(LIB_STORE)) req.result.createObjectStore(LIB_STORE)
+      for (const st of [STORE, FONT_STORE, VER_STORE, LIB_STORE])
+        if (!req.result.objectStoreNames.contains(st)) req.result.createObjectStore(st)
     }
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error)
   })
 }
 
-export async function idbGet(key: string): Promise<string | null> {
+/** 트랜잭션 보일러플레이트 공통화 — 열고, fn의 요청을 프라미스로 감싸고, 닫는다. */
+async function op<T>(
+  store: string,
+  mode: IDBTransactionMode,
+  fn: (os: IDBObjectStore) => IDBRequest | void,
+): Promise<T> {
   const db = await openDb()
   try {
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readonly')
-      const req = tx.objectStore(STORE).get(key)
-      req.onsuccess = () => resolve(typeof req.result === 'string' ? req.result : null)
-      req.onerror = () => reject(req.error)
+    return await new Promise<T>((resolve, reject) => {
+      const tx = db.transaction(store, mode)
+      const req = fn(tx.objectStore(store))
+      if (req) {
+        req.onsuccess = () => resolve(req.result as T)
+        req.onerror = () => reject(req.error)
+      } else {
+        tx.oncomplete = () => resolve(undefined as T)
+        tx.onerror = () => reject(tx.error)
+      }
     })
   } finally {
     db.close()
   }
 }
 
-export async function idbSet(key: string, value: string): Promise<void> {
-  const db = await openDb()
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readwrite')
-      tx.objectStore(STORE).put(value, key)
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => reject(tx.error)
-    })
-  } finally {
-    db.close()
-  }
-}
+const put = (store: string, key: string, value: unknown) =>
+  op<void>(store, 'readwrite', (os) => void os.put(value, key))
+const del = (store: string, key: string) => op<void>(store, 'readwrite', (os) => void os.delete(key))
 
-export async function idbDel(key: string): Promise<void> {
-  const db = await openDb()
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readwrite')
-      tx.objectStore(STORE).delete(key)
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => reject(tx.error)
-    })
-  } finally {
-    db.close()
-  }
-}
+export const idbGet = (key: string) =>
+  op<unknown>(STORE, 'readonly', (os) => os.get(key)).then((v) => (typeof v === 'string' ? v : null))
+export const idbSet = (key: string, value: string) => put(STORE, key, value)
+export const idbDel = (key: string) => del(STORE, key)
 
 // ── 폰트 저장소 — 텍스트 툴용 업로드 폰트 (.ttf/.otf 바이너리, 세션 간 유지) ──
-export async function idbFontPut(name: string, buf: ArrayBuffer): Promise<void> {
-  const db = await openDb()
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(FONT_STORE, 'readwrite')
-      tx.objectStore(FONT_STORE).put(buf, name)
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => reject(tx.error)
-    })
-  } finally {
-    db.close()
-  }
-}
-
-export async function idbFontGet(name: string): Promise<ArrayBuffer | null> {
-  const db = await openDb()
-  try {
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction(FONT_STORE, 'readonly')
-      const req = tx.objectStore(FONT_STORE).get(name)
-      req.onsuccess = () => resolve(req.result instanceof ArrayBuffer ? req.result : null)
-      req.onerror = () => reject(req.error)
-    })
-  } finally {
-    db.close()
-  }
-}
-
-export async function idbFontList(): Promise<string[]> {
-  const db = await openDb()
-  try {
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction(FONT_STORE, 'readonly')
-      const req = tx.objectStore(FONT_STORE).getAllKeys()
-      req.onsuccess = () => resolve((req.result as IDBValidKey[]).map(String))
-      req.onerror = () => reject(req.error)
-    })
-  } finally {
-    db.close()
-  }
-}
+export const idbFontPut = (name: string, buf: ArrayBuffer) => put(FONT_STORE, name, buf)
+export const idbFontGet = (name: string) =>
+  op<unknown>(FONT_STORE, 'readonly', (os) => os.get(name)).then((v) =>
+    v instanceof ArrayBuffer ? v : null,
+  )
+export const idbFontList = () =>
+  op<IDBValidKey[]>(FONT_STORE, 'readonly', (os) => os.getAllKeys()).then((ks) => ks.map(String))
 
 // ── 버전 스냅샷 — 수동 저장 포인트 (이름 + 시각 + 세션 페이로드) ──
 export interface VersionMeta {
@@ -118,65 +73,29 @@ export interface VersionMeta {
   bytes: number
 }
 
-export async function idbVersionPut(id: string, value: string): Promise<void> {
-  const db = await openDb()
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(VER_STORE, 'readwrite')
-      tx.objectStore(VER_STORE).put(value, id)
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => reject(tx.error)
-    })
-  } finally {
-    db.close()
-  }
-}
+export const idbVersionPut = (id: string, value: string) => put(VER_STORE, id, value)
+export const idbVersionGet = (id: string) =>
+  op<unknown>(VER_STORE, 'readonly', (os) => os.get(id)).then((v) =>
+    typeof v === 'string' ? v : null,
+  )
+export const idbVersionDel = (id: string) => del(VER_STORE, id)
 
-export async function idbVersionGet(id: string): Promise<string | null> {
-  const db = await openDb()
-  try {
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction(VER_STORE, 'readonly')
-      const req = tx.objectStore(VER_STORE).get(id)
-      req.onsuccess = () => resolve(typeof req.result === 'string' ? req.result : null)
-      req.onerror = () => reject(req.error)
-    })
-  } finally {
-    db.close()
-  }
-}
-
-export async function idbVersionDel(id: string): Promise<void> {
-  const db = await openDb()
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(VER_STORE, 'readwrite')
-      tx.objectStore(VER_STORE).delete(id)
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => reject(tx.error)
-    })
-  } finally {
-    db.close()
-  }
-}
-
-/** 메타 목록 — 최신순. 값 전체를 읽지 않도록 커서 없이 keys + 미리 저장한 메타 파싱. */
+/** 메타 목록 — 최신순. 값 전체를 파싱하되 손상 엔트리는 제외. */
 export async function idbVersionList(): Promise<VersionMeta[]> {
+  const rows: VersionMeta[] = []
   const db = await openDb()
   try {
-    const rows: VersionMeta[] = await new Promise((resolve, reject) => {
-      const tx = db.transaction(VER_STORE, 'readonly')
-      const req = tx.objectStore(VER_STORE).openCursor()
-      const out: VersionMeta[] = []
+    await new Promise<void>((resolve, reject) => {
+      const req = db.transaction(VER_STORE, 'readonly').objectStore(VER_STORE).openCursor()
       req.onsuccess = () => {
         const cur = req.result
         if (!cur) {
-          resolve(out)
+          resolve()
           return
         }
         try {
           const v = JSON.parse(String(cur.value)) as { name?: string; at?: number }
-          out.push({
+          rows.push({
             id: String(cur.key),
             name: String(v.name ?? cur.key),
             at: Number(v.at ?? 0),
@@ -207,56 +126,19 @@ export interface LibItem {
   h?: number
 }
 
-export async function idbLibPut(item: LibItem): Promise<void> {
-  const db = await openDb()
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(LIB_STORE, 'readwrite')
-      tx.objectStore(LIB_STORE).put(JSON.stringify(item), item.id)
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => reject(tx.error)
-    })
-  } finally {
-    db.close()
-  }
-}
+export const idbLibPut = (item: LibItem) => put(LIB_STORE, item.id, JSON.stringify(item))
+export const idbLibDel = (id: string) => del(LIB_STORE, id)
 
-export async function idbLibDel(id: string): Promise<void> {
-  const db = await openDb()
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(LIB_STORE, 'readwrite')
-      tx.objectStore(LIB_STORE).delete(id)
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => reject(tx.error)
-    })
-  } finally {
-    db.close()
-  }
-}
-
-export async function idbLibList(): Promise<LibItem[]> {
-  const db = await openDb()
-  try {
-    const rows: LibItem[] = await new Promise((resolve, reject) => {
-      const tx = db.transaction(LIB_STORE, 'readonly')
-      const req = tx.objectStore(LIB_STORE).getAll()
-      req.onsuccess = () => {
-        const out: LibItem[] = []
-        for (const raw of req.result as unknown[]) {
-          try {
-            const v = JSON.parse(String(raw)) as LibItem
-            if (v?.id && v?.data) out.push(v)
-          } catch {
-            // 손상 엔트리 — 제외
-          }
-        }
-        resolve(out)
+export const idbLibList = () =>
+  op<unknown[]>(LIB_STORE, 'readonly', (os) => os.getAll()).then((raws) => {
+    const out: LibItem[] = []
+    for (const raw of raws) {
+      try {
+        const v = JSON.parse(String(raw)) as LibItem
+        if (v?.id && v?.data) out.push(v)
+      } catch {
+        // 손상 엔트리 — 제외
       }
-      req.onerror = () => reject(req.error)
-    })
-    return rows.sort((a, b) => b.at - a.at)
-  } finally {
-    db.close()
-  }
-}
+    }
+    return out.sort((a, b) => b.at - a.at)
+  })
