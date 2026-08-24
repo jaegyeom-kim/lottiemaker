@@ -9,6 +9,7 @@ import {
 } from '../lib/customBuilder'
 import { PosInput } from './CustomBuilder'
 import AnchorControls from './AnchorControls'
+import { AddIcon, CloseIcon } from './icons'
 
 /** xshape.tool → 표시 라벨. */
 const TOOL_LABELS: Record<string, string> = {
@@ -310,18 +311,18 @@ export default function TransformPanel() {
                         }
                       />
                       <button
-                        className="linkbtn"
+                        className="linkbtn linkbtn--icon"
                         disabled={list.length <= 2}
                         title={t('스톱 삭제')}
                         onClick={() => commitStops(list.filter((_, j) => j !== i))}
                       >
-                        ✕
+                        <CloseIcon />
                       </button>
                     </div>
                   ))}
                   <div className="posrow posrow--fill">
-                    <button className="linkbtn" onClick={addStop}>
-                      {t('+ 스톱 추가')}
+                    <button className="linkbtn linkbtn--icon" title={t('스톱 추가')} onClick={addStop}>
+                      <AddIcon /> {t('스톱 추가')}
                     </button>
                     {kind === 'linear' && (
                       <PosInput
