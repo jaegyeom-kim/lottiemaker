@@ -734,6 +734,31 @@ export const useEditor = create<EditorState>((set, get) => {
     (src?.layers[li] as Record<string, unknown> | undefined)?.xlock === true
 
   /**
+   * 레이어 라이브 편집 공통 경로 — 베이스라인 확보 → 클론 → mutate → 적용.
+   * mutate가 false를 반환하면 no-op (커밋은 호출자의 commitEdit).
+   */
+  const liveLayerEdit = (
+    li: number,
+    mutate: (layer: Record<string, unknown>, src: LottieJson, st: EditorState) => boolean | void,
+  ) => {
+    const st = get()
+    const baseline = st.editBaseline ?? snap()
+    const baseSrc = baseline.source ?? st.sourceData
+    if (!baseSrc?.layers[li] || lockedAt(baseSrc, li)) return
+    const src = cloneForLive(baseSrc)
+    ensureLayerColors(src)
+    if (mutate(src.layers[li] as Record<string, unknown>, src, st) === false) return
+    const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
+    set({
+      animationData: applied,
+      sourceData: src,
+      colorGroups: st.colorGroups,
+      editBaseline: baseline,
+      future: [],
+    })
+  }
+
+  /**
    * 클론된 src의 레이어 li에 xkf 변형 적용 + 채널·클립 재생성. 성공 여부 반환.
    * 잠긴 레이어는 차단 — 시스템 재생성(임포트·컴프 길이 등)은 force로 통과.
    */
@@ -1405,90 +1430,67 @@ export const useEditor = create<EditorState>((set, get) => {
       })
     },
 
-    setPenPathLive: (li, k, xshape) => {
-      const st = get()
-      const baseline = st.editBaseline ?? snap()
-      const baseSrc = baseline.source ?? st.sourceData
-      if (!baseSrc?.layers[li] || lockedAt(baseSrc, li)) return
-      const src = cloneForLive(baseSrc)
-      ensureLayerColors(src)
-      const layer = src.layers[li] as Record<string, unknown>
-      const group = (layer.shapes as Record<string, unknown>[] | undefined)?.[0]
-      const sh = findSinglePathShape(layer)
-      if (!sh) return
-      const xkfP = normKf(layer.xkf as Partial<CustomKf> | undefined)
-      const pkKeys = kfChannelKeys(xkfP, 'pk')
-      if (pkKeys.length) {
-        // 패스 애니메이션 중 — 정적 교체 대신 재생헤드에 pk 키 업서트 (AE 방식)
-        const t = Math.round(st.curFrame * 10) / 10
-        let key = xkfP.keys.find((x) => Math.abs(x.t - t) < 0.5)
-        if (!key) {
-          key = { t }
-          xkfP.keys.push(key)
-          xkfP.keys.sort((a, b) => a.t - b.t)
-        }
-        key.pk = structuredClone(k)
-        layer.xkf = xkfP
-        applyPathChannel(layer, xkfP) // sh.ks + 유니온 bbox 메타
-        if (group) {
-          const trP = (group.it as Record<string, unknown>[] | undefined)?.find(
+    setPenPathLive: (li, k, xshape) =>
+      liveLayerEdit(li, (layer, src, st) => {
+        const group = (layer.shapes as Record<string, unknown>[] | undefined)?.[0]
+        const sh = findSinglePathShape(layer)
+        if (!sh) return false
+        const syncSize = () => {
+          if (!group) return
+          const tr = (group.it as Record<string, unknown>[] | undefined)?.find(
             (it) => it.ty === 'tr',
-          ) as { s?: { k: number[] } } | undefined
-          const gscP = ((trP?.s?.k?.[0] as number | undefined) ?? 100) / 100
-          const xselP = normSel(layer.xsel as Partial<CustomSel> | undefined, src.op)
-          layer.xsel = { ...xselP, size: Math.max(4, ((group.bboxMax as number) ?? 4) * gscP) }
+          ) as { a?: { k: number[] }; s?: { k: number[] } } | undefined
+          const gsc = ((tr?.s?.k?.[0] as number | undefined) ?? 100) / 100
+          const xsel2 = normSel(layer.xsel as Partial<CustomSel> | undefined, src.op)
+          layer.xsel = { ...xsel2, size: Math.max(4, ((group.bboxMax as number) ?? 4) * gsc) }
         }
-        const appliedP = applyKnobs(src, st.templateKnobs, st.knobValues)
-        set({
-          animationData: appliedP,
-          sourceData: src,
-          colorGroups: st.colorGroups,
-          editBaseline: baseline,
-          future: [],
-        })
-        return
-      }
-      ;(sh.ks as Record<string, unknown>).k = structuredClone(k)
-      if (xshape) layer.xshape = xshape
-      // bbox 메타 갱신 — 선택 박스·크기 조절이 새 곡선 범위를 따라가게 (곡선 극값 기준)
-      const acc = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
-      const n = k.c ? k.v.length : k.v.length - 1
-      for (let j = 0; j < n; j++) {
-        const j2 = (j + 1) % k.v.length
-        growCubicBbox(
-          acc,
-          k.v[j] as [number, number],
-          [k.v[j][0] + k.o[j][0], k.v[j][1] + k.o[j][1]],
-          [k.v[j2][0] + k.i[j2][0], k.v[j2][1] + k.i[j2][1]],
-          k.v[j2] as [number, number],
-        )
-      }
-      if (Number.isFinite(acc.minX) && group) {
-        group.bboxW = acc.maxX - acc.minX
-        group.bboxH = acc.maxY - acc.minY
-        group.bboxMax = Math.max(acc.maxX - acc.minX, acc.maxY - acc.minY)
-        // 시각 중심이 그룹 앵커에서 얼마나 벗어났는지 — 선택 박스/히트가 따라오게
-        // (포인트 편집으로 bbox 중심이 이동해도 xbase/앵커는 그대로이기 때문)
-        const tr = (group.it as Record<string, unknown>[] | undefined)?.find(
-          (it) => it.ty === 'tr',
-        ) as { a?: { k: number[] }; s?: { k: number[] } } | undefined
-        const ta = tr?.a?.k ?? [0, 0]
-        const gsc = ((tr?.s?.k?.[0] as number | undefined) ?? 100) / 100
-        group.bboxCx = ((acc.minX + acc.maxX) / 2 - ta[0]) * gsc
-        group.bboxCy = ((acc.minY + acc.maxY) / 2 - ta[1]) * gsc
-        // xsel.size(긴 변 px)도 동기 — 리사이즈/패턴 복제가 이 값을 비율 기준으로 쓴다
-        const xsel2 = normSel(layer.xsel as Partial<CustomSel> | undefined, src.op)
-        layer.xsel = { ...xsel2, size: Math.max(4, (group.bboxMax as number) * gsc) }
-      }
-      const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
-      set({
-        animationData: applied,
-        sourceData: src,
-        colorGroups: st.colorGroups,
-        editBaseline: baseline,
-        future: [],
-      })
-    },
+        const xkfP = normKf(layer.xkf as Partial<CustomKf> | undefined)
+        if (kfChannelKeys(xkfP, 'pk').length) {
+          // 패스 애니메이션 중 — 정적 교체 대신 재생헤드에 pk 키 업서트 (AE 방식)
+          const t = Math.round(st.curFrame * 10) / 10
+          let key = xkfP.keys.find((x) => Math.abs(x.t - t) < 0.5)
+          if (!key) {
+            key = { t }
+            xkfP.keys.push(key)
+            xkfP.keys.sort((a, b) => a.t - b.t)
+          }
+          key.pk = structuredClone(k)
+          layer.xkf = xkfP
+          applyPathChannel(layer, xkfP) // sh.ks + 유니온 bbox 메타
+          syncSize()
+          return
+        }
+        ;(sh.ks as Record<string, unknown>).k = structuredClone(k)
+        if (xshape) layer.xshape = xshape
+        // bbox 메타 갱신 — 선택 박스·크기 조절이 새 곡선 범위를 따라가게 (곡선 극값 기준)
+        const acc = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
+        const n = k.c ? k.v.length : k.v.length - 1
+        for (let j = 0; j < n; j++) {
+          const j2 = (j + 1) % k.v.length
+          growCubicBbox(
+            acc,
+            k.v[j] as [number, number],
+            [k.v[j][0] + k.o[j][0], k.v[j][1] + k.o[j][1]],
+            [k.v[j2][0] + k.i[j2][0], k.v[j2][1] + k.i[j2][1]],
+            k.v[j2] as [number, number],
+          )
+        }
+        if (Number.isFinite(acc.minX) && group) {
+          group.bboxW = acc.maxX - acc.minX
+          group.bboxH = acc.maxY - acc.minY
+          group.bboxMax = Math.max(acc.maxX - acc.minX, acc.maxY - acc.minY)
+          // 시각 중심이 그룹 앵커에서 얼마나 벗어났는지 — 선택 박스/히트가 따라오게
+          // (포인트 편집으로 bbox 중심이 이동해도 xbase/앵커는 그대로이기 때문)
+          const tr = (group.it as Record<string, unknown>[] | undefined)?.find(
+            (it) => it.ty === 'tr',
+          ) as { a?: { k: number[] }; s?: { k: number[] } } | undefined
+          const ta = tr?.a?.k ?? [0, 0]
+          const gsc = ((tr?.s?.k?.[0] as number | undefined) ?? 100) / 100
+          group.bboxCx = ((acc.minX + acc.maxX) / 2 - ta[0]) * gsc
+          group.bboxCy = ((acc.minY + acc.maxY) / 2 - ta[1]) * gsc
+          syncSize()
+        }
+      }),
 
     setShapeGeom: (li, patch) => {
       const st = get()
@@ -1671,57 +1673,30 @@ export const useEditor = create<EditorState>((set, get) => {
 
     setLayerFillStopsLive: (li, stops) => {
       if (stops.length < 2) return
-      const st = get()
-      const baseline = st.editBaseline ?? snap()
-      const baseSrc = baseline.source ?? st.sourceData
-      if (!baseSrc?.layers[li] || lockedAt(baseSrc, li)) return
-      const src = cloneForLive(baseSrc)
-      ensureLayerColors(src)
-      const layer = src.layers[li] as Record<string, unknown>
-      const gf = collectShapeItems(layer, ['gf'])[0]
-      if (!gf) return
-      const sorted = stops
-        .map((x) => ({
-          t: Math.round(Math.max(0, Math.min(1, x.t)) * 1000) / 1000,
-          rgb: hexToRgbArray(x.hex),
-        }))
-        .sort((a, b) => a.t - b.t)
-      ;(gf as Record<string, unknown>).g = {
-        p: sorted.length,
-        k: { a: 0, k: sorted.flatMap((x) => [x.t, x.rgb[0], x.rgb[1], x.rgb[2]]) },
-      }
-      const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
-      set({
-        animationData: applied,
-        sourceData: src,
-        colorGroups: st.colorGroups,
-        editBaseline: baseline,
-        future: [],
+      liveLayerEdit(li, (layer) => {
+        const gf = collectShapeItems(layer, ['gf'])[0]
+        if (!gf) return false
+        const sorted = stops
+          .map((x) => ({
+            t: Math.round(Math.max(0, Math.min(1, x.t)) * 1000) / 1000,
+            rgb: hexToRgbArray(x.hex),
+          }))
+          .sort((a, b) => a.t - b.t)
+        ;(gf as Record<string, unknown>).g = {
+          p: sorted.length,
+          k: { a: 0, k: sorted.flatMap((x) => [x.t, x.rgb[0], x.rgb[1], x.rgb[2]]) },
+        }
       })
     },
 
-    setLayerFillPointsLive: (li, pts) => {
-      const st = get()
-      const baseline = st.editBaseline ?? snap()
-      const baseSrc = baseline.source ?? st.sourceData
-      if (!baseSrc?.layers[li] || lockedAt(baseSrc, li)) return
-      const src = cloneForLive(baseSrc)
-      ensureLayerColors(src)
-      const layer = src.layers[li] as Record<string, unknown>
-      const gf = collectShapeItems(layer, ['gf'])[0]
-      if (!gf) return
-      const R1 = (v: number) => Math.round(v * 10) / 10
-      if (pts.s) (gf as Record<string, unknown>).s = { a: 0, k: [R1(pts.s[0]), R1(pts.s[1])] }
-      if (pts.e) (gf as Record<string, unknown>).e = { a: 0, k: [R1(pts.e[0]), R1(pts.e[1])] }
-      const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
-      set({
-        animationData: applied,
-        sourceData: src,
-        colorGroups: st.colorGroups,
-        editBaseline: baseline,
-        future: [],
-      })
-    },
+    setLayerFillPointsLive: (li, pts) =>
+      liveLayerEdit(li, (layer) => {
+        const gf = collectShapeItems(layer, ['gf'])[0]
+        if (!gf) return false
+        const R1 = (v: number) => Math.round(v * 10) / 10
+        if (pts.s) (gf as Record<string, unknown>).s = { a: 0, k: [R1(pts.s[0]), R1(pts.s[1])] }
+        if (pts.e) (gf as Record<string, unknown>).e = { a: 0, k: [R1(pts.e[0]), R1(pts.e[1])] }
+      }),
 
     setLayerFill: (li, fill) => {
       const { sourceData, templateKnobs, knobValues } = get()
