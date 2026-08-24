@@ -360,6 +360,16 @@ export function easeIndexBez(i: number): Bezier4 {
   return (EASE_PRESETS[i] ?? EASE_PRESETS[1]).bez
 }
 
+/** 그라디언트 스냅샷 — gk 채널 키 값 (gf.g.k 평탄 배열 + s/e 끝점). */
+export interface GradSnap {
+  /** 색 스톱 수 (gf.g.p). */
+  p: number
+  /** [t,r,g,b]×p (+ 알파쌍 [t,o]×p). */
+  k: number[]
+  s: [number, number]
+  e: [number, number]
+}
+
 /** 패스 지오메트리 (로티 sh.ks.k 형태) — pk 채널 키 값. */
 export interface PathShapeK {
   v: [number, number][]
@@ -384,6 +394,8 @@ export interface KfKey {
   te?: number
   /** 패스 모핑 키 — 레이어 로컬 패스 지오메트리 (단일 sh 레이어 전용). */
   pk?: PathShapeK
+  /** 그라디언트 키 — gf 스냅샷 (색+알파 스톱 평탄 배열 + 끝점). */
+  gk?: GradSnap
   /** 위치 키의 공간 탄젠트 (모션 패스) — 나가는 핸들 오프셋 (키 기준 상대). */
   pto?: [number, number]
   /** 위치 키의 공간 탄젠트 — 들어오는 핸들 오프셋 (키 기준 상대, 이전 키 쪽). */
@@ -415,7 +427,7 @@ export function normKf(raw: Partial<CustomKf> | undefined): CustomKf {
     .filter((k) => typeof k?.t === 'number')
     .map((k) => {
       const e: KfKey['e'] = {}
-      for (const ch of ['p', 's', 'r', 'o', 'ts', 'te', 'pk'] as const) {
+      for (const ch of ['p', 's', 'r', 'o', 'ts', 'te', 'pk', 'gk'] as const) {
         const b = k.e?.[ch]
         if (Array.isArray(b) && b.length === 4 && b.every((n) => typeof n === 'number'))
           e[ch] = [b[0], b[1], b[2], b[3]]
@@ -434,7 +446,7 @@ export function normKf(raw: Partial<CustomKf> | undefined): CustomKf {
       merged.push(k)
       continue
     }
-    for (const ch of ['p', 's', 'r', 'o', 'ts', 'te', 'pk'] as const)
+    for (const ch of ['p', 's', 'r', 'o', 'ts', 'te', 'pk', 'gk'] as const)
       if (dup[ch] === undefined && k[ch] !== undefined) (dup[ch] as unknown) = k[ch]
     if (k.e) dup.e = { ...k.e, ...(dup.e ?? {}) }
   }
@@ -470,7 +482,7 @@ export function segTangents(
   return { to, ti }
 }
 
-export type KfChannel = 'p' | 's' | 'r' | 'o' | 'ts' | 'te' | 'pk'
+export type KfChannel = 'p' | 's' | 'r' | 'o' | 'ts' | 'te' | 'pk' | 'gk'
 
 /** 타임라인 키 선택 항목 — 레이어 인덱스 + 채널 + 시각. */
 export interface KfSelItem {
@@ -488,6 +500,7 @@ export const KF_CHANNEL_DEFS: { ch: KfChannel; label: string; unit: string }[] =
   { ch: 'ts', label: '트림 시작', unit: '%' },
   { ch: 'te', label: '트림 끝', unit: '%' },
   { ch: 'pk', label: '패스', unit: '' },
+  { ch: 'gk', label: '그라디언트', unit: '' },
 ]
 
 /** 채널의 키 없는 구간 기본값 — ◆ 캡처/단축키/패널이 공유. */
@@ -501,7 +514,7 @@ export function kfFallbackValue(
   if (ch === 'r') return xsel.rotation
   if (ch === 'ts') return 0
   if (ch === 'te') return 100
-  if (ch === 'pk') return 0 // 패스는 수치 아님 — 값 패널에서 제외됨
+  if (ch === 'pk' || ch === 'gk') return 0 // 수치 채널 아님 — 값 패널에서 제외됨
   return xsel.opacity
 }
 
@@ -518,7 +531,7 @@ export function kfValueAt(
   fallback: number | [number, number],
 ): number | [number, number] {
   const keys = kfChannelKeys(xkf, ch)
-  if (!keys.length || ch === 'pk') return fallback // 패스 값은 pathKAt으로
+  if (!keys.length || ch === 'pk' || ch === 'gk') return fallback // pathKAt/gradKAt으로
   const val = (k: KfKey) => k[ch] as number | [number, number]
   if (t <= keys[0].t) return val(keys[0])
   if (t >= keys[keys.length - 1].t) return val(keys[keys.length - 1])
@@ -800,6 +813,98 @@ export function applyPathChannel(layer: Record<string, unknown>, xkf: CustomKf):
     group.bboxCx = ((acc.minX + acc.maxX) / 2 - ta[0]) * gsc
     group.bboxCy = ((acc.minY + acc.maxY) / 2 - ta[1]) * gsc
   }
+}
+
+/** t 시점 그라디언트 보간 — 스톱 수 다르면 왼쪽 키 홀드 (모핑 불가). 선형 근사. */
+export function gradKAt(xkf: CustomKf, t: number): GradSnap | null {
+  const keys = kfChannelKeys(xkf, 'gk')
+  if (!keys.length) return null
+  const val = (k: KfKey) => k.gk as GradSnap
+  if (t <= keys[0].t) return structuredClone(val(keys[0]))
+  if (t >= keys[keys.length - 1].t) return structuredClone(val(keys[keys.length - 1]))
+  for (let i = 0; i < keys.length - 1; i++) {
+    const a = keys[i]
+    const b = keys[i + 1]
+    if (t < a.t || t > b.t) continue
+    const A = val(a)
+    const B = val(b)
+    if (A.k.length !== B.k.length || A.p !== B.p) return structuredClone(A)
+    const f = b.t === a.t ? 0 : (t - a.t) / (b.t - a.t)
+    const mix = (x: number, y: number) => x + (y - x) * f
+    return {
+      p: A.p,
+      k: A.k.map((v, j) => mix(v, B.k[j])),
+      s: [mix(A.s[0], B.s[0]), mix(A.s[1], B.s[1])],
+      e: [mix(A.e[0], B.e[0]), mix(A.e[1], B.e[1])],
+    }
+  }
+  return structuredClone(val(keys[keys.length - 1]))
+}
+
+/** gk 키 간 스톱 수 불일치 — 모핑 불가 구간 존재 여부. */
+export function gkMismatch(xkf: CustomKf): boolean {
+  const keys = kfChannelKeys(xkf, 'gk')
+  for (let i = 0; i < keys.length - 1; i++) {
+    const a = keys[i].gk as GradSnap
+    const b = keys[i + 1].gk as GradSnap
+    if (a.k.length !== b.k.length || a.p !== b.p) return true
+  }
+  return false
+}
+
+/**
+ * xkf의 그라디언트 채널(gk)을 레이어의 첫 gf에 반영 — 키 1개 = 정적, 2개+ = 모핑
+ * (g.k와 s/e 끝점 모두 애니메이션). 키가 사라진 레이어(xgk)는 첫 키 형태로 고정.
+ */
+export function applyGradChannel(layer: Record<string, unknown>, xkf: CustomKf): void {
+  const keys = kfChannelKeys(xkf, 'gk')
+  const gf = collectShapeItems(layer, ['gf'])[0]
+  if (!gf) return
+  const setStatic = (snap: GradSnap) => {
+    gf.g = { p: snap.p, k: { a: 0, k: [...snap.k] } }
+    gf.s = { a: 0, k: [...snap.s] }
+    gf.e = { a: 0, k: [...snap.e] }
+  }
+  if (!keys.length) {
+    if (layer.xgk === true) {
+      const gk = (gf.g as Record<string, unknown> | undefined)?.k as
+        | { a?: number; k?: unknown }
+        | undefined
+      if (gk?.a === 1 && Array.isArray(gk.k)) {
+        const first = (gk.k[0] as { s?: number[] } | undefined)?.s
+        const sP = ((gf.s as Record<string, unknown>)?.k as unknown[]) ?? []
+        const eP = ((gf.e as Record<string, unknown>)?.k as unknown[]) ?? []
+        const at = (prop: unknown[]): [number, number] => {
+          const f0 = (prop[0] as { s?: number[] } | undefined)?.s
+          return Array.isArray(f0) ? [f0[0], f0[1]] : [Number(prop[0]) || 0, Number(prop[1]) || 0]
+        }
+        if (first)
+          setStatic({
+            p: Number((gf.g as Record<string, unknown>).p) || Math.floor(first.length / 4),
+            k: [...first],
+            s: at(sP),
+            e: at(eP),
+          })
+      }
+      delete layer.xgk
+    }
+    return
+  }
+  layer.xgk = true
+  if (keys.length === 1) {
+    setStatic(keys[0].gk as GradSnap)
+    return
+  }
+  const kfOf = (pick: (g: GradSnap) => number[]) =>
+    keys.map((x, i) => {
+      const sVal = pick(x.gk as GradSnap)
+      if (i === keys.length - 1) return { t: x.t, s: sVal }
+      const [x1, y1, x2, y2] = segEaseOf(xkf, x, 'gk')
+      return { o: { x: [x1], y: [y1] }, i: { x: [x2], y: [y2] }, t: x.t, s: sVal }
+    })
+  gf.g = { p: (keys[0].gk as GradSnap).p, k: { a: 1, k: kfOf((g) => [...g.k]) } }
+  gf.s = { a: 1, k: kfOf((g) => [...g.s]) }
+  gf.e = { a: 1, k: kfOf((g) => [...g.e]) }
 }
 
 /** shapes 트리에서 첫 트림(tm) 셰이프 찾기. */

@@ -9,7 +9,7 @@ import { durationSec, parseLottie, type LottieJson } from '../lib/lottieUtils'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
 import { TextDialog } from './TextControls'
 import {
-  layerHalfOf, layerAabbOf, layerBaseOf, layerRotationOf, normKf, kfValueAt, pathKAt, findSinglePathShape, collectShapeItems, segTangents,
+  layerHalfOf, layerAabbOf, layerBaseOf, layerRotationOf, normKf, kfValueAt, pathKAt, gradKAt, findSinglePathShape, collectShapeItems, segTangents,
   kfChannelKeys, normSel, animSpans, kfFallbackValue,
   type CustomPayload, type CustomKf, type CustomSel, type KfChannel,
 } from '../lib/customBuilder'
@@ -1030,8 +1030,21 @@ export default function Preview() {
   const gradInfo = (() => {
     if (templateId !== '__custom' || previewing || tool !== 'move' || drawTool) return null
     const lr = sourceData?.layers[gradIdx] as Record<string, unknown> | undefined
-    const g = lr ? collectShapeItems(lr, ['gf'])[0] : undefined
+    let g = lr ? collectShapeItems(lr, ['gf'])[0] : undefined
     if (!g) return null
+    // gk 애니메이션 중 — 현재 프레임 보간 스냅샷을 정적 gf 형태로 치환해 표시/편집
+    if (lr) {
+      const xkfG = normKf(lr.xkf as Partial<CustomKf> | undefined)
+      const snap = gradKAt(xkfG, Math.round(editCurFrame))
+      if (snap) {
+        g = {
+          ...g,
+          g: { p: snap.p, k: { a: 0, k: snap.k } },
+          s: { a: 0, k: snap.s },
+          e: { a: 0, k: snap.e },
+        }
+      }
+    }
     const sPt = ((g.s as Record<string, unknown>)?.k as number[] | undefined) ?? [0, 0]
     const ePt = ((g.e as Record<string, unknown>)?.k as number[] | undefined) ?? [100, 0]
     const stops = (((g.g as Record<string, unknown>)?.k as Record<string, unknown>)?.k as number[] | undefined) ?? []

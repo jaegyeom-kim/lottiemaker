@@ -15,7 +15,7 @@ import {
   CUSTOM_ASSET_PREFIX, CUSTOM_OP, DEFAULT_SEL,
   type CustomSel, type CustomPayload, type CustomKf, type KfChannel, type Bezier4,
   type KfSelItem, type PathShapeK,
-  kfChannelKeys, applyTrimChannels, applyPathChannel, pathKAt, pkMismatch, subdividePathK, findSinglePathShape, collectShapeItems, extractTrimToKf, layerScaleOf, layerAabbOf, layerRotationOf, layerBaseOf,
+  kfChannelKeys, applyTrimChannels, applyPathChannel, pathKAt, pkMismatch, subdividePathK, findSinglePathShape, collectShapeItems, applyGradChannel, gradKAt, type GradSnap, extractTrimToKf, layerScaleOf, layerAabbOf, layerRotationOf, layerBaseOf,
 } from './lib/customBuilder'
 
 const HISTORY_CAP = 50
@@ -284,6 +284,10 @@ interface EditorState {
   togglePathKf: (li: number) => void
   /** 재생헤드 프레임에 pk 키 추가 — 현재 보간 형태 스냅샷 (타임라인 ◆ 버튼). */
   addPathKey: (li: number, frame: number) => void
+  /** 그라디언트 애니메이션 토글 — on: 현재 gf 스냅샷 키, off: 현재 프레임 형태로 고정. */
+  toggleGradKf: (li: number) => void
+  /** 재생헤드에 gk 키 추가 — 현재 보간 그라디언트 스냅샷 (타임라인 ◆). */
+  addGradKey: (li: number, frame: number) => void
   /** pk 키 간 포인트 수 맞추기 — 적은 키를 세분해 최대 수에 맞춤 (형태 보존, 언두 1회). */
   matchPathPoints: (li: number) => void
   /** 로티 문서를 커스텀 레이어로 가져오기 — 트랜스폼 키프레임을 xkf로 변환. */
@@ -726,8 +730,53 @@ export const useEditor = create<EditorState>((set, get) => {
     }
   }
 
+  /** 정적 gf → 그라디언트 스냅샷 (애니메이션 상태면 null — gradKAt 사용). */
+  const gradSnapOf = (gf: Record<string, unknown>): GradSnap | null => {
+    const g = gf.g as { p?: number; k?: { a?: number; k?: unknown } } | undefined
+    const flat = g?.k?.a !== 1 && Array.isArray(g?.k?.k) ? (g.k.k as number[]) : null
+    if (!flat) return null
+    const at = (prop: unknown): [number, number] => {
+      const k = (prop as { k?: unknown })?.k
+      return Array.isArray(k) && typeof k[0] === 'number'
+        ? [k[0] as number, k[1] as number]
+        : [0, 0]
+    }
+    return {
+      p: Number(g?.p) || Math.floor(flat.length / 4),
+      k: [...flat],
+      s: at(gf.s),
+      e: at(gf.e),
+    }
+  }
+
+  /**
+   * gk 키 보유 레이어의 라이브 그라디언트 편집 — 현재 프레임 보간 스냅샷에 변경을 얹어
+   * 재생헤드 키로 업서트. gk 없으면 false (호출자가 정적 경로 진행).
+   */
+  const upsertGradKey = (
+    layer: Record<string, unknown>,
+    st: EditorState,
+    patch: (snap: GradSnap) => GradSnap,
+  ): boolean => {
+    const xkf = normKf(layer.xkf as Partial<CustomKf> | undefined)
+    if (!kfChannelKeys(xkf, 'gk').length) return false
+    const t = Math.round(st.curFrame * 10) / 10
+    const cur = gradKAt(xkf, t)
+    if (!cur) return false
+    let key = xkf.keys.find((x) => Math.abs(x.t - t) < 0.5)
+    if (!key) {
+      key = { t }
+      xkf.keys.push(key)
+      xkf.keys.sort((a, b) => a.t - b.t)
+    }
+    key.gk = patch(cur)
+    layer.xkf = xkf
+    applyGradChannel(layer, xkf)
+    return true
+  }
+
   /** 값 채널 전체 — 빈 키 정리 판정용. */
-  const KF_ALL_CHS = ['p', 's', 'r', 'o', 'ts', 'te', 'pk'] as const
+  const KF_ALL_CHS = ['p', 's', 'r', 'o', 'ts', 'te', 'pk', 'gk'] as const
 
   /** 잠긴 레이어(xlock) 여부 — UI와 별개로 store 차원에서 편집을 차단하는 기준. */
   const lockedAt = (src: LottieJson | null | undefined, li: number): boolean =>
@@ -791,6 +840,8 @@ export const useEditor = create<EditorState>((set, get) => {
     applyTrimChannels(layer, xkf)
     // 패스 모핑 채널(pk) — 단일 sh.ks에 반영 (키 이동/삭제/이징도 이 경로로 재생성)
     applyPathChannel(layer, xkf)
+    // 그라디언트 채널(gk) — 첫 gf의 스톱/끝점 애니메이션
+    applyGradChannel(layer, xkf)
     const { clipA, clipB } = animSpans(full, src.op)
     layer.ip = clipA
     layer.op = clipB
@@ -1332,7 +1383,7 @@ export const useEditor = create<EditorState>((set, get) => {
     revealChannels: (lis, spec, additive = false) => {
       const src = get().sourceData
       if (!src) return
-      const ALL: KfChannel[] = ['p', 's', 'r', 'o', 'ts', 'te', 'pk']
+      const ALL: KfChannel[] = ['p', 's', 'r', 'o', 'ts', 'te', 'pk', 'gk']
       const next = { ...get().tlReveal }
       for (const li of lis) {
         const layer = src.layers[li] as Record<string, unknown> | undefined
@@ -1341,11 +1392,12 @@ export const useEditor = create<EditorState>((set, get) => {
         // 트림 채널(ts/te)은 kf 모드와 무관하게 동작 — on 아닐 땐 트림만 공개 가능
         const eligible = (c: KfChannel) =>
           xkf.on || c === 'ts' || c === 'te' ||
-          (c === 'pk' && xkf.keys.some((k) => k.pk !== undefined))
+          (c === 'pk' && xkf.keys.some((k) => k.pk !== undefined)) ||
+          (c === 'gk' && xkf.keys.some((k) => k.gk !== undefined))
         if (
           !xkf.on &&
           Number(layer.ty) !== 4 &&
-          !xkf.keys.some((k) => k.ts !== undefined || k.te !== undefined || k.pk !== undefined)
+          !xkf.keys.some((k) => k.ts !== undefined || k.te !== undefined || k.pk !== undefined || k.gk !== undefined)
         )
           continue
         const cur = next[li] ?? []
@@ -1595,6 +1647,68 @@ export const useEditor = create<EditorState>((set, get) => {
       push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
     },
 
+    toggleGradKf: (li) => {
+      const st = get()
+      const src0 = st.sourceData
+      if (!src0?.layers[li] || lockedAt(src0, li)) return
+      const src = structuredClone(src0)
+      ensureLayerColors(src)
+      const layer = src.layers[li] as Record<string, unknown>
+      const gf = collectShapeItems(layer, ['gf'])[0]
+      if (!gf) return
+      const t = Math.round(st.curFrame * 10) / 10
+      const done = editKfLayerIn(src, li, (xkf) => {
+        if (kfChannelKeys(xkf, 'gk').length) {
+          // OFF — 현재 프레임 보간 형태로 고정 (applyGradChannel의 xgk 경로가 마무리)
+          const frozen = gradKAt(xkf, t)
+          for (const k of xkf.keys) {
+            delete k.gk
+            if (k.e) delete k.e.gk
+          }
+          xkf.keys = xkf.keys.filter((k) => KF_ALL_CHS.some((c) => k[c] !== undefined))
+          if (frozen) {
+            gf.g = { p: frozen.p, k: { a: 0, k: [...frozen.k] } }
+            gf.s = { a: 0, k: [...frozen.s] }
+            gf.e = { a: 0, k: [...frozen.e] }
+          }
+        } else {
+          const snap0 = gradSnapOf(gf)
+          if (!snap0) return
+          let key = xkf.keys.find((x) => Math.abs(x.t - t) < 0.5)
+          if (!key) {
+            key = { t }
+            xkf.keys.push(key)
+          }
+          key.gk = snap0
+        }
+      })
+      if (!done) return
+      const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
+      push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
+    },
+
+    addGradKey: (li, frame) => {
+      const st = get()
+      const src0 = st.sourceData
+      if (!src0?.layers[li] || lockedAt(src0, li)) return
+      const src = structuredClone(src0)
+      ensureLayerColors(src)
+      const t = Math.round(frame * 10) / 10
+      const done = editKfLayerIn(src, li, (xkf) => {
+        const cur = gradKAt(xkf, t)
+        if (!cur) return
+        let key = xkf.keys.find((x) => Math.abs(x.t - t) < 0.5)
+        if (!key) {
+          key = { t }
+          xkf.keys.push(key)
+        }
+        key.gk = cur
+      })
+      if (!done) return
+      const applied = applyKnobs(src, st.templateKnobs, st.knobValues)
+      push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
+    },
+
     matchPathPoints: (li) => {
       const st = get()
       const src0 = st.sourceData
@@ -1673,7 +1787,7 @@ export const useEditor = create<EditorState>((set, get) => {
 
     setLayerFillStopsLive: (li, stops) => {
       if (stops.length < 2) return
-      liveLayerEdit(li, (layer) => {
+      liveLayerEdit(li, (layer, _src, st) => {
         const gf = collectShapeItems(layer, ['gf'])[0]
         if (!gf) return false
         const sorted = stops
@@ -1686,15 +1800,26 @@ export const useEditor = create<EditorState>((set, get) => {
         // 알파 스톱은 색 스톱 뒤에 [t, o] 쌍으로 — 전부 불투명이면 생략 (표준 로티)
         const k = sorted.flatMap((x) => [x.t, x.rgb[0], x.rgb[1], x.rgb[2]])
         if (sorted.some((x) => x.a < 1)) k.push(...sorted.flatMap((x) => [x.t, x.a]))
+        // 그라디언트 애니메이션 중 — 재생헤드에 gk 키 업서트 (AE 오토키)
+        if (upsertGradKey(layer, st, (snap) => ({ ...snap, p: sorted.length, k }))) return
         ;(gf as Record<string, unknown>).g = { p: sorted.length, k: { a: 0, k } }
       })
     },
 
     setLayerFillPointsLive: (li, pts) =>
-      liveLayerEdit(li, (layer) => {
+      liveLayerEdit(li, (layer, _src, st) => {
         const gf = collectShapeItems(layer, ['gf'])[0]
         if (!gf) return false
         const R1 = (v: number) => Math.round(v * 10) / 10
+        // 그라디언트 애니메이션 중 — 끝점 변경도 gk 키 업서트
+        if (
+          upsertGradKey(layer, st, (snap) => ({
+            ...snap,
+            s: pts.s ? [R1(pts.s[0]), R1(pts.s[1])] : snap.s,
+            e: pts.e ? [R1(pts.e[0]), R1(pts.e[1])] : snap.e,
+          }))
+        )
+          return
         if (pts.s) (gf as Record<string, unknown>).s = { a: 0, k: [R1(pts.s[0]), R1(pts.s[1])] }
         if (pts.e) (gf as Record<string, unknown>).e = { a: 0, k: [R1(pts.e[0]), R1(pts.e[1])] }
       }),
@@ -2361,7 +2486,7 @@ export const useEditor = create<EditorState>((set, get) => {
             const dup = kept.find((m) => Math.abs(m.t - t) < 0.5)
             if (dup) {
               // 같은 프레임으로 클램프된 키 — 채널 값을 버리지 않고 빈 채널에 병합
-              for (const ch of ['p', 's', 'r', 'o', 'ts', 'te', 'pk'] as const)
+              for (const ch of ['p', 's', 'r', 'o', 'ts', 'te', 'pk', 'gk'] as const)
                 if (dup[ch] === undefined && k[ch] !== undefined)
                   (dup[ch] as unknown) = k[ch]
               if (k.e) dup.e = { ...k.e, ...(dup.e ?? {}) }

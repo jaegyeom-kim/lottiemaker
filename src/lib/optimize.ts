@@ -4,7 +4,7 @@ import type { LottieJson } from './lottieUtils'
 
 /** 레이어에 실리는 에디터 전용 키 — 로티 플레이어는 무시하지만 파일만 불린다. */
 const EDITOR_LAYER_KEYS = [
-  'xsel', 'xkf', 'xbase', 'xci', 'xlock', 'xsolo', 'xtloff', 'xshape', 'xpk', 'xblank',
+  'xsel', 'xkf', 'xbase', 'xci', 'xlock', 'xsolo', 'xtloff', 'xshape', 'xpk', 'xgk', 'xblank',
 ]
 
 function roundDeep(node: unknown): unknown {

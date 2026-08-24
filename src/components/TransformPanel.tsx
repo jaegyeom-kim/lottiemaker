@@ -4,7 +4,7 @@ import { rgbArrayToHex } from '../lib/lottieColors'
 import { idbLibPut } from '../lib/sessionStore'
 import { t } from '../lib/i18n'
 import {
-  normSel, normKf, kfValueAt, kfChannelKeys, pkMismatch, findSinglePathShape, collectShapeItems,
+  normSel, normKf, kfValueAt, kfChannelKeys, pkMismatch, gkMismatch, gradKAt, findSinglePathShape, collectShapeItems,
   type CustomKf, type CustomSel,
 } from '../lib/customBuilder'
 import { PosInput } from './CustomBuilder'
@@ -34,7 +34,7 @@ export default function TransformPanel() {
   const {
     setCustomChannelsLive, setKfChannelLive, commitEdit,
     nudgeCustomBase, setLayerBlend, setLayerStroke, setShapeGeom, togglePathKf, matchPathPoints,
-    setLayerFill, setLayerFillStopsLive, addLayerStroke, removeLayerStroke,
+    setLayerFill, setLayerFillStopsLive, toggleGradKf, addLayerStroke, removeLayerStroke,
   } = useEditor()
 
   const layers = sourceData?.layers ?? []
@@ -216,9 +216,13 @@ export default function TransformPanel() {
         const pt = collectShapeItems(selLayer, ['fl', 'gf'])[0]
         if (!pt) return null
         const isG = pt.ty === 'gf'
-        const stops = isG
-          ? (((pt.g as Record<string, unknown>)?.k as Record<string, unknown>)?.k as number[] | undefined) ?? []
-          : []
+        // gk 애니메이션 중 — 현재 프레임 보간 스냅샷으로 표시 (g.k가 키프레임 배열이라 직접 파싱 불가)
+        const gkSnap = isG ? gradKAt(xkf, curFrame) : null
+        const stops = gkSnap
+          ? gkSnap.k
+          : isG
+            ? (((pt.g as Record<string, unknown>)?.k as Record<string, unknown>)?.k as number[] | undefined) ?? []
+            : []
         const from = isG && stops.length >= 8 ? rgbArrayToHex([stops[1], stops[2], stops[3]]) : '#3380f5'
         const to = isG && stops.length >= 8 ? rgbArrayToHex([stops[5], stops[6], stops[7]]) : '#9b6ee8'
         const solidHex = !isG
@@ -226,8 +230,12 @@ export default function TransformPanel() {
           : from
         const kind: 'solid' | 'linear' | 'radial' = !isG ? 'solid' : Number(pt.t) === 2 ? 'radial' : 'linear'
         // 현재 각도 — s→e 벡터에서 역산
-        const sPt = ((pt.s as Record<string, unknown>)?.k as number[] | undefined) ?? [0, 0]
-        const ePt = ((pt.e as Record<string, unknown>)?.k as number[] | undefined) ?? [1, 0]
+        const sPt = gkSnap
+          ? gkSnap.s
+          : (((pt.s as Record<string, unknown>)?.k as number[] | undefined) ?? [0, 0])
+        const ePt = gkSnap
+          ? gkSnap.e
+          : (((pt.e as Record<string, unknown>)?.k as number[] | undefined) ?? [1, 0])
         const angle = Math.round((Math.atan2(ePt[1] - sPt[1], ePt[0] - sPt[0]) * 180) / Math.PI)
         return (
           <div className="knob">
@@ -249,7 +257,9 @@ export default function TransformPanel() {
             </div>
             {isG && (() => {
               // 스톱 목록 [{t, hex, a}] — 색 p×4 + 알파쌍 [t,o]×p (없으면 전부 1)
-              const pCount = Number((pt.g as Record<string, unknown>)?.p) || Math.floor(stops.length / 4)
+              const pCount = gkSnap
+                ? gkSnap.p
+                : Number((pt.g as Record<string, unknown>)?.p) || Math.floor(stops.length / 4)
               const alphaPairs = stops.slice(pCount * 4)
               const list: { t: number; hex: string; a: number }[] = []
               for (let i = 0; i < pCount; i++)
@@ -324,6 +334,13 @@ export default function TransformPanel() {
                     <button className="linkbtn linkbtn--icon" title={t('스톱 추가')} onClick={addStop}>
                       <AddIcon /> {t('스톱 추가')}
                     </button>
+                    <button
+                      className="linkbtn"
+                      title={t('그라디언트 애니메이션 — 켜면 스톱/끝점 수정이 재생헤드에 키를 찍습니다')}
+                      onClick={() => toggleGradKf(idx)}
+                    >
+                      {kfChannelKeys(xkf, 'gk').length > 0 ? `◆ ${t('애니메이션 끄기')}` : t('애니메이션 켜기')}
+                    </button>
                     {kind === 'linear' && (
                       <PosInput
                         label={`${t('각도')} °`}
@@ -332,6 +349,11 @@ export default function TransformPanel() {
                       />
                     )}
                   </div>
+                  {gkMismatch(xkf) && (
+                    <p className="knob__note knob__note--warn">
+                      {t('⚠ 키 간 스톱 수가 달라 모핑되지 않는 구간이 있습니다.')}
+                    </p>
+                  )}
                 </>
               )
             })()}

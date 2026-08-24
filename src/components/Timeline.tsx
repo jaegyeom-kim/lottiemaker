@@ -46,7 +46,7 @@ const KF_CHANNELS = KF_CHANNEL_DEFS
 
 /** 채널 행 표시 조건 — 라벨/트랙 양쪽 동일 필터 (행 정렬 유지). */
 const chVisible = (ch: KfChannel, xkf: CustomKf, ty: number) =>
-  ch === 'pk'
+  ch === 'pk' || ch === 'gk'
     ? kfChannelKeys(xkf, ch).length > 0
     : !(ch === 'ts' || ch === 'te') || ty === 4 || kfChannelKeys(xkf, ch).length > 0
 
@@ -69,7 +69,7 @@ export default function Timeline({
 }) {
   const {
     setCustomChannelsLive, commitEdit, setPlaying, setCustomIdx,
-    moveKfClipLive, removeKfChannel, setKfChannel, addPathKey,
+    moveKfClipLive, removeKfChannel, setKfChannel, addPathKey, addGradKey,
     setKfSegEase, setKfSegEaseLive, bakeSpringSegEase, bakeBounceSegEase,
     setKfSel, moveKfKeysLive, reverseKfSel, toggleCustomSel, setCustomSelList,
     revealChannels,
@@ -726,7 +726,7 @@ export default function Timeline({
             const xkfL = normKf(lr.xkf as Partial<CustomKf> | undefined)
             const hasTrimKeys = xkfL.keys.some((k) => k.ts !== undefined || k.te !== undefined)
             const shownChs = (tlReveal[li] ?? []).filter(
-              (c) => xkfL.on || c === 'ts' || c === 'te' || c === 'pk',
+              (c) => xkfL.on || c === 'ts' || c === 'te' || c === 'pk' || c === 'gk',
             )
             const open = shownChs.length > 0
             const isRef = isSceneRef(lr)
@@ -884,6 +884,8 @@ export default function Timeline({
                               removeKfChannel(ch, curFrame)
                             } else if (ch === 'pk') {
                               addPathKey(li, curFrame) // 현재 보간 형태 스냅샷
+                            } else if (ch === 'gk') {
+                              addGradKey(li, curFrame)
                             } else {
                               const xb: [number, number] = Array.isArray(lr.xbase)
                                 ? [(lr.xbase as number[])[0], (lr.xbase as number[])[1]]
@@ -991,7 +993,7 @@ export default function Timeline({
             const isPrimary = li === idx && customIdxs.includes(li)
             const isMulti = li !== idx && customIdxs.includes(li)
             const shownChs = (tlReveal[li] ?? []).filter(
-              (c) => kfOn || c === 'ts' || c === 'te' || c === 'pk',
+              (c) => kfOn || c === 'ts' || c === 'te' || c === 'pk' || c === 'gk',
             )
             const open = shownChs.length > 0
             const lrT = l as Record<string, unknown>
