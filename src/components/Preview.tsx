@@ -9,7 +9,7 @@ import { durationSec, parseLottie, type LottieJson } from '../lib/lottieUtils'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
 import { TextDialog } from './TextControls'
 import {
-  layerHalfOf, layerAabbOf, layerBaseOf, layerRotationOf, normKf, kfValueAt, pathKAt,
+  layerHalfOf, layerAabbOf, layerBaseOf, layerRotationOf, normKf, kfValueAt, pathKAt, findSinglePathShape, collectShapeItems,
   kfChannelKeys, normSel, animSpans, kfFallbackValue,
   type CustomPayload, type CustomKf, type CustomSel, type KfChannel,
 } from '../lib/customBuilder'
@@ -366,15 +366,9 @@ export default function Preview() {
     if (!layer || Number(layer.ty) !== 4 || layer.xlock === true) return null
     const shapes = layer.shapes as Record<string, unknown>[] | undefined
     if (!shapes || shapes.length !== 1) return null
-    const found: Record<string, unknown>[] = []
-    const walk = (items?: Record<string, unknown>[]) => {
-      for (const it of items ?? []) {
-        if (it.ty === 'sh') found.push(it)
-        else if (it.ty === 'gr') walk(it.it as Record<string, unknown>[])
-      }
-    }
-    walk((shapes[0] as Record<string, unknown>).it as Record<string, unknown>[])
-    if (found.length !== 1) return null
+    const single = findSinglePathShape(layer)
+    if (!single) return null
+    const found = [single]
     // 패스 애니메이션(pk) 레이어 — 현재 프레임의 보간 형태를 편집 대상으로
     const xkfP = normKf(layer.xkf as Partial<CustomKf> | undefined)
     const animK = pathKAt(xkfP, Math.round(st.curFrame))
@@ -1052,18 +1046,8 @@ export default function Preview() {
   const gradInfo = (() => {
     if (templateId !== '__custom' || previewing || tool !== 'move' || drawTool) return null
     const lr = sourceData?.layers[gradIdx] as Record<string, unknown> | undefined
-    const group = (lr?.shapes as Record<string, unknown>[] | undefined)?.[0]
-    if (!group?.it) return null
-    let gf: Record<string, unknown> | null = null
-    const walk = (items: Record<string, unknown>[]) => {
-      for (const it of items) {
-        if (it.ty === 'gf' && !gf) gf = it
-        else if (it.ty === 'gr') walk(it.it as Record<string, unknown>[])
-      }
-    }
-    walk(group.it as Record<string, unknown>[])
-    if (!gf) return null
-    const g = gf as Record<string, unknown>
+    const g = lr ? collectShapeItems(lr, ['gf'])[0] : undefined
+    if (!g) return null
     const sPt = ((g.s as Record<string, unknown>)?.k as number[] | undefined) ?? [0, 0]
     const ePt = ((g.e as Record<string, unknown>)?.k as number[] | undefined) ?? [100, 0]
     const stops = (((g.g as Record<string, unknown>)?.k as Record<string, unknown>)?.k as number[] | undefined) ?? []

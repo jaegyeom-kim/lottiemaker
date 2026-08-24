@@ -15,7 +15,7 @@ import {
   CUSTOM_ASSET_PREFIX, CUSTOM_OP, DEFAULT_SEL,
   type CustomSel, type CustomPayload, type CustomKf, type KfChannel, type Bezier4,
   type KfSelItem, type PathShapeK,
-  kfChannelKeys, applyTrimChannels, applyPathChannel, pathKAt, pkMismatch, subdividePathK, extractTrimToKf, layerScaleOf, layerAabbOf, layerRotationOf, layerBaseOf,
+  kfChannelKeys, applyTrimChannels, applyPathChannel, pathKAt, pkMismatch, subdividePathK, findSinglePathShape, collectShapeItems, extractTrimToKf, layerScaleOf, layerAabbOf, layerRotationOf, layerBaseOf,
 } from './lib/customBuilder'
 
 const HISTORY_CAP = 50
@@ -794,32 +794,6 @@ export const useEditor = create<EditorState>((set, get) => {
 
   /** xkf.keys에서 frame(±0.5f)의 키에 채널 값(+구간 이징) 업서트. */
   /** ind를 1..n으로 재할당하면서 tp(매트)·parent 참조를 함께 리매핑. */
-  /** 그룹 안의 유일한 sh — 펜 편집 가능 조건 (path 1개짜리 레이어). */
-  const findSinglePath = (group: Record<string, unknown> | undefined) => {
-    if (!group) return null
-    const found: Record<string, unknown>[] = []
-    const walk = (items: Record<string, unknown>[] | undefined) => {
-      for (const it of items ?? []) {
-        if (it.ty === 'sh') found.push(it)
-        else if (it.ty === 'gr') walk(it.it as Record<string, unknown>[])
-      }
-    }
-    walk(group.it as Record<string, unknown>[])
-    return found.length === 1 ? found[0] : null
-  }
-
-  /** 그룹 안의 모든 st(스트로크) 페인터. */
-  const findStrokes = (group: Record<string, unknown> | undefined) => {
-    const found: Record<string, unknown>[] = []
-    const walk = (items: Record<string, unknown>[] | undefined) => {
-      for (const it of items ?? []) {
-        if (it.ty === 'st') found.push(it)
-        else if (it.ty === 'gr') walk(it.it as Record<string, unknown>[])
-      }
-    }
-    if (group) walk(group.it as Record<string, unknown>[])
-    return found
-  }
 
   /**
    * ind 공간이 겹치는 여러 그룹(임포트 병합·패턴 복제)용 재색인.
@@ -1440,7 +1414,7 @@ export const useEditor = create<EditorState>((set, get) => {
       ensureLayerColors(src)
       const layer = src.layers[li] as Record<string, unknown>
       const group = (layer.shapes as Record<string, unknown>[] | undefined)?.[0]
-      const sh = findSinglePath(group)
+      const sh = findSinglePathShape(layer)
       if (!sh) return
       const xkfP = normKf(layer.xkf as Partial<CustomKf> | undefined)
       const pkKeys = kfChannelKeys(xkfP, 'pk')
@@ -1532,7 +1506,7 @@ export const useEditor = create<EditorState>((set, get) => {
       const k = shapeGeomK(next.tool, next.w, next.h, next.r)
       if (!k) return
       // 지오메트리는 (0,0)-(w,h)로 생성 — 기존 로컬 bbox 중심에 맞춰 이동해 도형 제자리 유지
-      const sh = findSinglePath((layer0.shapes as Record<string, unknown>[] | undefined)?.[0])
+      const sh = findSinglePathShape(layer0)
       const k0 = (sh?.ks as Record<string, unknown> | undefined)?.k as PenPathK | undefined
       if (k0?.v?.length) {
         let mnX = Infinity
@@ -1563,7 +1537,7 @@ export const useEditor = create<EditorState>((set, get) => {
       const src = structuredClone(src0)
       ensureLayerColors(src)
       const layer = src.layers[li] as Record<string, unknown>
-      const sh = findSinglePath((layer.shapes as Record<string, unknown>[] | undefined)?.[0])
+      const sh = findSinglePathShape(layer)
       if (!sh) return
       const t = Math.round(st.curFrame * 10) / 10
       const done = editKfLayerIn(src, li, (xkf) => {
@@ -1662,7 +1636,7 @@ export const useEditor = create<EditorState>((set, get) => {
       const layer = src.layers[li] as Record<string, unknown>
       const group = (layer.shapes as Record<string, unknown>[] | undefined)?.[0]
       if (!group?.it) return
-      if (findStrokes(group).length) return
+      if (collectShapeItems(layer, ['st']).length) return
       const it = group.it as Record<string, unknown>[]
       // 채움색 기반 기본 스트로크 — 페인터(fl/gf) 바로 앞에 삽입 (스트로크가 위에 그려지게)
       const fl = it.find((x) => x.ty === 'fl') as { c?: { k?: number[] } } | undefined
@@ -1704,16 +1678,7 @@ export const useEditor = create<EditorState>((set, get) => {
       const src = cloneForLive(baseSrc)
       ensureLayerColors(src)
       const layer = src.layers[li] as Record<string, unknown>
-      const group = (layer.shapes as Record<string, unknown>[] | undefined)?.[0]
-      if (!group?.it) return
-      let gf: Record<string, unknown> | null = null
-      const walk = (items: Record<string, unknown>[]) => {
-        for (const it of items) {
-          if (it.ty === 'gf' && !gf) gf = it
-          else if (it.ty === 'gr') walk(it.it as Record<string, unknown>[])
-        }
-      }
-      walk(group.it as Record<string, unknown>[])
+      const gf = collectShapeItems(layer, ['gf'])[0]
       if (!gf) return
       const sorted = stops
         .map((x) => ({
@@ -1743,16 +1708,7 @@ export const useEditor = create<EditorState>((set, get) => {
       const src = cloneForLive(baseSrc)
       ensureLayerColors(src)
       const layer = src.layers[li] as Record<string, unknown>
-      const group = (layer.shapes as Record<string, unknown>[] | undefined)?.[0]
-      if (!group?.it) return
-      let gf: Record<string, unknown> | null = null
-      const walk = (items: Record<string, unknown>[]) => {
-        for (const it of items) {
-          if (it.ty === 'gf' && !gf) gf = it
-          else if (it.ty === 'gr') walk(it.it as Record<string, unknown>[])
-        }
-      }
-      walk(group.it as Record<string, unknown>[])
+      const gf = collectShapeItems(layer, ['gf'])[0]
       if (!gf) return
       const R1 = (v: number) => Math.round(v * 10) / 10
       if (pts.s) (gf as Record<string, unknown>).s = { a: 0, k: [R1(pts.s[0]), R1(pts.s[1])] }
@@ -1844,7 +1800,7 @@ export const useEditor = create<EditorState>((set, get) => {
       const src = structuredClone(sourceData)
       ensureLayerColors(src)
       const layer = src.layers[li] as Record<string, unknown>
-      const sts = findStrokes((layer.shapes as Record<string, unknown>[] | undefined)?.[0])
+      const sts = collectShapeItems(layer, ['st'])
       if (!sts.length) return
       for (const st2 of sts) {
         if (opts.w !== undefined) (st2.w as { k: number }) = { a: 0, k: Math.max(0.5, opts.w) } as never

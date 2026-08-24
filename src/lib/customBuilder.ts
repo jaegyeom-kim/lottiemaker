@@ -732,16 +732,25 @@ export function subdividePathK(k0: PathShapeK, target: number): PathShapeK {
 }
 
 /** 그룹 안의 유일한 sh — 패스 편집/모핑 가능 조건. */
-export function findSinglePathShape(layer: Record<string, unknown>): Record<string, unknown> | null {
+/** 레이어 shapes[0] 트리에서 지정 타입 아이템 전부 수집 (그룹 재귀) — 워커 단일 소스. */
+export function collectShapeItems(
+  layer: Record<string, unknown>,
+  tys: string[],
+): Record<string, unknown>[] {
   const shapes = layer.shapes as Record<string, unknown>[] | undefined
   const found: Record<string, unknown>[] = []
   const walk = (items?: Record<string, unknown>[]) => {
     for (const it of items ?? []) {
-      if (it.ty === 'sh') found.push(it)
+      if (tys.includes(String(it.ty))) found.push(it)
       else if (it.ty === 'gr') walk(it.it as Record<string, unknown>[])
     }
   }
   if (shapes?.[0]) walk(shapes[0].it as Record<string, unknown>[])
+  return found
+}
+
+export function findSinglePathShape(layer: Record<string, unknown>): Record<string, unknown> | null {
+  const found = collectShapeItems(layer, ['sh'])
   return found.length === 1 ? found[0] : null
 }
 

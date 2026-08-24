@@ -4,7 +4,7 @@ import { rgbArrayToHex } from '../lib/lottieColors'
 import { idbLibPut } from '../lib/sessionStore'
 import { t } from '../lib/i18n'
 import {
-  normSel, normKf, kfValueAt, kfChannelKeys, pkMismatch,
+  normSel, normKf, kfValueAt, kfChannelKeys, pkMismatch, findSinglePathShape, collectShapeItems,
   type CustomKf, type CustomSel,
 } from '../lib/customBuilder'
 import { PosInput } from './CustomBuilder'
@@ -178,15 +178,7 @@ export default function TransformPanel() {
 
       {/* 패스 애니메이션 — 단일 sh 레이어(펜/도형): pk 채널 스톱워치 */}
       {(() => {
-        const shs: Record<string, unknown>[] = []
-        const walkSh = (items?: Record<string, unknown>[]) => {
-          for (const it of items ?? []) {
-            if (it.ty === 'sh') shs.push(it)
-            else if (it.ty === 'gr') walkSh(it.it as Record<string, unknown>[])
-          }
-        }
-        walkSh(((selLayer.shapes as Record<string, unknown>[] | undefined)?.[0] as Record<string, unknown> | undefined)?.it as Record<string, unknown>[])
-        if (shs.length !== 1 || Number(selLayer.ty) !== 4) return null
+        if (!findSinglePathShape(selLayer) || Number(selLayer.ty) !== 4) return null
         const pkOn = kfChannelKeys(xkf, 'pk').length > 0
         return (
           <div className="knob">
@@ -220,16 +212,8 @@ export default function TransformPanel() {
 
       {/* 칠 — 단색 ↔ 그라디언트 (선형/방사), 드로잉 레이어의 fl/gf */}
       {(() => {
-        let painter: Record<string, unknown> | null = null
-        const walkF = (items?: Record<string, unknown>[]) => {
-          for (const it of items ?? []) {
-            if ((it.ty === 'fl' || it.ty === 'gf') && !painter) painter = it
-            else if (it.ty === 'gr') walkF(it.it as Record<string, unknown>[])
-          }
-        }
-        walkF(((selLayer.shapes as Record<string, unknown>[] | undefined)?.[0] as Record<string, unknown> | undefined)?.it as Record<string, unknown>[])
-        if (!painter) return null
-        const pt = painter as Record<string, unknown>
+        const pt = collectShapeItems(selLayer, ['fl', 'gf'])[0]
+        if (!pt) return null
         const isG = pt.ty === 'gf'
         const stops = isG
           ? (((pt.g as Record<string, unknown>)?.k as Record<string, unknown>)?.k as number[] | undefined) ?? []
@@ -341,14 +325,7 @@ export default function TransformPanel() {
 
       {/* 선(스트로크) — 패스/선 레이어일 때만: 두께·라인캡 */}
       {(() => {
-        const strokes: Record<string, unknown>[] = []
-        const walk = (items?: Record<string, unknown>[]) => {
-          for (const it of items ?? []) {
-            if (it.ty === 'st') strokes.push(it)
-            else if (it.ty === 'gr') walk(it.it as Record<string, unknown>[])
-          }
-        }
-        walk(((selLayer.shapes as Record<string, unknown>[] | undefined)?.[0] as Record<string, unknown> | undefined)?.it as Record<string, unknown>[])
+        const strokes = collectShapeItems(selLayer, ['st'])
         // 셰이프 레이어인데 선이 없으면 — 추가 버튼
         if (!strokes.length) {
           if (Number(selLayer.ty) !== 4 || !(selLayer.shapes as unknown[])?.length) return null
