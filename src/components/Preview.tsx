@@ -1067,24 +1067,20 @@ export default function Preview() {
     const sPt = ((g.s as Record<string, unknown>)?.k as number[] | undefined) ?? [0, 0]
     const ePt = ((g.e as Record<string, unknown>)?.k as number[] | undefined) ?? [100, 0]
     const stops = (((g.g as Record<string, unknown>)?.k as Record<string, unknown>)?.k as number[] | undefined) ?? []
-    const hex = (i: number) =>
-      stops.length >= i + 4
-        ? `rgb(${Math.round(stops[i + 1] * 255)},${Math.round(stops[i + 2] * 255)},${Math.round(stops[i + 3] * 255)})`
-        : '#888'
-    const stopList: { t: number; css: string; hex: string }[] = []
+    const stopList: { t: number; hex: string }[] = []
     for (let i = 0; i + 3 < stops.length; i += 4) {
-      const to255 = (v: number) => Math.round(v * 255)
-      const hx = `#${[stops[i + 1], stops[i + 2], stops[i + 3]]
-        .map((v) => to255(v).toString(16).padStart(2, '0'))
-        .join('')}`
-      stopList.push({ t: stops[i], css: hex(i), hex: hx })
+      stopList.push({
+        t: stops[i],
+        hex: `#${[stops[i + 1], stops[i + 2], stops[i + 3]]
+          .map((v) => Math.round(v * 255).toString(16).padStart(2, '0'))
+          .join('')}`,
+      })
     }
+    if (!stopList.length) return null
     return {
       li: gradIdx,
       s: [sPt[0], sPt[1]] as [number, number],
       e: [ePt[0], ePt[1]] as [number, number],
-      from: hex(0),
-      to: hex((stopList.length - 1) * 4),
       stops: stopList,
       radial: Number(g.t) === 2,
     }
@@ -1151,7 +1147,6 @@ export default function Preview() {
     ;(e.currentTarget as Element).releasePointerCapture(e.pointerId)
     if (gd.moved) useEditor.getState().commitEdit()
   }
-
 
   // 고정 가이드 드래그 — 룰러에서 끌어 생성, 라인 드래그로 이동, 룰러 밖 드롭 = 삭제
   const guideDrag = useRef<{ axis: 'v' | 'h'; idx: number; moved: boolean } | null>(null)
@@ -2044,15 +2039,14 @@ export default function Preview() {
                     0.02,
                     Math.min(0.98, ((local.x - gradInfo.s[0]) * ex + (local.y - gradInfo.s[1]) * ey) / len2),
                   )
-                  // 이웃 스톱 색 보간
-                  const list = gradInfo.stops.map((x) => ({ t: x.t, hex: x.hex }))
-                  const sorted = [...list].sort((a, b) => a.t - b.t)
-                  let a = sorted[0]
-                  let b = sorted[sorted.length - 1]
-                  for (let i = 0; i < sorted.length - 1; i++)
-                    if (sorted[i].t <= tv && tv <= sorted[i + 1].t) {
-                      a = sorted[i]
-                      b = sorted[i + 1]
+                  // 이웃 스톱 색 보간 — 스톱은 store가 항상 t 정렬로 저장
+                  const list = gradInfo.stops
+                  let a = list[0]
+                  let b = list[list.length - 1]
+                  for (let i = 0; i < list.length - 1; i++)
+                    if (list[i].t <= tv && tv <= list[i + 1].t) {
+                      a = list[i]
+                      b = list[i + 1]
                       break
                     }
                   const u = b.t === a.t ? 0.5 : (tv - a.t) / (b.t - a.t)
@@ -2062,7 +2056,7 @@ export default function Preview() {
                     .map((v, j) => Math.round(v + (pb[j] - v) * u).toString(16).padStart(2, '0'))
                     .join('')}`
                   const st2 = useEditor.getState()
-                  st2.setLayerFillStopsLive(gradInfo.li, [...list, { t: tv, hex: hx }])
+                  st2.setLayerFillStopsLive(gradInfo.li, [...list.map((x) => ({ ...x })), { t: tv, hex: hx }])
                   st2.commitEdit()
                 }
                 return (
@@ -2089,7 +2083,7 @@ export default function Preview() {
                           cx={px}
                           cy={py}
                           r={4.5}
-                          style={{ fill: sp2.css }}
+                          style={{ fill: sp2.hex }}
                           onPointerDown={(ev) => {
                             if (ev.button !== 0) return
                             ev.stopPropagation()
@@ -2100,7 +2094,7 @@ export default function Preview() {
                               li: gradInfo.li,
                               moved: false,
                               stopIdx: i,
-                              stops: gradInfo.stops.map((x) => ({ t: x.t, hex: x.hex })),
+                              stops: gradInfo.stops.map((x) => ({ ...x })),
                               ls: gradInfo.s,
                               le: gradInfo.e,
                             }
@@ -2116,7 +2110,7 @@ export default function Preview() {
                       cx={sP.x}
                       cy={sP.y}
                       r={6}
-                      style={{ fill: gradInfo.from }}
+                      style={{ fill: gradInfo.stops[0].hex }}
                       onPointerDown={grab('s')}
                       onPointerMove={gradMove}
                       onPointerUp={gradUp}
@@ -2127,7 +2121,7 @@ export default function Preview() {
                       cx={eP.x}
                       cy={eP.y}
                       r={6}
-                      style={{ fill: gradInfo.to }}
+                      style={{ fill: gradInfo.stops[gradInfo.stops.length - 1].hex }}
                       onPointerDown={grab('e')}
                       onPointerMove={gradMove}
                       onPointerUp={gradUp}
