@@ -7,6 +7,7 @@ import type { AiMotionPlan } from './lib/ai'
 import { convertLottieToCustom, convertLottieToScenes, hasPrecomps } from './lib/lottieImport'
 import { t } from './lib/i18n'
 import { growCubicBbox, shapeGeomK } from './lib/drawTools'
+import { apply as applyMatXY } from './lib/svgImport'
 import { idbGet, idbSet, idbDel } from './lib/sessionStore'
 import {
   buildAnimKs, buildCustomDoc, buildCustomLayer, animSpans, normSel,
@@ -15,7 +16,8 @@ import {
   CUSTOM_ASSET_PREFIX, CUSTOM_OP, DEFAULT_SEL,
   type CustomSel, type CustomPayload, type CustomKf, type KfChannel, type Bezier4,
   type KfSelItem, type PathShapeK,
-  kfChannelKeys, applyTrimChannels, applyPathChannel, pathKAt, pkMismatch, subdividePathK, findSinglePathShape, collectShapeItems, applyGradChannel, gradKAt, type GradSnap, extractTrimToKf, layerScaleOf, layerAabbOf, layerRotationOf, layerBaseOf,
+  kfChannelKeys, applyTrimChannels, applyPathChannel, pathKAt, pkMismatch, subdividePathK, findSinglePathShape, collectShapeItems, applyGradChannel, gradKAt, type GradSnap,
+  parentWorldOf, invMat, applyVMat, extractTrimToKf, layerScaleOf, layerAabbOf, layerRotationOf, layerBaseOf,
 } from './lib/customBuilder'
 
 const HISTORY_CAP = 50
@@ -2348,7 +2350,13 @@ export const useEditor = create<EditorState>((set, get) => {
           sel1.length === 1 &&
           sel1[0] === pi
         ) {
-          get().setKfChannelLive('p', st.curFrame, [x, y])
+          // 부모가 있으면 드래그 목표(월드) → 부모 로컬 좌표로 (p키는 로컬)
+          const pw = parentWorldOf(sourceData, pi, st.curFrame)
+          const inv = invMat(pw.m)
+          get().setKfChannelLive('p', st.curFrame, [
+            Math.round((inv[0] * x + inv[2] * y + inv[4]) * 10) / 10,
+            Math.round((inv[1] * x + inv[3] * y + inv[5]) * 10) / 10,
+          ])
           return
         }
       }
@@ -2372,7 +2380,10 @@ export const useEditor = create<EditorState>((set, get) => {
       )
       if (!sel.length) return
       for (const i of sel) {
-        shiftLayer(src.layers[i] as Record<string, unknown>, dx, dy)
+        // 부모 밑 레이어 — 월드 델타를 부모 로컬 델타로 (회전/스케일 통과)
+        const inv = invMat(parentWorldOf(src, i, st.curFrame).m)
+        const [ldx, ldy] = applyVMat(inv, dx, dy)
+        shiftLayer(src.layers[i] as Record<string, unknown>, ldx, ldy)
       }
       const applied = applyKnobs(src, templateKnobs, knobValues)
       set({
@@ -2925,6 +2936,9 @@ export const useEditor = create<EditorState>((set, get) => {
       for (const l of layers) if (typeof l.ind === 'number') maxInd = Math.max(maxInd, l.ind as number)
       for (const l of layers) if (typeof l.ind !== 'number') l.ind = ++maxInd
       const layer = layers[li]
+      const frame = get().curFrame
+      // AE 방식 — 할당/해제 순간의 월드 트랜스폼 보존: 이전 부모 공간 → 새 부모 공간 변환
+      const oldPW = parentWorldOf(src, li, frame)
       if (targetLi === null) {
         delete layer.parent
       } else {
@@ -2940,6 +2954,44 @@ export const useEditor = create<EditorState>((set, get) => {
         }
         layer.parent = target.ind as number
       }
+      const newPW = parentWorldOf(src, li, frame)
+      const inv = invMat(newPW.m)
+      const toNew = (pt: [number, number]): [number, number] => {
+        const w = applyMatXY(oldPW.m, pt[0], pt[1])
+        return [
+          Math.round((inv[0] * w[0] + inv[2] * w[1] + inv[4]) * 10) / 10,
+          Math.round((inv[1] * w[0] + inv[3] * w[1] + inv[5]) * 10) / 10,
+        ]
+      }
+      const toNewV = (v: [number, number]): [number, number] => {
+        const w = applyVMat(oldPW.m, v[0], v[1])
+        const r = applyVMat(inv, w[0], w[1])
+        return [Math.round(r[0] * 10) / 10, Math.round(r[1] * 10) / 10]
+      }
+      const dRot = oldPW.rot - newPW.rot
+      const scRatio = oldPW.sc / (newPW.sc || 1e-9)
+      // xbase + 위치/공간탄젠트 키, 회전/스케일 채널 보정
+      if (Array.isArray(layer.xbase)) {
+        const nb = toNew([(layer.xbase as number[])[0], (layer.xbase as number[])[1]])
+        layer.xbase = nb
+      }
+      const xsel = normSel(layer.xsel as Partial<CustomSel> | undefined, src.op)
+      layer.xsel = {
+        ...xsel,
+        rotation: Math.round((xsel.rotation + dRot) * 10) / 10,
+        scale: Math.round(xsel.scale * scRatio * 10) / 10,
+      }
+      const xkf0 = normKf(layer.xkf as Partial<CustomKf> | undefined)
+      for (const k of xkf0.keys) {
+        if (Array.isArray(k.p)) k.p = toNew(k.p as [number, number])
+        if (Array.isArray(k.pto)) k.pto = toNewV(k.pto as [number, number])
+        if (Array.isArray(k.pti)) k.pti = toNewV(k.pti as [number, number])
+        if (typeof k.r === 'number') k.r = Math.round((k.r + dRot) * 10) / 10
+        if (typeof k.s === 'number') k.s = Math.round(k.s * scRatio * 10) / 10
+      }
+      layer.xkf = xkf0
+      // ks 재생성 — 보정된 로컬 값 반영
+      editKfLayerIn(src, li, () => {}, true)
       const applied = applyKnobs(src, templateKnobs, knobValues)
       push({ animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) })
     },

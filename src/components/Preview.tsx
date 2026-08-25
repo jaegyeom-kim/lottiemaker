@@ -9,7 +9,7 @@ import { durationSec, parseLottie, type LottieJson } from '../lib/lottieUtils'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
 import { TextDialog } from './TextControls'
 import {
-  layerHalfOf, layerAabbOf, layerBaseOf, layerRotationOf, normKf, kfValueAt, pathKAt, gradKAt, findSinglePathShape, collectShapeItems, segTangents,
+  layerHalfOf, layerAabbOf, layerBaseOf, layerRotationOf, normKf, kfValueAt, pathKAt, gradKAt, findSinglePathShape, collectShapeItems, segTangents, parentWorldOf, invMat, applyVMat,
   kfChannelKeys, normSel, animSpans, kfFallbackValue,
   type CustomPayload, type CustomKf, type CustomSel, type KfChannel,
 } from '../lib/customBuilder'
@@ -967,13 +967,23 @@ export default function Preview() {
     const pk = kfChannelKeys(xkf, 'p')
     if (pk.length < 2) return null
     const fb = pk[0].p as [number, number]
+    // 부모 밑 레이어 — 로컬 p키/벡터를 캔버스 좌표로 (표시 전부)
+    const pm = parentWorldOf(sourceData, idxClamped, Math.round(frame)).m
+    const toW = (pt2: [number, number]): [number, number] => [
+      pm[0] * pt2[0] + pm[2] * pt2[1] + pm[4],
+      pm[1] * pt2[0] + pm[3] * pt2[1] + pm[5],
+    ]
+    const toWV = (v: [number, number]): [number, number] => [
+      pm[0] * v[0] + pm[2] * v[1],
+      pm[1] * v[0] + pm[3] * v[1],
+    ]
     // 프레임 점 — 2f 간격 샘플, 이징에 따라 점 간격이 속도를 보여준다
     const dots: [number, number][] = []
     const t0 = pk[0].t
     const t1 = pk[pk.length - 1].t
-    for (let f = t0; f <= t1; f += 2) dots.push(kfValueAt(xkf, 'p', f, fb) as [number, number])
+    for (let f = t0; f <= t1; f += 2) dots.push(toW(kfValueAt(xkf, 'p', f, fb) as [number, number]))
     // 곡선 경로 d + 공간 탄젠트 핸들 — segTangents(수동 우선, smooth 폴백) 공용
-    const pts = pk.map((k) => k.p as [number, number])
+    const pts = pk.map((k) => toW(k.p as [number, number]))
     let d = `M ${pts[0][0]} ${pts[0][1]}`
     const handles: {
       t: number
@@ -987,7 +997,9 @@ export default function Preview() {
       const b = pk[i + 1]
       const pa = pts[i]
       const pb = pts[i + 1]
-      const { to, ti } = segTangents(pk, i, xkf.smooth)
+      const { to: to0, ti: ti0 } = segTangents(pk, i, xkf.smooth)
+      const to = to0 ? toWV(to0) : null
+      const ti = ti0 ? toWV(ti0) : null
       d += ` C ${pa[0] + (to?.[0] ?? 0)} ${pa[1] + (to?.[1] ?? 0)} ${pb[0] + (ti?.[0] ?? 0)} ${pb[1] + (ti?.[1] ?? 0)} ${pb[0]} ${pb[1]}`
       // 핸들 표시 오프셋 — 탄젠트 없으면(직선) 세그먼트 방향 20%로 시드 (0길이는 못 잡음)
       const dist = Math.hypot(pb[0] - pa[0], pb[1] - pa[1]) || 1
@@ -1003,11 +1015,11 @@ export default function Preview() {
       })
     }
     return {
-      keys: pk.map((k) => ({ t: k.t, p: k.p as [number, number] })),
+      keys: pk.map((k) => ({ t: k.t, p: toW(k.p as [number, number]) })),
       d,
       handles,
       dots,
-      cur: kfValueAt(xkf, 'p', Math.round(frame), fb) as [number, number],
+      cur: toW(kfValueAt(xkf, 'p', Math.round(frame), fb) as [number, number]),
       firstT: pk[0].t,
       lastT: pk[pk.length - 1].t,
     }
@@ -1186,13 +1198,21 @@ export default function Preview() {
     if (!pt) return
     md.moved = true
     const st = useEditor.getState()
+    // 부모 밑 레이어 — 캔버스 입력을 부모 로컬로 역변환 (p키/탄젠트는 로컬 저장)
+    const invP = st.sourceData
+      ? invMat(parentWorldOf(st.sourceData, idxClamped, Math.round(frame)).m)
+      : null
     if (md.kind === 'key') {
-      st.setKfChannelLive('p', md.t, [Math.round(pt[0] * 10) / 10, Math.round(pt[1] * 10) / 10])
+      const lx = invP ? invP[0] * pt[0] + invP[2] * pt[1] + invP[4] : pt[0]
+      const ly = invP ? invP[1] * pt[0] + invP[3] * pt[1] + invP[5] : pt[1]
+      st.setKfChannelLive('p', md.t, [Math.round(lx * 10) / 10, Math.round(ly * 10) / 10])
       return
     }
+    const offW: [number, number] = [pt[0] - md.base[0], pt[1] - md.base[1]]
+    const offL = invP ? applyVMat(invP, offW[0], offW[1]) : offW
     const off: [number, number] = [
-      Math.round((pt[0] - md.base[0]) * 10) / 10,
-      Math.round((pt[1] - md.base[1]) * 10) / 10,
+      Math.round(offL[0] * 10) / 10,
+      Math.round(offL[1] * 10) / 10,
     ]
     const isFirst = motionPath && Math.abs(md.t - motionPath.firstT) < 0.5
     const isLast = motionPath && Math.abs(md.t - motionPath.lastT) < 0.5

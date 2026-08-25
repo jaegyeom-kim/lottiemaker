@@ -34,16 +34,16 @@ export default function ExportPanel() {
   const [copied, setCopied] = useState<'json' | 'code' | null>(null)
   const [recording, setRecording] = useState<number | null>(null)
   const [videoErr, setVideoErr] = useState('')
+  const [gifBusy, setGifBusy] = useState<number | null>(null)
+  const [pngBusy, setPngBusy] = useState<number | null>(null)
   const bg = useEditor((s) => s.bg)
+  const curFrame = useEditor((s) => s.curFrame)
 
   if (!animationData) return null
 
   const rawData = () => (applySpeed && speed !== 1 ? bakeSpeed(animationData, speed) : animationData)
   const finalData = () => (optimize ? optimizeLottie(rawData()) : rawData())
 
-  const [gifBusy, setGifBusy] = useState<number | null>(null)
-  const [pngBusy, setPngBusy] = useState<number | null>(null)
-  const curFrame = useEditor((s) => s.curFrame)
   const savePngFrame = async () => {
     try {
       saveBlob(await exportFramePng(finalData(), curFrame), `${fileName}_${curFrame}f.png`)

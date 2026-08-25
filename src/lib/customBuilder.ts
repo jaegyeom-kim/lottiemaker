@@ -4,6 +4,7 @@
 import type { LottieJson } from './lottieUtils'
 import { wrapToFit, fitImageSize, type ImportedGraphic, type ImportedImage } from './svgImport'
 import { growCubicBbox } from './drawTools'
+import { mul, apply, type Mat } from './svgImport'
 
 export const CUSTOM_OP = 90 // 1.5s @60fps
 export const CUSTOM_ASSET_PREFIX = 'img_custom'
@@ -1006,7 +1007,7 @@ export function extractTrimToKf(layer: Record<string, unknown>): boolean {
  * 유효 레이어 스케일 (ks.s 정착값) — frame 주면 s 키 보간값, 없으면 정적(xsel.scale).
  * 박스/히트/앵커 보정이 공유 — 스케일 100 가정으로 어긋나던 버그의 단일 소스.
  */
-export function layerScaleOf(doc: LottieJson, i: number, frame?: number): number {
+function localScaleOf(doc: LottieJson, i: number, frame?: number): number {
   const layer = doc.layers[i] as Record<string, unknown> | undefined
   if (!layer) return 1
   // 정적 ks.s가 진실 소스 — 임포트된 씬 래퍼처럼 xsel 밖에서 온 스케일 포함
@@ -1029,7 +1030,7 @@ export function layerScaleOf(doc: LottieJson, i: number, frame?: number): number
 }
 
 /** 문서에서 레이어 i의 기준 위치 (첫 키프레임 또는 정적 값). atFrame = 키프레임 모드 보간 시각. */
-export function layerBaseOf(doc: LottieJson, i: number, atFrame?: number): [number, number] | null {
+function localBaseOf(doc: LottieJson, i: number, atFrame?: number): [number, number] | null {
   const layer = doc.layers[i] as (Record<string, unknown> & { ks?: unknown }) | undefined
   if (!layer) return null
   // 키프레임 모드 — 파킹 프레임의 보간 위치 (박스가 애니메이션 위치를 따라감)
@@ -1054,7 +1055,7 @@ export function layerBaseOf(doc: LottieJson, i: number, atFrame?: number): [numb
 }
 
 /** 정착 회전(도) — 정적 ks.r 우선, 애니메이션 중엔 xkf r 채널/xsel. layerScaleOf와 같은 규칙. */
-export function layerRotationOf(doc: LottieJson, i: number, frame?: number): number {
+function localRotationOf(doc: LottieJson, i: number, frame?: number): number {
   const layer = doc.layers[i] as Record<string, unknown> | undefined
   if (!layer) return 0
   const ksR = (layer.ks as Record<string, unknown> | undefined)?.r as
@@ -1066,6 +1067,99 @@ export function layerRotationOf(doc: LottieJson, i: number, frame?: number): num
   return xkf.on && frame !== undefined
     ? (kfValueAt(xkf, 'r', frame, xsel.rotation ?? 0) as number)
     : (xsel.rotation ?? 0)
+}
+
+/** 레이어 앵커 (ks.a 정적) — 로컬 좌표. */
+function anchorOf(doc: LottieJson, i: number): [number, number] {
+  const a = ((doc.layers[i] as Record<string, unknown>)?.ks as Record<string, unknown> | undefined)
+    ?.a as { k?: number[] } | undefined
+  return Array.isArray(a?.k) ? [a.k[0] ?? 0, a.k[1] ?? 0] : [0, 0]
+}
+
+/** 부모 체인 — 가까운 부모부터 레이어 인덱스. 끊긴 참조/순환은 중단. */
+export function parentChainOf(doc: LottieJson, i: number): number[] {
+  const layers = doc.layers as unknown as Record<string, unknown>[]
+  if (typeof layers[i]?.parent !== 'number') return []
+  const byInd = new Map<number, number>()
+  layers.forEach((l, j) => {
+    if (typeof l.ind === 'number') byInd.set(l.ind as number, j)
+  })
+  const chain: number[] = []
+  let cur = layers[i]
+  let hop = 0
+  while (cur && typeof cur.parent === 'number' && hop++ < 64) {
+    const pj = byInd.get(cur.parent as number)
+    if (pj === undefined || pj === i || chain.includes(pj)) break
+    chain.push(pj)
+    cur = layers[pj]
+  }
+  return chain
+}
+
+/** 항등 2×3. */
+const MAT_ID: Mat = [1, 0, 0, 1, 0, 0]
+
+/** 2×3 역행렬. */
+export function invMat(m: Mat): Mat {
+  const det = m[0] * m[3] - m[1] * m[2] || 1e-9
+  const a = m[3] / det
+  const b = -m[1] / det
+  const c = -m[2] / det
+  const d = m[0] / det
+  return [a, b, c, d, -(a * m[4] + c * m[5]), -(b * m[4] + d * m[5])]
+}
+
+/** 방향 벡터 변환 — 이동 성분 제외. */
+export function applyVMat(m: Mat, x: number, y: number): [number, number] {
+  return [m[0] * x + m[2] * y, m[1] * x + m[3] * y]
+}
+
+/**
+ * 레이어 i의 부모 월드 변환 — 로컬→캔버스 2×3 행렬 + 회전 합/스케일 곱.
+ * 부모 없으면 항등 (fast path). 로티 합성 순서: T(p)·R·S·T(-a).
+ */
+export function parentWorldOf(
+  doc: LottieJson,
+  i: number,
+  frame?: number,
+): { rot: number; sc: number; m: Mat } {
+  const chain = parentChainOf(doc, i)
+  if (!chain.length) return { rot: 0, sc: 1, m: MAT_ID }
+  let m: Mat = MAT_ID
+  let rot = 0
+  let sc = 1
+  for (let c = chain.length - 1; c >= 0; c--) {
+    const j = chain[c]
+    const p = localBaseOf(doc, j, frame) ?? [0, 0]
+    const r = localRotationOf(doc, j, frame)
+    const scl = localScaleOf(doc, j, frame)
+    const a = anchorOf(doc, j)
+    const rad = (r * Math.PI) / 180
+    const cos = Math.cos(rad) * scl
+    const sin = Math.sin(rad) * scl
+    m = mul(m, [cos, sin, -sin, cos, p[0] - (a[0] * cos - a[1] * sin), p[1] - (a[0] * sin + a[1] * cos)])
+    rot += r
+    sc *= scl
+  }
+  return { rot, sc, m }
+}
+
+/** 기준 위치 — 부모 체인 반영(캔버스 좌표). atFrame = 키프레임 보간 시각. */
+export function layerBaseOf(doc: LottieJson, i: number, atFrame?: number): [number, number] | null {
+  const local = localBaseOf(doc, i, atFrame)
+  if (!local) return null
+  const pw = parentWorldOf(doc, i, atFrame)
+  return pw.m === MAT_ID ? local : apply(pw.m, local[0], local[1])
+}
+
+/** 회전 — 부모 회전 합산. */
+export function layerRotationOf(doc: LottieJson, i: number, frame?: number): number {
+  return localRotationOf(doc, i, frame) + parentWorldOf(doc, i, frame).rot
+}
+
+/** 스케일 — 부모 스케일 곱. */
+export function layerScaleOf(doc: LottieJson, i: number, frame?: number): number {
+  return localScaleOf(doc, i, frame) * parentWorldOf(doc, i, frame).sc
 }
 
 /**
