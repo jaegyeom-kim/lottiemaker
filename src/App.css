@@ -4559,3 +4559,10 @@ body.drag-cross * { cursor: crosshair !important; }
   padding: 0;
   flex: 0 0 auto;
 }
+
+/* 빈 화면 액션 행 — 새 문서 + 파일 열기 */
+.preview__empty-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}

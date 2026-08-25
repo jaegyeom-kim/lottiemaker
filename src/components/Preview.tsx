@@ -2889,9 +2889,17 @@ export default function Preview() {
               <div className="preview__empty">
                 <p className="preview__empty-title">{empty.title}</p>
                 <p className="preview__empty-sub">{empty.sub}</p>
-                <button className="btn btn--secondary" onClick={() => fileInputRef.current?.click()}>
-                  {empty.btn}
-                </button>
+                <div className="preview__empty-actions">
+                  <button
+                    className="btn btn--primary"
+                    onClick={() => useEditor.getState().newBlankCustom()}
+                  >
+                    {t('새 문서')}
+                  </button>
+                  <button className="btn btn--secondary" onClick={() => fileInputRef.current?.click()}>
+                    {empty.btn}
+                  </button>
+                </div>
               </div>
             )
           })()
