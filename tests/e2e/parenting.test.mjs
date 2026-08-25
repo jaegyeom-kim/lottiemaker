@@ -132,4 +132,26 @@ ok(before && after && Math.hypot(after.x - before.x, after.y - before.y) < 2, `�
   )
 }
 
+// ── properties 부모 드롭다운 — 같은 기능, 발견 가능한 경로 ──
+{
+  const rows = await page.$$('.timeline__label--row')
+  const rb = await rows[0].boundingBox()
+  await page.mouse.click(rb.x + 14, rb.y + rb.height / 2)
+  await page.waitForTimeout(300)
+  const parentKnob = page.locator('.knob', { hasText: /^부모/ })
+  ok((await parentKnob.count()) === 1, 'properties 부모 드롭다운')
+  const opts = await parentKnob.locator('option').allTextContents()
+  ok(opts[0].includes('없음') && opts.length >= 2, `옵션 (${opts.join('/')})`)
+  // 드롭다운으로 할당
+  const val = await parentKnob.locator('option').nth(1).getAttribute('value')
+  await parentKnob.locator('select').selectOption(val)
+  await page.waitForTimeout(1300)
+  d = await src()
+  ok(d.layers[0].parent === Number(val), `드롭다운 할당 (parent=${d.layers[0].parent})`)
+  await parentKnob.locator('select').selectOption('')
+  await page.waitForTimeout(1300)
+  d = await src()
+  ok(d.layers[0].parent === undefined, '드롭다운 해제')
+}
+
 await done(browser)

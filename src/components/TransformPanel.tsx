@@ -35,6 +35,7 @@ export default function TransformPanel() {
     setCustomChannelsLive, setKfChannelLive, commitEdit,
     nudgeCustomBase, setLayerBlend, setLayerStroke, setShapeGeom, togglePathKf, matchPathPoints,
     setLayerFill, setLayerFillStopsLive, toggleGradKf, addLayerStroke, removeLayerStroke,
+    setLayerParent,
   } = useEditor()
 
   const layers = sourceData?.layers ?? []
@@ -421,6 +422,39 @@ export default function TransformPanel() {
           </div>
         )
       })()}
+
+      {/* 부모 레이어 — AE 페어런팅 (타임라인 나선 아이콘과 동일 기능) */}
+      {layers.length > 1 && (
+        <div className="knob">
+          <div className="knob__head">
+            <span className="knob__name">{t('부모')}</span>
+          </div>
+          <select
+            className="input"
+            value={typeof selLayer.parent === 'number' ? String(selLayer.parent) : ''}
+            title={t('자식이 부모의 이동·회전·스케일을 따라갑니다 (걸 때 화면 위치는 유지)')}
+            onChange={(e) => {
+              const v = e.target.value
+              if (v === '') setLayerParent(idx, null)
+              else {
+                const ti = layers.findIndex((l) => (l as Record<string, unknown>).ind === Number(v))
+                if (ti >= 0) setLayerParent(idx, ti)
+              }
+            }}
+          >
+            <option value="">{t('없음')}</option>
+            {layers.map((l, i) => {
+              const lr = l as Record<string, unknown>
+              if (i === idx || typeof lr.ind !== 'number') return null
+              return (
+                <option key={i} value={String(lr.ind)}>
+                  {String(lr.nm ?? t('레이어 {n}').replace('{n}', String(i + 1)))}
+                </option>
+              )
+            })}
+          </select>
+        </div>
+      )}
 
       {/* 블렌드 모드 — Lottie bm, 내보낸 JSON에도 그대로 실림 */}
       <div className="knob">
