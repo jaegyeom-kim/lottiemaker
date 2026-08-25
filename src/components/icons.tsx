@@ -19,10 +19,11 @@ export function MatteIcon(p: SVGProps<SVGSVGElement>) {
 }
 
 /** picture_in_picture_alt — 부모 설정 (사각 안 사각). */
+/** Material 'link' — 부모 연결 (픽처인픽처 글리프는 부모로 안 읽혀 교체). */
 export function ParentIcon(p: SVGProps<SVGSVGElement>) {
   return (
     <Icon {...p}>
-      <path d="M19 11h-8v6h8v-6zm4 8V5a2 2 0 0 0-2-2H3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2zm-2 .02H3V4.97h18v14.05z" />
+      <path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z" />
     </Icon>
   )
 }
