@@ -79,6 +79,32 @@ ok(before && after && Math.hypot(after.x - before.x, after.y - before.y) < 2, `�
   ok(childBox && Math.abs(childBox.x - (before.x + (after.w / (await page.$eval('.preview__lottiewrap', (e) => e.getBoundingClientRect().width)) ) * 0 + ((80 / 512) * (await page.$eval('.preview__lottiewrap', (e) => e.getBoundingClientRect().width))))) < 4, `부모 이동 → 자식 박스 +80 (${childBox ? (childBox.x - before.x).toFixed(0) : '?'}px)`)
 }
 
+// 드래그 중간에도 자식 동반 — 부모를 끌면서 릴리즈 전 자식 렌더 이동 확인
+{
+  await page.mouse.click(...(await tc(240, 150))) // A 선택
+  await page.waitForTimeout(300)
+  const childRect0 = await page.$eval('.preview__lottiewrap', (w) => {
+    const g = w.querySelectorAll('svg > g > g')[0] // 레이어 0 = 자식 B
+    const r = g.getBoundingClientRect()
+    return { x: r.x, y: r.y }
+  })
+  await page.mouse.move(...(await tc(240, 150)))
+  await page.mouse.down()
+  await page.mouse.move(...(await tc(300, 210)), { steps: 6 }) // 릴리즈 안 함
+  await page.waitForTimeout(150)
+  const childRectMid = await page.$eval('.preview__lottiewrap', (w) => {
+    const g = w.querySelectorAll('svg > g > g')[0]
+    const r = g.getBoundingClientRect()
+    return { x: r.x, y: r.y }
+  })
+  const midDx = childRectMid.x - childRect0.x
+  ok(midDx > 20, `드래그 중 자식 실시간 동반 (+${midDx.toFixed(0)}px)`)
+  // 원위치로 되돌리고 릴리즈 — 이후 케이스 좌표 유지
+  await page.mouse.move(...(await tc(240, 150)), { steps: 4 })
+  await page.mouse.up()
+  await page.waitForTimeout(1300)
+}
+
 // 부모 회전 45° 후 자식 드래그 → 목표 도달 (월드→로컬 변환)
 {
   await page.mouse.click(...(await tc(240, 150))) // A 선택

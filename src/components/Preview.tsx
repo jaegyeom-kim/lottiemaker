@@ -9,7 +9,7 @@ import { durationSec, parseLottie, type LottieJson } from '../lib/lottieUtils'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
 import { TextDialog } from './TextControls'
 import {
-  layerHalfOf, layerAabbOf, layerBaseOf, layerRotationOf, normKf, kfValueAt, pathKAt, gradKAt, findSinglePathShape, collectShapeItems, segTangents, parentWorldOf, invMat, applyVMat,
+  layerHalfOf, layerAabbOf, layerBaseOf, layerRotationOf, normKf, kfValueAt, pathKAt, gradKAt, findSinglePathShape, collectShapeItems, segTangents, parentWorldOf, parentChainOf, invMat, applyVMat,
   kfChannelKeys, normSel, animSpans, kfFallbackValue,
   type CustomPayload, type CustomKf, type CustomSel, type KfChannel,
 } from '../lib/customBuilder'
@@ -222,13 +222,22 @@ export default function Preview() {
     if (!els?.length) return false
     const st = useEditor.getState()
     const n = st.sourceData?.layers.length ?? 0
-    const sel = [...new Set(only !== undefined ? [only] : st.customIdxs)].filter(
+    const base = [...new Set(only !== undefined ? [only] : st.customIdxs)].filter(
       (i) =>
         i >= 0 &&
         i < n &&
         (st.sourceData?.layers[i] as Record<string, unknown> | undefined)?.xlock !== true,
     )
-    if (!sel.length) return false
+    if (!base.length) return false
+    // 자손 레이어 동반 — 부모를 끌면 자식도 실시간으로 따라오게 (커밋은 부모만, 자식은 재구축이 반영)
+    const selSet = new Set(base)
+    if (st.sourceData) {
+      for (let j = 0; j < n; j++) {
+        if (selSet.has(j)) continue
+        if (parentChainOf(st.sourceData, j).some((pj) => selSet.has(pj))) selSet.add(j)
+      }
+    }
+    const sel = [...selSet]
     if (!dragOverlay.current) dragOverlay.current = new Map()
     let applied = 0
     for (const i of sel) {
