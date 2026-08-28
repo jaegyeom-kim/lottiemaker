@@ -17,7 +17,7 @@ import {
   type CustomSel, type CustomPayload, type CustomKf, type KfChannel, type Bezier4,
   type KfSelItem, type PathShapeK,
   kfChannelKeys, applyTrimChannels, applyPathChannel, pathKAt, pkMismatch, subdividePathK, findSinglePathShape, collectShapeItems, applyGradChannel, gradKAt, type GradSnap,
-  parentWorldOf, invMat, applyVMat, extractTrimToKf, layerScaleOf, layerAabbOf, layerRotationOf, layerBaseOf,
+  parentWorldOf, parentChainOf, invMat, applyVMat, extractTrimToKf, layerScaleOf, layerAabbOf, layerRotationOf, layerBaseOf, localBaseOf, localRotationOf,
 } from './lib/customBuilder'
 
 const HISTORY_CAP = 50
@@ -416,6 +416,8 @@ interface EditorState {
   applyKfSpring: (z: number) => void
   /** 다중 선택 레이어의 키를 위→아래 순서로 step 프레임씩 계단 오프셋. */
   staggerLayers: (step: number) => void
+  /** 부모 모션을 delay 프레임 지연시킨 팔로우스루(2차 모션)를 자식 위치/회전 키로 베이크. */
+  bakeFollowThrough: (li: number, delay: number) => void
   /** AI 모션 플랜 적용 — 대상 레이어를 키프레임 모드로 전환하고 키 통째 교체, 언두 1칸. */
   /** 반환 = 실제 적용된 레이어 수 (잠긴 레이어는 스킵). */
   applyAiMotion: (plan: AiMotionPlan) => number
@@ -3090,6 +3092,90 @@ export const useEditor = create<EditorState>((set, get) => {
         })
       }
       if (!touched) return
+      const applied = applyKnobs(src, templateKnobs, knobValues)
+      push({
+        animationData: applied,
+        sourceData: src,
+        colorGroups: extractColorGroups(applied),
+        kfSel: [],
+      })
+    },
+
+    bakeFollowThrough: (li, delay) => {
+      const { sourceData, templateKnobs, knobValues } = get()
+      if (!sourceData || delay <= 0) return
+      const layer = sourceData.layers[li] as Record<string, unknown> | undefined
+      if (!layer || typeof layer.parent !== 'number') return
+      const chain = parentChainOf(sourceData, li)
+      if (!chain.length) return
+      // 부모 체인의 모션 키 시각 수집 — 없으면 베이크할 게 없음
+      const times = new Set<number>()
+      for (const j of chain) {
+        const pxkf = normKf((sourceData.layers[j] as Record<string, unknown>).xkf as Partial<CustomKf> | undefined)
+        if (!pxkf.on) continue
+        for (const k of pxkf.keys)
+          if (k.p !== undefined || k.r !== undefined || k.s !== undefined) times.add(k.t)
+      }
+      if (times.size < 2) return
+      const op = sourceData.op
+      const samples = new Set<number>([0])
+      for (const t2 of times) {
+        samples.add(Math.min(op, t2))
+        samples.add(Math.min(op, Math.round((t2 + delay) * 10) / 10))
+        samples.add(Math.min(op, Math.round((t2 + delay / 2) * 10) / 10))
+      }
+      const ts = [...samples].sort((a, b) => a - b)
+      // 자식의 로컬 기준 (부모 공간) — 자식 자체 p/r 키는 베이크로 대체된다
+      const base = localBaseOf(sourceData, li) ?? [256, 256]
+      const baseR = localRotationOf(sourceData, li)
+      const src = structuredClone(sourceData)
+      const done = editKfLayerIn(src, li, (xkf) => {
+        xkf.on = true
+        // ponytail: 자식의 기존 p/r 애니메이션과 합성하지 않고 대체 — 겹치면 수동 병합
+        const kept = xkf.keys
+          .map((k) => {
+            const c = { ...k }
+            delete c.p
+            delete c.r
+            if (c.e) {
+              const e = { ...c.e }
+              delete e.p
+              delete e.r
+              c.e = Object.keys(e).length ? e : undefined
+            }
+            return c
+          })
+          .filter((k) => KF_ALL_CHS.some((c) => k[c] !== undefined))
+        const baked: KfKey[] = []
+        let anyRot = false
+        for (const t2 of ts) {
+          const now = parentWorldOf(src, li, t2)
+          const lag = parentWorldOf(src, li, Math.max(0, t2 - delay))
+          const w = applyMatXY(lag.m, base[0], base[1])
+          const local = applyMatXY(invMat(now.m), w[0], w[1])
+          const rLag = lag.rot - now.rot
+          if (Math.abs(rLag) > 0.05) anyRot = true
+          const k: KfKey = {
+            t: t2,
+            p: [Math.round(local[0] * 10) / 10, Math.round(local[1] * 10) / 10],
+            r: Math.round((baseR + rLag) * 10) / 10,
+            e: { p: [0.37, 0, 0.63, 1], r: [0.37, 0, 0.63, 1] },
+          }
+          baked.push(k)
+        }
+        if (!anyRot) baked.forEach((k) => { delete k.r; if (k.e) delete k.e.r })
+        // 같은 시각 kept 키에 병합
+        for (const k of baked) {
+          const dup = kept.find((x) => Math.abs(x.t - k.t) < 0.5)
+          if (dup) {
+            dup.p = k.p
+            if (k.r !== undefined) dup.r = k.r
+            dup.e = { ...(dup.e ?? {}), ...(k.e ?? {}) }
+          } else kept.push(k)
+        }
+        xkf.keys = kept.sort((a, b) => a.t - b.t)
+      })
+      if (!done) return
       const applied = applyKnobs(src, templateKnobs, knobValues)
       push({
         animationData: applied,

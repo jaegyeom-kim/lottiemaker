@@ -132,4 +132,28 @@ ok(
   `둘째 레이어 +4f (${before0[1].join(',')} → ${after0[1].join(',')})`,
 )
 
+// ── 팔로우스루 — 행0을 행1의 자식으로 걸고 '팔로우 중' 베이크 ──
+{
+  const r0 = await (await page.$$('.timeline__label--row'))[0].boundingBox()
+  await page.mouse.click(r0.x + 14, r0.y + r0.height / 2)
+  await page.waitForTimeout(300)
+  const parentKnob = page.locator('.knob', { hasText: /^부모/ })
+  const val = await parentKnob.locator('option').nth(1).getAttribute('value')
+  await parentKnob.locator('select').selectOption(val)
+  await page.waitForTimeout(1300)
+  const ftBtn = page.locator('.chip', { hasText: /^팔로우 중$/ })
+  ok((await ftBtn.count()) === 1, '부모 걸면 팔로우스루 칩 표시')
+  await ftBtn.click()
+  await page.waitForTimeout(1300)
+  d = await src()
+  const ks = (d.layers[0].xkf?.keys ?? []).filter((k) => k.p !== undefined)
+  ok(ks.length >= 5, `팔로우스루 베이크 (${ks.length}키)`)
+  const xs2 = ks.map((k) => k.p[0])
+  const dev = Math.max(...xs2) - Math.min(...xs2)
+  ok(dev > 1, `지연 델타 존재 (Δx ${dev.toFixed(1)}px)`)
+  ok(ks[0].t === 0, '0프레임 기준 키')
+  // 시작(부모 이동 전)과 끝(정착 후) 로컬 위치 동일 — 랙은 이동 중에만
+  ok(Math.abs(xs2[0] - xs2[xs2.length - 1]) < 0.5, '시작=끝 정착 (랙은 과도 구간만)')
+}
+
 await done(browser)

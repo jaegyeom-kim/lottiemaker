@@ -35,7 +35,7 @@ export default function TransformPanel() {
     setCustomChannelsLive, setKfChannelLive, commitEdit,
     nudgeCustomBase, setLayerBlend, setLayerStroke, setShapeGeom, togglePathKf, matchPathPoints,
     setLayerFill, setLayerFillStopsLive, toggleGradKf, addLayerStroke, removeLayerStroke,
-    setLayerParent,
+    setLayerParent, bakeFollowThrough,
   } = useEditor()
 
   const layers = sourceData?.layers ?? []
@@ -453,6 +453,31 @@ export default function TransformPanel() {
               )
             })}
           </select>
+          {typeof selLayer.parent === 'number' && (
+            <>
+              <div className="knob__chips" style={{ marginTop: 6 }}>
+                {(
+                  [
+                    ['약', 2],
+                    ['중', 4],
+                    ['강', 7],
+                  ] as const
+                ).map(([label, d]) => (
+                  <button
+                    key={label}
+                    className="chip"
+                    title={t('팔로우스루 베이크 — 부모 모션을 {n}프레임 지연시켜 자식 키로 (꼬리·안테나 2차 모션)').replace('{n}', String(d))}
+                    onClick={() => bakeFollowThrough(idx, d)}
+                  >
+                    {t('팔로우 {label}').replace('{label}', t(label))}
+                  </button>
+                ))}
+              </div>
+              <p className="knob__note">
+                {t('부모가 움직인 뒤 따라붙는 2차 모션을 위치/회전 키로 베이크합니다. 부모에 모션 키가 있어야 합니다.')}
+              </p>
+            </>
+          )}
         </div>
       )}
 

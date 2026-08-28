@@ -1100,7 +1100,7 @@ function localScaleOf(doc: LottieJson, i: number, frame?: number): number {
 }
 
 /** 문서에서 레이어 i의 기준 위치 (첫 키프레임 또는 정적 값). atFrame = 키프레임 모드 보간 시각. */
-function localBaseOf(doc: LottieJson, i: number, atFrame?: number): [number, number] | null {
+export function localBaseOf(doc: LottieJson, i: number, atFrame?: number): [number, number] | null {
   const layer = doc.layers[i] as (Record<string, unknown> & { ks?: unknown }) | undefined
   if (!layer) return null
   // 키프레임 모드 — 파킹 프레임의 보간 위치 (박스가 애니메이션 위치를 따라감)
@@ -1125,7 +1125,7 @@ function localBaseOf(doc: LottieJson, i: number, atFrame?: number): [number, num
 }
 
 /** 정착 회전(도) — 정적 ks.r 우선, 애니메이션 중엔 xkf r 채널/xsel. layerScaleOf와 같은 규칙. */
-function localRotationOf(doc: LottieJson, i: number, frame?: number): number {
+export function localRotationOf(doc: LottieJson, i: number, frame?: number): number {
   const layer = doc.layers[i] as Record<string, unknown> | undefined
   if (!layer) return 0
   const ksR = (layer.ks as Record<string, unknown> | undefined)?.r as
