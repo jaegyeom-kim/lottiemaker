@@ -414,6 +414,8 @@ interface EditorState {
   setKfSmooth: (v: boolean) => void
   /** 선택된 도착 키(p/s/r)에 감쇠 스프링 정착 베이크 — z 낮을수록 출렁. */
   applyKfSpring: (z: number) => void
+  /** 다중 선택 레이어의 키를 위→아래 순서로 step 프레임씩 계단 오프셋. */
+  staggerLayers: (step: number) => void
   /** AI 모션 플랜 적용 — 대상 레이어를 키프레임 모드로 전환하고 키 통째 교체, 언두 1칸. */
   /** 반환 = 실제 적용된 레이어 수 (잠긴 레이어는 스킵). */
   applyAiMotion: (plan: AiMotionPlan) => number
@@ -850,6 +852,18 @@ export const useEditor = create<EditorState>((set, get) => {
     layer.ip = clipA
     layer.op = clipB
     return true
+  }
+
+  /** 레이어 인덱스가 밀리는 편집에서 타임라인 채널 공개(tlReveal) 인덱스 리매핑.
+   *  map이 null을 주면 그 레이어의 공개 상태를 버린다. */
+  const remapReveal = (map: (li: number) => number | null): Record<number, KfChannel[]> => {
+    const cur = get().tlReveal
+    const next: Record<number, KfChannel[]> = {}
+    for (const [k, v] of Object.entries(cur)) {
+      const to = map(Number(k))
+      if (to !== null && v.length) next[to] = v
+    }
+    return next
   }
 
   /** 선택 레이어의 xkf를 변형하고 채널·클립을 재생성 — 키프레임 모드 편집의 공통 경로.
@@ -1481,6 +1495,7 @@ export const useEditor = create<EditorState>((set, get) => {
         sourceData: src,
         colorGroups: extractColorGroups(applied),
         kfSel: [], // 맨 위에 끼어들며 레이어 인덱스가 밀림
+        tlReveal: remapReveal((li) => li + 1),
         customIdx: 0,
         customIdxs: [0],
       })
@@ -2082,6 +2097,7 @@ export const useEditor = create<EditorState>((set, get) => {
           sourceData: src,
           colorGroups: extractColorGroups(applied),
           kfSel: [],
+          tlReveal: remapReveal((li) => li + sc.main.length),
           customIdx: 0,
           customIdxs: [0],
         })
@@ -2147,6 +2163,7 @@ export const useEditor = create<EditorState>((set, get) => {
         sourceData: src,
         colorGroups: extractColorGroups(applied),
         kfSel: [],
+        tlReveal: remapReveal((li) => li + conv.layers.length),
         customIdx: 0,
         customIdxs: [0],
       })
@@ -2198,6 +2215,9 @@ export const useEditor = create<EditorState>((set, get) => {
         customIdx: nextIdx,
         customIdxs: [nextIdx],
         kfSel: [], // 레이어 인덱스가 바뀌므로 키 선택 무효화
+        tlReveal: remapReveal((li) =>
+          uniq.includes(li) ? null : li - uniq.filter((u) => u < li).length,
+        ),
       })
     },
 
@@ -2235,6 +2255,11 @@ export const useEditor = create<EditorState>((set, get) => {
         customIdx: to,
         customIdxs: [to],
         kfSel: [], // 레이어 인덱스가 바뀌므로 키 선택 무효화
+        tlReveal: remapReveal((li) => {
+          if (li === from) return to
+          const a = li > from ? li - 1 : li // from 제거 후
+          return a >= to ? a + 1 : a // to 삽입 후
+        }),
       })
     },
 
@@ -2278,6 +2303,7 @@ export const useEditor = create<EditorState>((set, get) => {
         customIdx: i,
         customIdxs: [i],
         kfSel: [], // 아래 레이어 인덱스가 밀리므로 키 선택 무효화
+        tlReveal: remapReveal((li) => (li > i ? li + 1 : li)),
       })
     },
 
@@ -3063,6 +3089,36 @@ export const useEditor = create<EditorState>((set, get) => {
           if (xkf.keys.length > before) touched++
         })
       }
+      if (!touched) return
+      const applied = applyKnobs(src, templateKnobs, knobValues)
+      push({
+        animationData: applied,
+        sourceData: src,
+        colorGroups: extractColorGroups(applied),
+        kfSel: [],
+      })
+    },
+
+    staggerLayers: (step) => {
+      const { customIdxs, sourceData, templateKnobs, knobValues } = get()
+      if (customIdxs.length < 2 || !sourceData || !step) return
+      const src = structuredClone(sourceData)
+      const order = [...customIdxs].sort((a, b) => a - b)
+      let touched = 0
+      order.forEach((li, i) => {
+        if (!i) return // 첫 레이어는 기준
+        editKfLayerIn(src, li, (xkf) => {
+          if (!xkf.keys.length) return
+          const maxT = Math.max(...xkf.keys.map((k) => k.t))
+          // 마지막 키가 컴프 길이를 넘지 않게 시프트 상한
+          const shift = Math.min(step * i, Math.max(0, src.op - maxT))
+          if (shift <= 0) return
+          xkf.keys.forEach((k) => {
+            k.t = Math.round((k.t + shift) * 10) / 10
+          })
+          touched++
+        })
+      })
       if (!touched) return
       const applied = applyKnobs(src, templateKnobs, knobValues)
       push({

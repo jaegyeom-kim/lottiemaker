@@ -71,7 +71,7 @@ export default function Timeline({
     setCustomChannelsLive, commitEdit, setPlaying, setCustomIdx,
     moveKfClipLive, removeKfChannel, setKfChannel, addPathKey, addGradKey,
     setKfSegEase, setKfSegEaseLive, bakeSpringSegEase, bakeBounceSegEase,
-    setKfSel, moveKfKeysLive, reverseKfSel, toggleCustomSel, setCustomSelList,
+    setKfSel, moveKfKeysLive, reverseKfSel, staggerLayers, toggleCustomSel, setCustomSelList,
     revealChannels,
   } = useEditor()
   const tlReveal = useEditor((s) => s.tlReveal)
@@ -699,6 +699,18 @@ export default function Timeline({
         <button className="tlbtn" title={t('그래프 에디터')} onClick={() => setGraphOpen(true)}>
           <GraphIcon />
         </button>
+        {customIdxs.length >= 2 && (
+          <span className="timeline__selbadge">
+            {t('레이어 {n}개').replace('{n}', String(customIdxs.length))}
+            <button
+              className="timeline__selact"
+              title={t('키프레임 계단 오프셋 — 위에서 아래로 4프레임씩 (⇧ 8f)')}
+              onClick={(e) => staggerLayers(e.shiftKey ? 8 : 4)}
+            >
+              {t('⧉ 스태거')}
+            </button>
+          </span>
+        )}
         {kfSel.length > 0 && (
           <span className="timeline__selbadge">
             {t('키 {n}개 선택 — 드래그 이동 · Delete 삭제').replace('{n}', String(kfSel.length))}

@@ -74,4 +74,62 @@ d = await src()
 pKeys = d.layers[0].xkf.keys.filter((k) => k.p !== undefined)
 ok(pKeys.length >= 4, `리두 → 베이크 복원 (${pKeys.length}키)`)
 
+// ── 스태거 — 두 번째 레이어 추가 후 ⇧선택 → 4f 계단 ──
+await page.locator('.drawbar button[title*="사각형"]').click()
+await page.mouse.move(...(await tc(100, 400)))
+await page.mouse.down()
+await page.mouse.move(...(await tc(180, 470)), { steps: 4 })
+await page.mouse.up()
+await page.waitForTimeout(900)
+// 새 레이어(행 0) 선택 → 키프레임 모드 → 위치 키 2개
+{
+  const r0 = await (await page.$$('.timeline__label--row'))[0].boundingBox()
+  await page.mouse.click(r0.x + 14, r0.y + r0.height / 2)
+  await page.waitForTimeout(200)
+}
+await page.locator('.opttab', { hasText: /^키프레임$/ }).click()
+await page.waitForTimeout(300)
+// 행 트월 버튼으로 프로퍼티 공개 (키보드 P 대신 — 결정적)
+await (await (await page.$$('.timeline__label--row'))[0].$('.timeline__twirl--end')).click()
+await page.waitForTimeout(400)
+await page.locator('.timeline__label--prop', { hasText: /위치/ }).first().locator('.timeline__propkey').click()
+await page.waitForTimeout(800)
+{
+  const ruler2 = await page.locator('.timeline__ruler').boundingBox()
+  await page.mouse.click(ruler2.x + (30 / op) * ruler2.width, ruler2.y + ruler2.height / 2)
+  await page.waitForTimeout(250)
+  await page.mouse.move(...(await tc(140, 435)))
+  await page.mouse.down()
+  await page.mouse.move(...(await tc(340, 435)), { steps: 6 })
+  await page.mouse.up()
+  await page.waitForTimeout(1300)
+}
+// 행0 클릭 → ⇧행1 = 두 레이어 선택 → 스태거 버튼
+{
+  const rows = await page.$$('.timeline__label--row')
+  const r0 = await rows[0].boundingBox()
+  await page.mouse.click(r0.x + 14, r0.y + r0.height / 2)
+  await page.waitForTimeout(200)
+  const r1 = await (await page.$$('.timeline__label--row'))[1].boundingBox()
+  await page.keyboard.down('Shift')
+  await page.mouse.click(r1.x + 14, r1.y + r1.height / 2)
+  await page.keyboard.up('Shift')
+  await page.waitForTimeout(300)
+}
+const staggerBtn = page.locator('.timeline__selact', { hasText: '스태거' })
+ok((await staggerBtn.count()) === 1, '다중 선택 → 스태거 버튼 표시')
+const before0 = (await src()).layers.map((l) => (l.xkf?.keys ?? []).map((k) => k.t))
+await staggerBtn.click()
+await page.waitForTimeout(1300)
+d = await src()
+const after0 = d.layers.map((l) => (l.xkf?.keys ?? []).map((k) => k.t))
+ok(
+  after0[0].every((t2, i) => t2 === before0[0][i]),
+  `첫 레이어 기준 유지 (${after0[0].join(',')})`,
+)
+ok(
+  after0[1].every((t2, i) => Math.abs(t2 - (before0[1][i] + 4)) < 0.11),
+  `둘째 레이어 +4f (${before0[1].join(',')} → ${after0[1].join(',')})`,
+)
+
 await done(browser)
