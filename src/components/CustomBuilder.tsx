@@ -4,6 +4,7 @@ import {
   getAiKey, setAiKey, verifyAiKey, summarizeDoc, generateMotion,
   getAiProvider, setAiProvider, getLocalUrl, getLocalModel, setLocalConfig,
   listLocalModels, generateMotionLocal, type AiProvider,
+  getGlmKey, setGlmKey, getGlmModel, setGlmModel, generateMotionGlm,
 } from '../lib/ai'
 import { useEditor } from '../store'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
@@ -425,6 +426,8 @@ function AiMotionPanel() {
   const [apiKey, setApiKeyState] = useState(getAiKey)
   const [editKey, setEditKey] = useState(false)
   const [provider, setProvider] = useState<AiProvider>(getAiProvider)
+  const [glmKey, setGlmKeyState] = useState(getGlmKey)
+  const [glmModel, setGlmModelState] = useState(getGlmModel)
   const [localModels, setLocalModels] = useState<string[]>([])
   const [localModel, setLocalModel] = useState(getLocalModel)
   // 로컬 프로바이더 — 모델 목록 로드 (Ollama /api/tags)
@@ -452,6 +455,7 @@ function AiMotionPanel() {
       }}
     >
       <option value="anthropic">Claude (API)</option>
+      <option value="glm">GLM (Z.ai)</option>
       <option value="local">{t('로컬 (Ollama)')}</option>
     </select>
   )
@@ -526,7 +530,16 @@ function AiMotionPanel() {
               signal: ac.signal,
               onProgress: setStatus,
             })
-          : await generateMotion({ apiKey, prompt: req, doc, signal: ac.signal, onProgress: setStatus })
+          : provider === 'glm'
+            ? await generateMotionGlm({
+                apiKey: glmKey,
+                model: glmModel,
+                prompt: req,
+                doc,
+                signal: ac.signal,
+                onProgress: setStatus,
+              })
+            : await generateMotion({ apiKey, prompt: req, doc, signal: ac.signal, onProgress: setStatus })
       setStatus(t('모션 적용 중'))
       const applied = applyAiMotion(plan)
       if (applied === 0) {
@@ -549,7 +562,67 @@ function AiMotionPanel() {
     }
   }
 
-  if (provider === 'anthropic' && (!apiKey || editKey)) {
+  if ((provider === 'anthropic' && (!apiKey || editKey)) || (provider === 'glm' && (!glmKey || editKey))) {
+    const isGlm = provider === 'glm'
+    if (isGlm) {
+      return (
+        <div className="knob aipanel">
+          <div className="aipanel__row">{providerSelect}</div>
+          <p className="knob__note">
+            {t('Z.ai API 키가 필요합니다 (코딩 플랜 키도 가능 — 엔드포인트 자동 인식). 키는 이 브라우저에만 저장됩니다.')}
+          </p>
+          <div className="aipanel__keyrow">
+            <input
+              className="input"
+              type="password"
+              placeholder={t('Z.ai API 키')}
+              value={keyDraft}
+              onChange={(e) => setKeyDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && keyDraft.trim()) {
+                  setGlmKey(keyDraft.trim())
+                  setGlmKeyState(keyDraft.trim())
+                  setKeyDraft('')
+                  setEditKey(false)
+                }
+              }}
+              spellCheck={false}
+            />
+            <button
+              className="btn"
+              disabled={!keyDraft.trim()}
+              onClick={() => {
+                setGlmKey(keyDraft.trim())
+                setGlmKeyState(keyDraft.trim())
+                setKeyDraft('')
+                setEditKey(false)
+              }}
+            >
+              {t('저장')}
+            </button>
+            {editKey && (
+              <button className="btn" onClick={() => { setEditKey(false); setKeyDraft('') }}>
+                {t('취소')}
+              </button>
+            )}
+          </div>
+          {msgEl}
+          {editKey && glmKey && (
+            <button
+              className="aipanel__keybtn"
+              onClick={() => {
+                setGlmKey('')
+                setGlmKeyState('')
+                setEditKey(false)
+                setKeyDraft('')
+              }}
+            >
+              {t('저장된 키 삭제')}
+            </button>
+          )}
+        </div>
+      )
+    }
     return (
       <div className="knob aipanel">
         <div className="aipanel__row">{providerSelect}</div>
@@ -599,6 +672,18 @@ function AiMotionPanel() {
     <div className="knob aipanel">
       <div className="aipanel__row">
         {providerSelect}
+        {provider === 'glm' && (
+          <input
+            className="input input--inline aipanel__glmmodel"
+            value={glmModel}
+            spellCheck={false}
+            title={t('GLM 모델 id')}
+            onChange={(e) => {
+              setGlmModelState(e.target.value)
+              setGlmModel(e.target.value)
+            }}
+          />
+        )}
         {provider === 'local' && (
           <select
             className="input input--inline"

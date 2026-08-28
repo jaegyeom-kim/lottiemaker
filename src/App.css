@@ -4576,6 +4576,12 @@ body.drag-cross * { cursor: crosshair !important; }
 .aipanel__row select {
   min-width: 0;
 }
+.aipanel__glmmodel {
+  flex: 1;
+  min-width: 0;
+  padding: 0 6px;
+  font-size: 11px;
+}
 
 /* AI 진행 상태 버블 — 채팅 타이핑 인디케이터 느낌 */
 .aipanel__status {

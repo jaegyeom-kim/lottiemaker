@@ -12,7 +12,45 @@ const LOCAL_URL_STORAGE = 'lottiemaker.ai.localUrl'
 const LOCAL_MODEL_STORAGE = 'lottiemaker.ai.localModel'
 export const DEFAULT_LOCAL_URL = 'http://localhost:11434'
 
-export type AiProvider = 'anthropic' | 'local'
+export type AiProvider = 'anthropic' | 'glm' | 'local'
+
+// ── GLM (Z.ai) — OpenAI 호환, 브라우저 CORS 허용 확인됨 ──
+const GLM_KEY_STORAGE = 'lottiemaker.glm.key'
+const GLM_MODEL_STORAGE = 'lottiemaker.glm.model'
+const GLM_BASE_STORAGE = 'lottiemaker.glm.base'
+export const DEFAULT_GLM_MODEL = 'glm-5.3-flash'
+/** 코딩 플랜 키(opencode 등)는 coding 경로, 일반 API 키는 paas 경로 — 401이면 자동 전환. */
+const GLM_BASES = ['https://api.z.ai/api/coding/paas/v4', 'https://api.z.ai/api/paas/v4']
+
+export function getGlmKey(): string {
+  try {
+    return localStorage.getItem(GLM_KEY_STORAGE) ?? ''
+  } catch {
+    return ''
+  }
+}
+export function setGlmKey(key: string) {
+  try {
+    if (key) localStorage.setItem(GLM_KEY_STORAGE, key)
+    else localStorage.removeItem(GLM_KEY_STORAGE)
+  } catch {
+    // 무시
+  }
+}
+export function getGlmModel(): string {
+  try {
+    return localStorage.getItem(GLM_MODEL_STORAGE) || DEFAULT_GLM_MODEL
+  } catch {
+    return DEFAULT_GLM_MODEL
+  }
+}
+export function setGlmModel(m: string) {
+  try {
+    localStorage.setItem(GLM_MODEL_STORAGE, m || DEFAULT_GLM_MODEL)
+  } catch {
+    // 무시
+  }
+}
 
 export function getAiProvider(): AiProvider {
   try {
@@ -473,6 +511,125 @@ export async function generateMotionLocal(opts: {
   } catch (e) {
     if ((e as Error).name === 'AbortError') throw e
     // 스키마 위반/파싱 실패 — 1회 재시도 (지시 강화)
+    onProgress?.(t('형식이 어긋나 다시 요청 중'))
+    return ask('\n\n(이전 응답이 JSON 스키마에 맞지 않았습니다. 지시된 JSON 오브젝트 하나만 출력하세요.)')
+  }
+}
+
+/** GLM(Z.ai) — OpenAI 호환 SSE + JSON 모드, 엔드포인트 자동 전환(코딩 플랜/일반), 1회 재시도. */
+export async function generateMotionGlm(opts: {
+  apiKey: string
+  model: string
+  prompt: string
+  doc: AiDocSummary
+  signal?: AbortSignal
+  onProgress?: (status: string) => void
+}): Promise<AiMotionPlan> {
+  const { apiKey, model, prompt, doc, signal, onProgress } = opts
+  let bases: string[]
+  try {
+    const saved = localStorage.getItem(GLM_BASE_STORAGE)
+    bases = saved ? [saved, ...GLM_BASES.filter((b) => b !== saved)] : [...GLM_BASES]
+  } catch {
+    bases = [...GLM_BASES]
+  }
+  const askAt = async (base: string, extra: string): Promise<AiMotionPlan> => {
+    onProgress?.(t('GLM에 연결 중'))
+    let res: Response
+    try {
+      res = await fetch(`${base}/chat/completions`, {
+        method: 'POST',
+        signal,
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          stream: true,
+          temperature: 0.4,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: systemPrompt(doc, 'json') },
+            {
+              role: 'user',
+              content: `<composition>\n${JSON.stringify(doc)}\n</composition>\n\n요청: ${prompt}${extra}`,
+            },
+          ],
+        }),
+      })
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') throw e
+      throw new Error(t('네트워크 오류 — 인터넷 연결을 확인하세요'))
+    }
+    if (!res.ok) {
+      let detail = ''
+      try {
+        const j = (await res.json()) as { error?: { message?: string }; msg?: string }
+        detail = j.error?.message ?? j.msg ?? ''
+      } catch {
+        // 본문 없음
+      }
+      const err = new Error(
+        res.status === 401 || res.status === 403
+          ? t('GLM 키 인증 실패 — 키와 플랜(코딩/일반)을 확인하세요') + (detail ? ` (${detail})` : '')
+          : detail || t('API 오류 ({status})').replace('{status}', String(res.status)),
+      ) as Error & { status?: number }
+      err.status = res.status
+      throw err
+    }
+    try {
+      localStorage.setItem(GLM_BASE_STORAGE, base) // 성공 엔드포인트 기억
+    } catch {
+      // 무시
+    }
+    // OpenAI 형식 SSE — choices[0].delta.content 누적
+    const reader = res.body?.getReader()
+    let acc = ''
+    if (reader) {
+      const dec = new TextDecoder()
+      let buf = ''
+      const eat = (ln: string) => {
+        const m = ln.startsWith('data:') ? ln.slice(5).trim() : ''
+        if (!m || m === '[DONE]') return
+        try {
+          const j = JSON.parse(m) as { choices?: { delta?: { content?: string } }[] }
+          acc += j.choices?.[0]?.delta?.content ?? ''
+        } catch {
+          // 부분 라인 — 무시
+        }
+      }
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += dec.decode(value, { stream: true })
+        const lines = buf.split('\n')
+        buf = lines.pop() ?? ''
+        lines.forEach(eat)
+        if (acc.length) onProgress?.(t('키프레임 작성 중 — {n}자').replace('{n}', String(acc.length)))
+      }
+      eat(buf)
+    }
+    onProgress?.(t('모션 검증 중'))
+    // 모델이 마크다운 펜스로 감싸는 경우 방어
+    const clean = acc.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '')
+    const parsed = JSON.parse(clean) as unknown
+    return sanitizePlan(parsed, doc.layers.length, doc.op)
+  }
+  const ask = async (extra: string): Promise<AiMotionPlan> => {
+    try {
+      return await askAt(bases[0], extra)
+    } catch (e) {
+      const st = (e as Error & { status?: number }).status
+      // 코딩 플랜 ↔ 일반 API 경로 자동 전환
+      if ((st === 401 || st === 403 || st === 404) && bases[1]) return askAt(bases[1], extra)
+      throw e
+    }
+  }
+  try {
+    return await ask('')
+  } catch (e) {
+    if ((e as Error).name === 'AbortError' || (e as Error & { status?: number }).status) throw e
     onProgress?.(t('형식이 어긋나 다시 요청 중'))
     return ask('\n\n(이전 응답이 JSON 스키마에 맞지 않았습니다. 지시된 JSON 오브젝트 하나만 출력하세요.)')
   }
