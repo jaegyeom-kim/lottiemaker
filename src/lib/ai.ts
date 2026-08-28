@@ -391,10 +391,12 @@ export async function generateMotionLocal(opts: {
   prompt: string
   doc: AiDocSummary
   signal?: AbortSignal
+  onProgress?: (status: string) => void
 }): Promise<AiMotionPlan> {
-  const { url, model, prompt, doc, signal } = opts
+  const { url, model, prompt, doc, signal, onProgress } = opts
   const base = url.replace(/\/$/, '')
   const ask = async (extra: string): Promise<AiMotionPlan> => {
+    onProgress?.(t('로컬 모델에 연결 중'))
     let res: Response
     try {
       res = await fetch(`${base}/api/chat`, {
@@ -403,7 +405,7 @@ export async function generateMotionLocal(opts: {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           model,
-          stream: false,
+          stream: true,
           format: 'json',
           options: { temperature: 0.4, num_ctx: 8192 },
           messages: [
@@ -432,9 +434,38 @@ export async function generateMotionLocal(opts: {
         throw new Error(t('모델 "{m}"이 없습니다 — ollama pull 후 다시 시도하세요').replace('{m}', model))
       throw new Error(detail || t('로컬 LLM 오류 ({status})').replace('{status}', String(res.status)))
     }
-    const data = (await res.json()) as { message?: { content?: string } }
-    const text = data.message?.content ?? ''
-    const parsed = JSON.parse(text) as unknown // 실패 시 catch에서 재시도
+    // NDJSON 스트림 — 청크마다 진행 표시 (모델 로딩 중엔 첫 청크가 늦다)
+    onProgress?.(t('모델 준비 중 (첫 응답 대기)'))
+    const reader = res.body?.getReader()
+    let acc = ''
+    if (reader) {
+      const dec = new TextDecoder()
+      let buf = ''
+      const eat = (ln: string) => {
+        if (!ln.trim()) return
+        try {
+          const j = JSON.parse(ln) as { message?: { content?: string } }
+          acc += j.message?.content ?? ''
+        } catch {
+          // 부분 라인 — 무시
+        }
+      }
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += dec.decode(value, { stream: true })
+        const lines = buf.split('\n')
+        buf = lines.pop() ?? ''
+        lines.forEach(eat)
+        if (acc.length) onProgress?.(t('키프레임 작성 중 — {n}자').replace('{n}', String(acc.length)))
+      }
+      eat(buf) // 트레일링 개행 없는 마지막 라인
+    } else {
+      const data = (await res.json()) as { message?: { content?: string } }
+      acc = data.message?.content ?? ''
+    }
+    onProgress?.(t('모션 검증 중'))
+    const parsed = JSON.parse(acc) as unknown // 실패 시 catch에서 재시도
     return sanitizePlan(parsed, doc.layers.length, doc.op)
   }
   try {
@@ -442,6 +473,7 @@ export async function generateMotionLocal(opts: {
   } catch (e) {
     if ((e as Error).name === 'AbortError') throw e
     // 스키마 위반/파싱 실패 — 1회 재시도 (지시 강화)
+    onProgress?.(t('형식이 어긋나 다시 요청 중'))
     return ask('\n\n(이전 응답이 JSON 스키마에 맞지 않았습니다. 지시된 JSON 오브젝트 하나만 출력하세요.)')
   }
 }
@@ -451,8 +483,10 @@ export async function generateMotion(opts: {
   prompt: string
   doc: AiDocSummary
   signal?: AbortSignal
+  onProgress?: (status: string) => void
 }): Promise<AiMotionPlan> {
-  const { apiKey, prompt, doc, signal } = opts
+  const { apiKey, prompt, doc, signal, onProgress } = opts
+  onProgress?.(t('Claude에 연결 중'))
   let res: Response
   try {
     res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -471,6 +505,7 @@ export async function generateMotion(opts: {
         // max_tokens가 (thinking + 툴 JSON) 합산 상한이라 여유 있게 잡고 effort는 낮춘다
         max_tokens: 16000,
         output_config: { effort: 'low' },
+        stream: true,
         system: systemPrompt(doc),
         tools: [MOTION_TOOL],
         tool_choice: { type: 'tool', name: 'apply_motion' },
@@ -496,18 +531,66 @@ export async function generateMotion(opts: {
     }
     throw apiError(res.status, detail)
   }
-  const data = (await res.json()) as {
-    stop_reason?: string
-    content?: { type: string; name?: string; input?: unknown }[]
+  // SSE 스트림 — thinking/툴 JSON 진행을 단계 문구로
+  const reader = res.body?.getReader()
+  let inputJson = ''
+  let stopReason = ''
+  let sawTool = false
+  if (reader) {
+    const dec = new TextDecoder()
+    let buf = ''
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += dec.decode(value, { stream: true })
+      const lines = buf.split('\n')
+      buf = lines.pop() ?? ''
+      for (const ln of lines) {
+        if (!ln.startsWith('data:')) continue
+        let ev: Record<string, unknown>
+        try {
+          ev = JSON.parse(ln.slice(5)) as Record<string, unknown>
+        } catch {
+          continue
+        }
+        const type = String(ev.type ?? '')
+        if (type === 'content_block_start') {
+          const cb = ev.content_block as { type?: string; name?: string } | undefined
+          if (cb?.type === 'tool_use' && cb.name === 'apply_motion') {
+            sawTool = true
+            onProgress?.(t('키프레임 작성 중'))
+          }
+        } else if (type === 'content_block_delta') {
+          const dlt = ev.delta as { type?: string; partial_json?: string } | undefined
+          if (dlt?.type === 'thinking_delta') onProgress?.(t('모션 구상 중'))
+          else if (dlt?.type === 'input_json_delta' && sawTool) {
+            inputJson += dlt.partial_json ?? ''
+            onProgress?.(t('키프레임 작성 중 — {n}자').replace('{n}', String(inputJson.length)))
+          }
+        } else if (type === 'message_delta') {
+          const d2 = ev.delta as { stop_reason?: string } | undefined
+          if (d2?.stop_reason) stopReason = d2.stop_reason
+        } else if (type === 'error') {
+          const er = ev.error as { message?: string } | undefined
+          throw new Error(er?.message || t('API 오류 ({status})').replace('{status}', 'stream'))
+        }
+      }
+    }
   }
-  const tool = data.content?.find((b) => b.type === 'tool_use' && b.name === 'apply_motion')
-  if (!tool) {
+  if (!sawTool || !inputJson) {
     // refusal은 같은 프롬프트 재시도가 무의미 — 재시도 안내 대신 표현 변경 안내
-    if (data.stop_reason === 'refusal')
+    if (stopReason === 'refusal')
       throw new Error(t('요청이 거부되었습니다 — 다른 표현으로 다시 써보세요'))
-    if (data.stop_reason === 'max_tokens')
+    if (stopReason === 'max_tokens')
       throw new Error(t('응답이 너무 길어 잘렸습니다 — 요청을 더 작게 나눠보세요'))
     throw new Error(t('AI가 모션을 반환하지 않았습니다 — 다시 시도해보세요'))
   }
-  return sanitizePlan(tool.input, doc.layers.length, doc.op)
+  onProgress?.(t('모션 검증 중'))
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(inputJson)
+  } catch {
+    throw new Error(t('AI가 모션을 반환하지 않았습니다 — 다시 시도해보세요'))
+  }
+  return sanitizePlan(parsed, doc.layers.length, doc.op)
 }

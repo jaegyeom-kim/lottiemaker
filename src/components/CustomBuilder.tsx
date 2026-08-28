@@ -458,6 +458,7 @@ function AiMotionPanel() {
   const [keyDraft, setKeyDraft] = useState('')
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState('')
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string; undoable?: boolean } | null>(null)
 
   // 결과/에러 메시지 + 되돌리기 — 두 렌더 분기 공용
@@ -523,8 +524,10 @@ function AiMotionPanel() {
               prompt: req,
               doc,
               signal: ac.signal,
+              onProgress: setStatus,
             })
-          : await generateMotion({ apiKey, prompt: req, doc, signal: ac.signal })
+          : await generateMotion({ apiKey, prompt: req, doc, signal: ac.signal, onProgress: setStatus })
+      setStatus(t('모션 적용 중'))
       const applied = applyAiMotion(plan)
       if (applied === 0) {
         setMsg({ kind: 'err', text: t('적용된 레이어가 없습니다 — 대상 레이어가 잠겨 있는지 확인하세요') })
@@ -541,6 +544,7 @@ function AiMotionPanel() {
       if ((e as Error).name !== 'AbortError') setMsg({ kind: 'err', text: (e as Error).message })
     } finally {
       setBusy(false)
+      setStatus('')
       abortRef.current = null
     }
   }
@@ -638,6 +642,16 @@ function AiMotionPanel() {
           </button>
         ))}
       </div>
+      {busy && (
+        <div className="aipanel__status">
+          <span className="aipanel__dots">
+            <i />
+            <i />
+            <i />
+          </span>
+          {status || t('생각 중')}
+        </div>
+      )}
       <div className="aipanel__actions">
         {busy ? (
           <>

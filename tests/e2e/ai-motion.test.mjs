@@ -6,24 +6,30 @@ const { browser, page } = await launchApp({
   beforeGoto: async (page) => {
     await page.route('https://api.anthropic.com/v1/messages', async (route) => {
       capturedBody = JSON.parse(route.request().postData())
+      // 스트리밍(SSE) 응답 — 실제 API와 동일한 이벤트 시퀀스로 목
+      const input = {
+        layers: [
+          { index: 0, keys: [{ t: 0, r: 0, ts: 0, te: 0 }, { t: 30, r: 180, te: 100, e: { r: [0.42, 0, 0.58, 1] } }] },
+        ],
+        note: '테스트 회전 적용',
+      }
+      const json = JSON.stringify(input)
+      const half = Math.floor(json.length / 2)
+      const sse = [
+        { type: 'message_start' },
+        { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', name: 'apply_motion' } },
+        { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: json.slice(0, half) } },
+        { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: json.slice(half) } },
+        { type: 'content_block_stop', index: 0 },
+        { type: 'message_delta', delta: { stop_reason: 'tool_use' } },
+        { type: 'message_stop' },
+      ]
+        .map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n`)
+        .join('\n')
       await route.fulfill({
         status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          stop_reason: 'tool_use',
-          content: [
-            {
-              type: 'tool_use',
-              name: 'apply_motion',
-              input: {
-                layers: [
-                  { index: 0, keys: [{ t: 0, r: 0, ts: 0, te: 0 }, { t: 30, r: 180, te: 100, e: { r: [0.42, 0, 0.58, 1] } }] },
-                ],
-                note: '테스트 회전 적용',
-              },
-            },
-          ],
-        }),
+        contentType: 'text/event-stream',
+        body: sse + '\n',
       })
     })
     await page.addInitScript(() => localStorage.setItem('lottiemaker.anthropic.key', 'sk-ant-api-mock'))
