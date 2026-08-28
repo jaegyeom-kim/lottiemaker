@@ -54,7 +54,8 @@ export function setGlmModel(m: string) {
 
 export function getAiProvider(): AiProvider {
   try {
-    return localStorage.getItem(PROVIDER_STORAGE) === 'local' ? 'local' : 'anthropic'
+    const v = localStorage.getItem(PROVIDER_STORAGE)
+    return v === 'local' || v === 'glm' ? v : 'anthropic'
   } catch {
     return 'anthropic'
   }
@@ -526,13 +527,20 @@ export async function generateMotionGlm(opts: {
   onProgress?: (status: string) => void
 }): Promise<AiMotionPlan> {
   const { apiKey, model, prompt, doc, signal, onProgress } = opts
+  // OpenRouter 키(sk-or-…)는 엔드포인트/모델 슬러그 자동 전환
+  const orKey = apiKey.startsWith('sk-or-')
   let bases: string[]
-  try {
-    const saved = localStorage.getItem(GLM_BASE_STORAGE)
-    bases = saved ? [saved, ...GLM_BASES.filter((b) => b !== saved)] : [...GLM_BASES]
-  } catch {
-    bases = [...GLM_BASES]
+  if (orKey) {
+    bases = ['https://openrouter.ai/api/v1']
+  } else {
+    try {
+      const saved = localStorage.getItem(GLM_BASE_STORAGE)
+      bases = saved ? [saved, ...GLM_BASES.filter((b) => b !== saved)] : [...GLM_BASES]
+    } catch {
+      bases = [...GLM_BASES]
+    }
   }
+  const mdl = orKey && !model.includes('/') ? `z-ai/${model}` : model
   const askAt = async (base: string, extra: string): Promise<AiMotionPlan> => {
     onProgress?.(t('GLM에 연결 중'))
     let res: Response
@@ -545,7 +553,7 @@ export async function generateMotionGlm(opts: {
           authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model,
+          model: mdl,
           stream: true,
           temperature: 0.4,
           response_format: { type: 'json_object' },
@@ -578,10 +586,12 @@ export async function generateMotionGlm(opts: {
       err.status = res.status
       throw err
     }
-    try {
-      localStorage.setItem(GLM_BASE_STORAGE, base) // 성공 엔드포인트 기억
-    } catch {
-      // 무시
+    if (!orKey) {
+      try {
+        localStorage.setItem(GLM_BASE_STORAGE, base) // 성공 엔드포인트 기억
+      } catch {
+        // 무시
+      }
     }
     // OpenAI 형식 SSE — choices[0].delta.content 누적
     const reader = res.body?.getReader()

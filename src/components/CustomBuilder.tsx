@@ -569,13 +569,13 @@ function AiMotionPanel() {
         <div className="knob aipanel">
           <div className="aipanel__row">{providerSelect}</div>
           <p className="knob__note">
-            {t('Z.ai API 키가 필요합니다 (코딩 플랜 키도 가능 — 엔드포인트 자동 인식). 키는 이 브라우저에만 저장됩니다.')}
+            {t('Z.ai 또는 OpenRouter API 키가 필요합니다 (sk-or-… 키는 OpenRouter로 자동 인식). 키는 이 브라우저에만 저장됩니다.')}
           </p>
           <div className="aipanel__keyrow">
             <input
               className="input"
               type="password"
-              placeholder={t('Z.ai API 키')}
+              placeholder={t('Z.ai / OpenRouter API 키')}
               value={keyDraft}
               onChange={(e) => setKeyDraft(e.target.value)}
               onKeyDown={(e) => {

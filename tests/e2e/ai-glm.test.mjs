@@ -91,4 +91,25 @@ await aiPanel.locator('button', { hasText: '모션 생성' }).click()
 await page.waitForTimeout(2000)
 ok(codingCalls === 1 && paasCalls === 2, `기억된 base 우선 (coding=${codingCalls}, paas=${paasCalls})`)
 
+// ── OpenRouter 키(sk-or-…) 자동 인식 — 엔드포인트 전환 + 모델 슬러그 프리픽스 ──
+let orBody = null
+await page.route('https://openrouter.ai/api/v1/chat/completions', (route) => {
+  orBody = route.request().postDataJSON()
+  route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream' }, body: sse })
+})
+await page.evaluate(() => {
+  localStorage.setItem('lottiemaker.glm.key', 'sk-or-v1-test-abc')
+  localStorage.removeItem('lottiemaker.glm.base')
+})
+await page.reload()
+await page.waitForTimeout(1500)
+ok((await aiPanel.locator('.aipanel__prompt').count()) === 1, '리로드 후 GLM 프로바이더 유지')
+await aiPanel.locator('.aipanel__prompt').fill('오픈라우터로')
+await aiPanel.locator('button', { hasText: '모션 생성' }).click()
+await page.waitForTimeout(2000)
+ok(orBody !== null && codingCalls === 1, 'sk-or 키 → OpenRouter 엔드포인트')
+ok(orBody?.model === 'z-ai/glm-5.3-flash', `모델 슬러그 자동 프리픽스 (${orBody?.model})`)
+const orBase = await page.evaluate(() => localStorage.getItem('lottiemaker.glm.base'))
+ok(orBase === null, 'OpenRouter는 base 기억 안 함')
+
 await done(browser)
