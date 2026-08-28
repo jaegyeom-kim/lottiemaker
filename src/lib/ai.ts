@@ -246,8 +246,65 @@ const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v))
 const fin = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 
 /** 모델 출력 검증·클램프 — 유효 레이어가 하나도 없으면 throw. */
+/** 감쇠 스프링을 키프레임으로 베이크 — 도착 키에 spring 표시 시 직전 키와의 구간에 오버슛 극값 키 삽입. */
+const SPRING_CHS = ['p', 's', 'r'] as const
+function bakeSprings(keys: KfKey[], springs: Map<KfKey, number>): KfKey[] {
+  if (!springs.size) return keys
+  const out: KfKey[] = []
+  keys.forEach((k, i) => {
+    const z = springs.get(k)
+    const prev = i > 0 ? keys[i - 1] : undefined
+    if (z === undefined || !prev || k.t - prev.t < 4) {
+      out.push(k)
+      return
+    }
+    const L = k.t - prev.t
+    // 반주기당 진폭비 — 감쇠 조화진동 닫힌형
+    const ratio = Math.exp((-z * Math.PI) / Math.sqrt(1 - z * z))
+    const extra: KfKey[] = []
+    for (const ch of SPRING_CHS) {
+      const a = prev[ch]
+      const b = k[ch]
+      if (a === undefined || b === undefined) continue
+      const d =
+        ch === 'p'
+          ? [(b as [number, number])[0] - (a as [number, number])[0], (b as [number, number])[1] - (a as [number, number])[1]]
+          : [(b as number) - (a as number)]
+      const mag = Math.hypot(...d)
+      if (mag < 0.5) continue
+      let n = 0
+      while (n < 4 && mag * Math.pow(ratio, n + 1) > Math.max(0.02 * mag, 0.5)) n++
+      if (!n) continue
+      const h = (0.45 * L) / n
+      // 첫 피크로 가속 진입 — 모델이 이징을 준 경우는 존중
+      prev.e = { ...(prev.e ?? {}), [ch]: prev.e?.[ch] ?? ([0.33, 0, 0.35, 1] as Bezier4) }
+      for (let j = 1; j <= n; j++) {
+        const tt = Math.min(Math.round((prev.t + 0.55 * L + (j - 1) * h) * 10) / 10, k.t - 0.5)
+        const amp = Math.pow(ratio, j) * (j % 2 ? 1 : -1)
+        const kk: KfKey = { t: tt, e: { [ch]: [0.37, 0, 0.63, 1] as Bezier4 } }
+        if (ch === 'p')
+          kk.p = [(b as [number, number])[0] + d[0] * amp, (b as [number, number])[1] + d[1] * amp]
+        else kk[ch] = (b as number) + d[0] * amp
+        extra.push(kk)
+      }
+    }
+    // 채널별 극값 키가 같은 시각이면 병합
+    const merged: KfKey[] = []
+    for (const kk of extra) {
+      const dup = merged.find((m) => Math.abs(m.t - kk.t) < 0.5)
+      if (dup) {
+        for (const ch of SPRING_CHS) if (dup[ch] === undefined && kk[ch] !== undefined) (dup[ch] as unknown) = kk[ch]
+        dup.e = { ...(dup.e ?? {}), ...(kk.e ?? {}) }
+      } else merged.push(kk)
+    }
+    out.push(...merged.sort((x, y) => x.t - y.t), k)
+  })
+  return out
+}
+
 export function sanitizePlan(raw: unknown, layerCount: number, op: number): AiMotionPlan {
   const r = (raw ?? {}) as Record<string, unknown>
+  const springs = new Map<KfKey, number>()
   const byIndex = new Map<number, { keys: KfKey[]; clip?: [number, number] }>()
   const rawLayers = Array.isArray(r.layers) ? (r.layers as Record<string, unknown>[]) : []
   for (const rl of rawLayers) {
@@ -293,6 +350,10 @@ export function sanitizePlan(raw: unknown, layerCount: number, op: number): AiMo
       } else if (entry.keys.length < 60) {
         entry.keys.push(key)
       }
+      // spring 플래그 — true=0.5, 숫자/{"damping":n} 허용 (낮을수록 출렁)
+      const sp = rk.spring
+      const zRaw = sp === true ? 0.5 : fin(sp) ? (sp as number) : sp && typeof sp === 'object' && fin((sp as { damping?: unknown }).damping) ? ((sp as { damping: number }).damping) : undefined
+      if (zRaw !== undefined) springs.set(dup ?? key, clamp(zRaw, 0.15, 0.85))
     }
     const c = rl.clip
     if (Array.isArray(c) && fin(c[0]) && fin(c[1])) {
@@ -304,7 +365,11 @@ export function sanitizePlan(raw: unknown, layerCount: number, op: number): AiMo
   }
   const layers: AiLayerPlan[] = [...byIndex.entries()]
     .filter(([, v]) => v.keys.length > 0)
-    .map(([index, v]) => ({ index, keys: v.keys.sort((a, b) => a.t - b.t), ...(v.clip ? { clip: v.clip } : {}) }))
+    .map(([index, v]) => ({
+      index,
+      keys: bakeSprings(v.keys.sort((a, b) => a.t - b.t), springs),
+      ...(v.clip ? { clip: v.clip } : {}),
+    }))
     .sort((a, b) => a.index - b.index)
   if (!layers.length) throw new Error(t('AI가 적용 가능한 모션을 만들지 못했습니다 — 요청을 더 구체적으로 써보세요'))
   const note = typeof r.note === 'string' ? r.note.slice(0, 200) : undefined
@@ -364,6 +429,10 @@ const MOTION_TOOL = {
                     properties: { p: BEZ_SCHEMA, s: BEZ_SCHEMA, r: BEZ_SCHEMA, o: BEZ_SCHEMA },
                     description: 'per-channel easing toward the NEXT key; omit on the last key',
                   },
+                  spring: {
+                    type: ['boolean', 'number'],
+                    description: 'physical overshoot-settle into THIS key for p/s/r — true (damping 0.5) or damping 0.2 (loose, wobbly) .. 0.8 (tight, one small overshoot). The engine bakes the extra keyframes. Prefer this for arrivals, pop-ins, snaps.',
+                  },
                 },
               },
             },
@@ -380,7 +449,7 @@ function systemPrompt(doc: AiDocSummary, mode: 'tool' | 'json' = 'tool'): string
     mode === 'tool'
       ? 'Respond ONLY by calling the apply_motion tool — no prose.'
       : `Respond with ONLY one JSON object, no prose, no markdown fences. Shape:
-{"layers":[{"index":<int>,"clip":[inFrame,outFrame] (optional),"keys":[{"t":<frames>,"p":[x,y],"s":<scale%>,"r":<deg>,"o":<opacity%>,"ts":<trim start%>,"te":<trim end%>,"e":{"p":[x1,y1,x2,y2],"s":[...],"r":[...],"o":[...]}}]}],"note":"한국어 한 문장"}
+{"layers":[{"index":<int>,"clip":[inFrame,outFrame] (optional),"keys":[{"t":<frames>,"p":[x,y],"s":<scale%>,"r":<deg>,"o":<opacity%>,"ts":<trim start%>,"te":<trim end%>,"spring":true|<damping 0.2..0.8>,"e":{"p":[x1,y1,x2,y2],"s":[...],"r":[...],"o":[...]}}]}],"note":"한국어 한 문장"}
 Every key needs t plus at least one of p/s/r/o/ts/te. All fields except t are optional.`
   return `You are the motion assistant inside LottieMaker, a web tool for building Lottie animations.
 The user describes motion in Korean or English. ${respond}
@@ -396,7 +465,9 @@ Keyframe semantics:
 
 Craft guidelines:
 - Prefer expressive easing over linear: ease-out [0.22,1,0.36,1], ease-in-out [0.65,0,0.35,1], anticipation dip or >100% overshoot via extra keys.
-- Bounce = several keys with decreasing amplitude, ease-out falling / ease-in rising, not one curve.
+- Natural arrivals: put "spring": true on the destination key (p/s/r) — the engine bakes a physical overshoot-settle into that segment. Damping number tunes it: 0.3 wobbly, 0.5 default, 0.8 subtle. USE THIS instead of hand-crafting overshoot keys. Example pop-in: {"t":0,"s":0},{"t":18,"s":100,"spring":0.4}.
+- Bounce off a floor (falling ball) = several keys with decreasing amplitude, ease-out falling / ease-in rising — spring won't do ground contact.
+- Give the settle room: a sprung segment reads best over 15+ frames.
 - When the request implies sequence over multiple layers, stagger their key times (e.g. 4-8 frame offsets).
 - Off-canvas start/end positions are fine for entries/exits; settled poses should sit inside the canvas.
 - ts/te animate the trim path (draw-on): typical draw effect = te 0->100 (ts 0 static). Shape/path layers only — never on image layers. Great for strokes (hasStroke: true) and pen paths (kind: path).

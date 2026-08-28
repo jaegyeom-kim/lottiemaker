@@ -14,12 +14,24 @@ const plan = {
   note: '왼쪽에서 페이드 인',
 }
 // 마크다운 펜스 포함 콘텐츠 — 펜스 제거 경로 검증. delta 조각으로 쪼개서 SSE 누적 검증.
-const content = '```json\n' + JSON.stringify(plan) + '\n```'
-const chunks = []
-for (let i = 0; i < content.length; i += 40) chunks.push(content.slice(i, i + 40))
-const sse =
-  chunks.map((c) => `data: ${JSON.stringify({ choices: [{ delta: { content: c } }] })}\n\n`).join('') +
-  'data: [DONE]\n\n'
+const toSse = (obj, fence) => {
+  const content = fence ? '```json\n' + JSON.stringify(obj) + '\n```' : JSON.stringify(obj)
+  const chunks = []
+  for (let i = 0; i < content.length; i += 40) chunks.push(content.slice(i, i + 40))
+  return (
+    chunks.map((c) => `data: ${JSON.stringify({ choices: [{ delta: { content: c } }] })}\n\n`).join('') +
+    'data: [DONE]\n\n'
+  )
+}
+const sse = toSse(plan, true)
+// 스프링 플랜 — 도착 키 spring:true → 엔진이 오버슛 정착 키 베이크
+const springPlan = {
+  layers: [
+    { index: 0, keys: [{ t: 0, p: [100, 256] }, { t: 30, p: [300, 256], spring: true }] },
+  ],
+  note: '스프링 도착',
+}
+const sse2 = toSse(springPlan, false)
 
 let codingCalls = 0
 let paasCalls = 0
@@ -36,7 +48,7 @@ const { browser, page } = await launchApp({
       route.fulfill({
         status: 200,
         headers: { 'content-type': 'text/event-stream' },
-        body: sse,
+        body: paasCalls >= 2 ? sse2 : sse,
       })
     })
   },
@@ -85,11 +97,21 @@ const keys = d.layers[0].xkf?.keys ?? []
 ok(d.layers[0].xkf?.on === true && keys.length === 2, `플랜 적용 (${keys.length}키)`)
 ok(keys[0].o === 0 && keys[1].o === 100, '키 내용 일치')
 
-// 재실행 — 기억된 base 우선 (coding 재시도 없음)
-await aiPanel.locator('.aipanel__prompt').fill('한번 더')
+// 재실행 — 기억된 base 우선 (coding 재시도 없음) + spring 베이크
+await aiPanel.locator('.aipanel__prompt').fill('스프링으로 도착')
 await aiPanel.locator('button', { hasText: '모션 생성' }).click()
-await page.waitForTimeout(2000)
+await page.waitForTimeout(2500)
 ok(codingCalls === 1 && paasCalls === 2, `기억된 base 우선 (coding=${codingCalls}, paas=${paasCalls})`)
+{
+  const d2 = await sessionSource(page)
+  const ks = d2.layers[0].xkf?.keys ?? []
+  ok(ks.length >= 4, `spring 베이크 — 극값 키 삽입 (${ks.length}키)`)
+  const over = ks.some((k) => Array.isArray(k.p) && k.p[0] > 300.5)
+  const under = ks.some((k) => Array.isArray(k.p) && k.p[0] > 250 && k.p[0] < 299.5)
+  const last = ks[ks.length - 1]
+  ok(over && under, `오버슛→언더슛 정착 (${ks.map((k) => k.p?.[0]?.toFixed(0)).join('→')})`)
+  ok(last.p?.[0] === 300, '최종값 목표 정착')
+}
 
 // ── OpenRouter 키(sk-or-…) 자동 인식 — 엔드포인트 전환 + 모델 슬러그 프리픽스 ──
 let orBody = null
