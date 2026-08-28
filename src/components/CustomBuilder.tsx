@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { evalNumExpr } from '../lib/num'
-import { getAiKey, setAiKey, verifyAiKey, summarizeDoc, generateMotion } from '../lib/ai'
+import {
+  getAiKey, setAiKey, verifyAiKey, summarizeDoc, generateMotion,
+  getAiProvider, setAiProvider, getLocalUrl, getLocalModel, setLocalConfig,
+  listLocalModels, generateMotionLocal, type AiProvider,
+} from '../lib/ai'
 import { useEditor } from '../store'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
 import { parseLottie } from '../lib/lottieUtils'
@@ -420,6 +424,37 @@ function AiMotionPanel() {
   const applyAiMotion = useEditor((s) => s.applyAiMotion)
   const [apiKey, setApiKeyState] = useState(getAiKey)
   const [editKey, setEditKey] = useState(false)
+  const [provider, setProvider] = useState<AiProvider>(getAiProvider)
+  const [localModels, setLocalModels] = useState<string[]>([])
+  const [localModel, setLocalModel] = useState(getLocalModel)
+  // 로컬 프로바이더 — 모델 목록 로드 (Ollama /api/tags)
+  useEffect(() => {
+    if (provider !== 'local') return
+    void listLocalModels().then((ms) => {
+      setLocalModels(ms)
+      if (ms.length && !ms.includes(localModel)) {
+        setLocalModel(ms[0])
+        setLocalConfig(getLocalUrl(), ms[0])
+      }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provider])
+  const providerSelect = (
+    <select
+      className="input input--inline aipanel__provider"
+      value={provider}
+      title={t('모션 생성에 쓸 모델 — Anthropic API 또는 로컬 Ollama')}
+      onChange={(e) => {
+        const v = e.target.value as AiProvider
+        setProvider(v)
+        setAiProvider(v)
+        setMsg(null)
+      }}
+    >
+      <option value="anthropic">Claude (API)</option>
+      <option value="local">{t('로컬 (Ollama)')}</option>
+    </select>
+  )
   const [keyDraft, setKeyDraft] = useState('')
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
@@ -480,7 +515,16 @@ function AiMotionPanel() {
     abortRef.current = ac
     try {
       const doc = summarizeDoc(sourceData, customIdxs, curFrame)
-      const plan = await generateMotion({ apiKey, prompt: req, doc, signal: ac.signal })
+      const plan =
+        provider === 'local'
+          ? await generateMotionLocal({
+              url: getLocalUrl(),
+              model: localModel,
+              prompt: req,
+              doc,
+              signal: ac.signal,
+            })
+          : await generateMotion({ apiKey, prompt: req, doc, signal: ac.signal })
       const applied = applyAiMotion(plan)
       if (applied === 0) {
         setMsg({ kind: 'err', text: t('적용된 레이어가 없습니다 — 대상 레이어가 잠겨 있는지 확인하세요') })
@@ -501,9 +545,10 @@ function AiMotionPanel() {
     }
   }
 
-  if (!apiKey || editKey) {
+  if (provider === 'anthropic' && (!apiKey || editKey)) {
     return (
       <div className="knob aipanel">
+        <div className="aipanel__row">{providerSelect}</div>
         <p className="knob__note">
           {t('문장으로 모션을 만들려면 Anthropic API 키가 필요합니다. 키는 이 브라우저에만 저장되고 Anthropic API 호출에만 쓰입니다 — 프로젝트 파일이나 내보내기에 포함되지 않습니다.')}
         </p>
@@ -548,6 +593,29 @@ function AiMotionPanel() {
 
   return (
     <div className="knob aipanel">
+      <div className="aipanel__row">
+        {providerSelect}
+        {provider === 'local' && (
+          <select
+            className="input input--inline"
+            value={localModel}
+            title={t('Ollama 모델')}
+            onChange={(e) => {
+              setLocalModel(e.target.value)
+              setLocalConfig(getLocalUrl(), e.target.value)
+            }}
+          >
+            {!localModels.length && (
+              <option value="">{t('모델 없음 — Ollama 실행 확인')}</option>
+            )}
+            {localModels.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
       <textarea
         className="input aipanel__prompt"
         rows={2}

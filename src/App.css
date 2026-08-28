@@ -4566,3 +4566,13 @@ body.drag-cross * { cursor: crosshair !important; }
   gap: 10px;
   justify-content: center;
 }
+
+/* AI 프로바이더 행 */
+.aipanel__row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.aipanel__row select {
+  min-width: 0;
+}

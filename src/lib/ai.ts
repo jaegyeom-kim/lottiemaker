@@ -7,6 +7,73 @@ import type { LottieJson } from './lottieUtils'
 import { t } from './i18n'
 
 const KEY_STORAGE = 'lottiemaker.anthropic.key'
+const PROVIDER_STORAGE = 'lottiemaker.ai.provider'
+const LOCAL_URL_STORAGE = 'lottiemaker.ai.localUrl'
+const LOCAL_MODEL_STORAGE = 'lottiemaker.ai.localModel'
+export const DEFAULT_LOCAL_URL = 'http://localhost:11434'
+
+export type AiProvider = 'anthropic' | 'local'
+
+export function getAiProvider(): AiProvider {
+  try {
+    return localStorage.getItem(PROVIDER_STORAGE) === 'local' ? 'local' : 'anthropic'
+  } catch {
+    return 'anthropic'
+  }
+}
+export function setAiProvider(v: AiProvider) {
+  try {
+    localStorage.setItem(PROVIDER_STORAGE, v)
+  } catch {
+    // 무시
+  }
+}
+export function getLocalUrl(): string {
+  try {
+    return localStorage.getItem(LOCAL_URL_STORAGE) || DEFAULT_LOCAL_URL
+  } catch {
+    return DEFAULT_LOCAL_URL
+  }
+}
+export function getLocalModel(): string {
+  try {
+    return localStorage.getItem(LOCAL_MODEL_STORAGE) ?? ''
+  } catch {
+    return ''
+  }
+}
+export function setLocalConfig(url: string, model: string) {
+  try {
+    localStorage.setItem(LOCAL_URL_STORAGE, url || DEFAULT_LOCAL_URL)
+    localStorage.setItem(LOCAL_MODEL_STORAGE, model)
+  } catch {
+    // 무시
+  }
+}
+
+/** 로컬 서버 모델 목록 — Ollama /api/tags 우선, OpenAI 호환 /v1/models 폴백. */
+export async function listLocalModels(url = getLocalUrl()): Promise<string[]> {
+  const base = url.replace(/\/$/, '')
+  try {
+    const res = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(4000) })
+    if (res.ok) {
+      const j = (await res.json()) as { models?: { name: string }[] }
+      if (Array.isArray(j.models)) return j.models.map((m) => m.name)
+    }
+  } catch {
+    // Ollama 아님 — OpenAI 호환 폴백
+  }
+  try {
+    const res = await fetch(`${base}/v1/models`, { signal: AbortSignal.timeout(4000) })
+    if (res.ok) {
+      const j = (await res.json()) as { data?: { id: string }[] }
+      if (Array.isArray(j.data)) return j.data.map((m) => m.id)
+    }
+  } catch {
+    // 서버 없음
+  }
+  return []
+}
 const MODEL = 'claude-sonnet-5'
 const CHANNELS: KfChannel[] = ['p', 's', 'r', 'o', 'ts', 'te']
 
@@ -269,9 +336,15 @@ const MOTION_TOOL = {
   },
 }
 
-function systemPrompt(doc: AiDocSummary): string {
+function systemPrompt(doc: AiDocSummary, mode: 'tool' | 'json' = 'tool'): string {
+  const respond =
+    mode === 'tool'
+      ? 'Respond ONLY by calling the apply_motion tool — no prose.'
+      : `Respond with ONLY one JSON object, no prose, no markdown fences. Shape:
+{"layers":[{"index":<int>,"clip":[inFrame,outFrame] (optional),"keys":[{"t":<frames>,"p":[x,y],"s":<scale%>,"r":<deg>,"o":<opacity%>,"ts":<trim start%>,"te":<trim end%>,"e":{"p":[x1,y1,x2,y2],"s":[...],"r":[...],"o":[...]}}]}],"note":"한국어 한 문장"}
+Every key needs t plus at least one of p/s/r/o/ts/te. All fields except t are optional.`
   return `You are the motion assistant inside LottieMaker, a web tool for building Lottie animations.
-The user describes motion in Korean or English. Respond ONLY by calling the apply_motion tool — no prose.
+The user describes motion in Korean or English. ${respond}
 
 Composition: ${doc.w}x${doc.h} px canvas (origin top-left), ${doc.fr} fps, ${doc.op} frames long (${Math.round((doc.op / doc.fr) * 100) / 100}s). Playhead at frame ${doc.playhead}.
 
@@ -309,6 +382,68 @@ function apiError(status: number, detail: string): Error {
   if (status === 429) return new Error(t('요청 한도 초과 — 잠시 후 다시 시도하세요'))
   if (status >= 500) return new Error(t('Anthropic API 일시 오류 — 잠시 후 다시 시도하세요'))
   return new Error(detail || t('API 오류 ({status})').replace('{status}', String(status)))
+}
+
+/** 로컬 LLM(Ollama) — /api/chat + format:json, 파싱/검증 실패 시 1회 재시도. */
+export async function generateMotionLocal(opts: {
+  url: string
+  model: string
+  prompt: string
+  doc: AiDocSummary
+  signal?: AbortSignal
+}): Promise<AiMotionPlan> {
+  const { url, model, prompt, doc, signal } = opts
+  const base = url.replace(/\/$/, '')
+  const ask = async (extra: string): Promise<AiMotionPlan> => {
+    let res: Response
+    try {
+      res = await fetch(`${base}/api/chat`, {
+        method: 'POST',
+        signal,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          stream: false,
+          format: 'json',
+          options: { temperature: 0.4, num_ctx: 8192 },
+          messages: [
+            { role: 'system', content: systemPrompt(doc, 'json') },
+            {
+              role: 'user',
+              content: `<composition>\n${JSON.stringify(doc)}\n</composition>\n\n요청: ${prompt}${extra}`,
+            },
+          ],
+        }),
+      })
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') throw e
+      throw new Error(
+        t('로컬 LLM 연결 실패 — Ollama가 실행 중인지, 브라우저 접근이 막혔다면 OLLAMA_ORIGINS="*" 로 실행했는지 확인하세요'),
+      )
+    }
+    if (!res.ok) {
+      let detail = ''
+      try {
+        detail = ((await res.json()) as { error?: string }).error ?? ''
+      } catch {
+        // 본문 없음
+      }
+      if (res.status === 404 && /model/i.test(detail))
+        throw new Error(t('모델 "{m}"이 없습니다 — ollama pull 후 다시 시도하세요').replace('{m}', model))
+      throw new Error(detail || t('로컬 LLM 오류 ({status})').replace('{status}', String(res.status)))
+    }
+    const data = (await res.json()) as { message?: { content?: string } }
+    const text = data.message?.content ?? ''
+    const parsed = JSON.parse(text) as unknown // 실패 시 catch에서 재시도
+    return sanitizePlan(parsed, doc.layers.length, doc.op)
+  }
+  try {
+    return await ask('')
+  } catch (e) {
+    if ((e as Error).name === 'AbortError') throw e
+    // 스키마 위반/파싱 실패 — 1회 재시도 (지시 강화)
+    return ask('\n\n(이전 응답이 JSON 스키마에 맞지 않았습니다. 지시된 JSON 오브젝트 하나만 출력하세요.)')
+  }
 }
 
 export async function generateMotion(opts: {
