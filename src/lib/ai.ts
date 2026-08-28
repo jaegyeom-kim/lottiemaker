@@ -2,7 +2,7 @@
 // BYOK: 사용자의 Anthropic API 키로 브라우저에서 직접 호출한다. 키는 이 브라우저
 // localStorage에만 저장되고 api.anthropic.com 외에는 어디에도 전송되지 않는다.
 // 프로젝트 파일(.lmproj)·자동 저장·내보낸 Lottie JSON에는 절대 포함되지 않는다.
-import { normSel, normKf, type Bezier4, type KfChannel, type KfKey } from './customBuilder'
+import { normSel, normKf, bakeSprings, type Bezier4, type KfChannel, type KfKey } from './customBuilder'
 import type { LottieJson } from './lottieUtils'
 import { t } from './i18n'
 
@@ -246,65 +246,9 @@ const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v))
 const fin = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 
 /** 모델 출력 검증·클램프 — 유효 레이어가 하나도 없으면 throw. */
-/** 감쇠 스프링을 키프레임으로 베이크 — 도착 키에 spring 표시 시 직전 키와의 구간에 오버슛 극값 키 삽입. */
-const SPRING_CHS = ['p', 's', 'r'] as const
-function bakeSprings(keys: KfKey[], springs: Map<KfKey, number>): KfKey[] {
-  if (!springs.size) return keys
-  const out: KfKey[] = []
-  keys.forEach((k, i) => {
-    const z = springs.get(k)
-    const prev = i > 0 ? keys[i - 1] : undefined
-    if (z === undefined || !prev || k.t - prev.t < 4) {
-      out.push(k)
-      return
-    }
-    const L = k.t - prev.t
-    // 반주기당 진폭비 — 감쇠 조화진동 닫힌형
-    const ratio = Math.exp((-z * Math.PI) / Math.sqrt(1 - z * z))
-    const extra: KfKey[] = []
-    for (const ch of SPRING_CHS) {
-      const a = prev[ch]
-      const b = k[ch]
-      if (a === undefined || b === undefined) continue
-      const d =
-        ch === 'p'
-          ? [(b as [number, number])[0] - (a as [number, number])[0], (b as [number, number])[1] - (a as [number, number])[1]]
-          : [(b as number) - (a as number)]
-      const mag = Math.hypot(...d)
-      if (mag < 0.5) continue
-      let n = 0
-      while (n < 4 && mag * Math.pow(ratio, n + 1) > Math.max(0.02 * mag, 0.5)) n++
-      if (!n) continue
-      const h = (0.45 * L) / n
-      // 첫 피크로 가속 진입 — 모델이 이징을 준 경우는 존중
-      prev.e = { ...(prev.e ?? {}), [ch]: prev.e?.[ch] ?? ([0.33, 0, 0.35, 1] as Bezier4) }
-      for (let j = 1; j <= n; j++) {
-        const tt = Math.min(Math.round((prev.t + 0.55 * L + (j - 1) * h) * 10) / 10, k.t - 0.5)
-        const amp = Math.pow(ratio, j) * (j % 2 ? 1 : -1)
-        const kk: KfKey = { t: tt, e: { [ch]: [0.37, 0, 0.63, 1] as Bezier4 } }
-        if (ch === 'p')
-          kk.p = [(b as [number, number])[0] + d[0] * amp, (b as [number, number])[1] + d[1] * amp]
-        else kk[ch] = (b as number) + d[0] * amp
-        extra.push(kk)
-      }
-    }
-    // 채널별 극값 키가 같은 시각이면 병합
-    const merged: KfKey[] = []
-    for (const kk of extra) {
-      const dup = merged.find((m) => Math.abs(m.t - kk.t) < 0.5)
-      if (dup) {
-        for (const ch of SPRING_CHS) if (dup[ch] === undefined && kk[ch] !== undefined) (dup[ch] as unknown) = kk[ch]
-        dup.e = { ...(dup.e ?? {}), ...(kk.e ?? {}) }
-      } else merged.push(kk)
-    }
-    out.push(...merged.sort((x, y) => x.t - y.t), k)
-  })
-  return out
-}
-
 export function sanitizePlan(raw: unknown, layerCount: number, op: number): AiMotionPlan {
   const r = (raw ?? {}) as Record<string, unknown>
-  const springs = new Map<KfKey, number>()
+  const springs = new Map<KfKey, { z: number }>()
   const byIndex = new Map<number, { keys: KfKey[]; clip?: [number, number] }>()
   const rawLayers = Array.isArray(r.layers) ? (r.layers as Record<string, unknown>[]) : []
   for (const rl of rawLayers) {
@@ -353,7 +297,7 @@ export function sanitizePlan(raw: unknown, layerCount: number, op: number): AiMo
       // spring 플래그 — true=0.5, 숫자/{"damping":n} 허용 (낮을수록 출렁)
       const sp = rk.spring
       const zRaw = sp === true ? 0.5 : fin(sp) ? (sp as number) : sp && typeof sp === 'object' && fin((sp as { damping?: unknown }).damping) ? ((sp as { damping: number }).damping) : undefined
-      if (zRaw !== undefined) springs.set(dup ?? key, clamp(zRaw, 0.15, 0.85))
+      if (zRaw !== undefined) springs.set(dup ?? key, { z: clamp(zRaw, 0.15, 0.85) })
     }
     const c = rl.clip
     if (Array.isArray(c) && fin(c[0]) && fin(c[1])) {

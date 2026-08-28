@@ -776,7 +776,8 @@ function KfPanel({
   base: [number, number] | null
   compOp: number
 }) {
-  const { setKfChannel, removeKfChannel, setKfEase, setKfSmooth, jumpTo, commitEdit } = useEditor()
+  const { setKfChannel, removeKfChannel, setKfEase, setKfSmooth, applyKfSpring, kfSel, jumpTo, commitEdit } = useEditor()
+  const springable = kfSel.some((it) => it.ch === 'p' || it.ch === 's' || it.ch === 'r')
   const curFrame = useEditor((s) => s.curFrame)
   const frame = Math.max(0, Math.min(compOp, curFrame))
 
@@ -882,6 +883,33 @@ function KfPanel({
           {t('곡선')}
         </button>
       </div>
+      <div className="knob__head" style={{ marginTop: 10 }}>
+        <span className="knob__name">{t('스프링 정착')}</span>
+      </div>
+      <div className="knob__chips">
+        {(
+          [
+            ['출렁', 0.3],
+            ['보통', 0.5],
+            ['절제', 0.7],
+          ] as const
+        ).map(([label, z]) => (
+          <button
+            key={label}
+            className="chip"
+            disabled={!springable}
+            title={t('선택한 도착 키에 물리 오버슛 정착 키를 베이크')}
+            onClick={() => applyKfSpring(z)}
+          >
+            {t(label)}
+          </button>
+        ))}
+      </div>
+      <p className="knob__note">
+        {springable
+          ? t('선택한 키(위치/크기/회전)로 들어오는 구간에 오버슛→정착 키를 삽입합니다.')
+          : t('타임라인에서 도착 키(위치/크기/회전)를 선택하면 스프링 정착을 베이크할 수 있습니다.')}
+      </p>
       <p className="knob__note">
         {t('캔버스 드래그·방향키·우측 패널 위치 X/Y = 재생헤드에 위치 키. 키가 있는 채널은 우측 변형 슬라이더도 키를 찍습니다.')}
       </p>

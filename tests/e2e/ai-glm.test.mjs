@@ -27,7 +27,14 @@ const sse = toSse(plan, true)
 // 스프링 플랜 — 도착 키 spring:true → 엔진이 오버슛 정착 키 베이크
 const springPlan = {
   layers: [
-    { index: 0, keys: [{ t: 0, p: [100, 256] }, { t: 30, p: [300, 256], spring: true }] },
+    {
+      index: 0,
+      keys: [
+        { t: 0, p: [100, 256] },
+        { t: 15, p: [200, 180] },
+        { t: 30, p: [300, 256], spring: true },
+      ],
+    },
   ],
   note: '스프링 도착',
 }
@@ -111,6 +118,7 @@ ok(codingCalls === 1 && paasCalls === 2, `기억된 base 우선 (coding=${coding
   const last = ks[ks.length - 1]
   ok(over && under, `오버슛→언더슛 정착 (${ks.map((k) => k.p?.[0]?.toFixed(0)).join('→')})`)
   ok(last.p?.[0] === 300, '최종값 목표 정착')
+  ok(d2.layers[0].xkf?.smooth === true, '위치 키 3개+ → 자동 아크 (곡선 경로)')
 }
 
 // ── OpenRouter 키(sk-or-…) 자동 인식 — 엔드포인트 전환 + 모델 슬러그 프리픽스 ──

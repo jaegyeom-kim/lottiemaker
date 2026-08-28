@@ -461,6 +461,76 @@ function crTangent(pts: [number, number][], j: number): [number, number] {
   return [(p2[0] - p0[0]) / 2, (p2[1] - p0[1]) / 2]
 }
 
+/** 스프링 대상 채널 — 위치/크기/회전. */
+export const SPRING_CHS = ['p', 's', 'r'] as const
+
+/**
+ * 감쇠 스프링을 키프레임으로 베이크 — springs에 담긴 도착 키마다, 같은 채널의
+ * 직전 키와의 구간에 감쇠 조화진동(닫힌형) 극값 키를 삽입한다. 키는 최대 4개,
+ * 진폭이 이동량의 2% 아래로 떨어지면 중단 — 그래프 에디터에서 후편집 가능한
+ * 최소 키 수를 유지한다.
+ */
+export function bakeSprings(
+  keys: KfKey[],
+  springs: Map<KfKey, { z: number; chs?: readonly KfChannel[] }>,
+): KfKey[] {
+  if (!springs.size) return keys
+  const sorted = [...keys].sort((a, b) => a.t - b.t)
+  const extras: KfKey[] = []
+  for (const [k, sp] of springs) {
+    const idx = sorted.indexOf(k)
+    if (idx <= 0) continue
+    // 반주기당 진폭비 — 감쇠 조화진동 닫힌형
+    const ratio = Math.exp((-sp.z * Math.PI) / Math.sqrt(1 - sp.z * sp.z))
+    for (const ch of sp.chs ?? SPRING_CHS) {
+      const b = k[ch]
+      if (b === undefined) continue
+      // 같은 채널을 가진 직전 키 — 채널이 성긴 수동 키 배열에서도 동작
+      let prev: KfKey | undefined
+      for (let i = idx - 1; i >= 0; i--)
+        if (sorted[i][ch] !== undefined) {
+          prev = sorted[i]
+          break
+        }
+      if (!prev || k.t - prev.t < 4) continue
+      const a = prev[ch] as number | [number, number]
+      const L = k.t - prev.t
+      const d =
+        ch === 'p'
+          ? [(b as [number, number])[0] - (a as [number, number])[0], (b as [number, number])[1] - (a as [number, number])[1]]
+          : [(b as number) - (a as number)]
+      const mag = Math.hypot(...d)
+      if (mag < 0.5) continue
+      let n = 0
+      while (n < 4 && mag * Math.pow(ratio, n + 1) > Math.max(0.02 * mag, 0.5)) n++
+      if (!n) continue
+      const h = (0.45 * L) / n
+      // 첫 피크로 가속 진입 — 기존 이징이 있으면 존중
+      prev.e = { ...(prev.e ?? {}), [ch]: prev.e?.[ch] ?? ([0.33, 0, 0.35, 1] as Bezier4) }
+      for (let j = 1; j <= n; j++) {
+        const tt = Math.min(Math.round((prev.t + 0.55 * L + (j - 1) * h) * 10) / 10, k.t - 0.5)
+        const amp = Math.pow(ratio, j) * (j % 2 ? 1 : -1)
+        const kk: KfKey = { t: tt, e: { [ch]: [0.37, 0, 0.63, 1] as Bezier4 } }
+        if (ch === 'p')
+          kk.p = [(b as [number, number])[0] + d[0] * amp, (b as [number, number])[1] + d[1] * amp]
+        else if (ch === 's' || ch === 'r') kk[ch] = (b as number) + d[0] * amp
+        extras.push(kk)
+      }
+    }
+  }
+  if (!extras.length) return sorted
+  // 같은 시각(±0.5f) 키는 채널 병합 — 기존 키 우선
+  const out = [...sorted]
+  for (const kk of extras) {
+    const dup = out.find((m) => Math.abs(m.t - kk.t) < 0.5)
+    if (dup) {
+      for (const ch of SPRING_CHS) if (dup[ch] === undefined && kk[ch] !== undefined) (dup[ch] as unknown) = kk[ch]
+      dup.e = { ...(kk.e ?? {}), ...(dup.e ?? {}) }
+    } else out.push(kk)
+  }
+  return out.sort((a, b) => a.t - b.t)
+}
+
 /** 위치 구간 i의 공간 접선 — 수동(pto/pti) 우선, smooth는 Catmull-Rom 폴백. */
 export function segTangents(
   keys: KfKey[],

@@ -11,7 +11,7 @@ import { apply as applyMatXY } from './lib/svgImport'
 import { idbGet, idbSet, idbDel } from './lib/sessionStore'
 import {
   buildAnimKs, buildCustomDoc, buildCustomLayer, animSpans, normSel,
-  normKf, buildKfKs, kfValueAt,
+  normKf, buildKfKs, kfValueAt, bakeSprings, type KfKey,
   springValue, SPRING_PRESETS, bounceValue,
   CUSTOM_ASSET_PREFIX, CUSTOM_OP, DEFAULT_SEL,
   type CustomSel, type CustomPayload, type CustomKf, type KfChannel, type Bezier4,
@@ -412,6 +412,8 @@ interface EditorState {
   setTlHideOff: (v: boolean) => void
   /** 선택 레이어 위치 모션 패스 곡선 보간 토글. */
   setKfSmooth: (v: boolean) => void
+  /** 선택된 도착 키(p/s/r)에 감쇠 스프링 정착 베이크 — z 낮을수록 출렁. */
+  applyKfSpring: (z: number) => void
   /** AI 모션 플랜 적용 — 대상 레이어를 키프레임 모드로 전환하고 키 통째 교체, 언두 1칸. */
   /** 반환 = 실제 적용된 레이어 수 (잠긴 레이어는 스킵). */
   applyAiMotion: (plan: AiMotionPlan) => number
@@ -3037,6 +3039,40 @@ export const useEditor = create<EditorState>((set, get) => {
       if (next) push(next)
     },
 
+    applyKfSpring: (z) => {
+      const { kfSel, sourceData, templateKnobs, knobValues } = get()
+      if (!sourceData) return
+      const items = kfSel.filter((it) => it.ch === 'p' || it.ch === 's' || it.ch === 'r')
+      if (!items.length) return
+      const src = structuredClone(sourceData)
+      let touched = 0
+      const byLi = new Map<number, KfSelItem[]>()
+      for (const it of items) byLi.set(it.li, [...(byLi.get(it.li) ?? []), it])
+      for (const [li, sel] of byLi) {
+        editKfLayerIn(src, li, (xkf) => {
+          const springs = new Map<KfKey, { z: number; chs?: readonly KfChannel[] }>()
+          for (const it of sel) {
+            const k = xkf.keys.find((x) => Math.abs(x.t - it.t) < 0.5 && x[it.ch] !== undefined)
+            if (!k) continue
+            const cur = springs.get(k)
+            springs.set(k, { z, chs: [...(cur?.chs ?? []), it.ch] })
+          }
+          if (!springs.size) return
+          const before = xkf.keys.length
+          xkf.keys = bakeSprings(xkf.keys, springs)
+          if (xkf.keys.length > before) touched++
+        })
+      }
+      if (!touched) return
+      const applied = applyKnobs(src, templateKnobs, knobValues)
+      push({
+        animationData: applied,
+        sourceData: src,
+        colorGroups: extractColorGroups(applied),
+        kfSel: [],
+      })
+    },
+
     copyKfSel: () => {
       const { kfSel, sourceData } = get()
       if (!kfSel.length || !sourceData) return
@@ -3223,6 +3259,9 @@ export const useEditor = create<EditorState>((set, get) => {
         const ok = editKfLayerIn(src, lp.index, (xkf, layer) => {
           xkf.on = true
           xkf.keys = structuredClone(lp.keys)
+          // 자동 아크 — 위치 키 3개 이상이면 Catmull-Rom 곡선 경로 (자연 모션은 호)
+          if (lp.keys.filter((k) => k.p).length >= 3 && !lp.keys.some((k) => k.pto || k.pti))
+            xkf.smooth = true
           if (lp.clip) {
             const xsel = normSel(layer.xsel as Partial<CustomSel> | undefined, src.op)
             xsel.clip = [lp.clip[0], lp.clip[1]]
