@@ -12,7 +12,7 @@ const LOCAL_URL_STORAGE = 'lottiemaker.ai.localUrl'
 const LOCAL_MODEL_STORAGE = 'lottiemaker.ai.localModel'
 export const DEFAULT_LOCAL_URL = 'http://localhost:11434'
 
-export type AiProvider = 'anthropic' | 'glm' | 'local'
+export type AiProvider = 'anthropic' | 'glm' | 'deepseek' | 'local'
 
 // ── GLM (Z.ai) — OpenAI 호환, 브라우저 CORS 허용 확인됨 ──
 const GLM_KEY_STORAGE = 'lottiemaker.glm.key'
@@ -21,6 +21,9 @@ const GLM_BASE_STORAGE = 'lottiemaker.glm.base'
 export const DEFAULT_GLM_MODEL = 'glm-5.3-flash'
 /** 코딩 플랜 키(opencode 등)는 coding 경로, 일반 API 키는 paas 경로 — 401이면 자동 전환. */
 const GLM_BASES = ['https://api.z.ai/api/coding/paas/v4', 'https://api.z.ai/api/paas/v4']
+/** sk-or-… 키는 어느 프로바이더를 골랐든 OpenRouter로 — 모델 슬러그만 갈아끼운다. */
+const OPENROUTER_BASE = 'https://openrouter.ai/api/v1'
+const DEEPSEEK_BASE = 'https://api.deepseek.com'
 
 export function getGlmKey(): string {
   try {
@@ -52,10 +55,46 @@ export function setGlmModel(m: string) {
   }
 }
 
+// ── DeepSeek — OpenAI 호환. 공식 API는 날짜 없는 별칭만 받는다
+// (deepseek-v4-flash = V4-Flash-0731). 날짜 스냅샷은 OpenRouter 슬러그로. ──
+const DS_KEY_STORAGE = 'lottiemaker.deepseek.key'
+const DS_MODEL_STORAGE = 'lottiemaker.deepseek.model'
+export const DEFAULT_DEEPSEEK_MODEL = 'deepseek-v4-flash'
+
+export function getDeepseekKey(): string {
+  try {
+    return localStorage.getItem(DS_KEY_STORAGE) ?? ''
+  } catch {
+    return ''
+  }
+}
+export function setDeepseekKey(key: string) {
+  try {
+    if (key) localStorage.setItem(DS_KEY_STORAGE, key)
+    else localStorage.removeItem(DS_KEY_STORAGE)
+  } catch {
+    // 무시
+  }
+}
+export function getDeepseekModel(): string {
+  try {
+    return localStorage.getItem(DS_MODEL_STORAGE) || DEFAULT_DEEPSEEK_MODEL
+  } catch {
+    return DEFAULT_DEEPSEEK_MODEL
+  }
+}
+export function setDeepseekModel(m: string) {
+  try {
+    localStorage.setItem(DS_MODEL_STORAGE, m || DEFAULT_DEEPSEEK_MODEL)
+  } catch {
+    // 무시
+  }
+}
+
 export function getAiProvider(): AiProvider {
   try {
     const v = localStorage.getItem(PROVIDER_STORAGE)
-    return v === 'local' || v === 'glm' ? v : 'anthropic'
+    return v === 'local' || v === 'glm' || v === 'deepseek' ? v : 'anthropic'
   } catch {
     return 'anthropic'
   }
@@ -532,32 +571,32 @@ export async function generateMotionLocal(opts: {
   }
 }
 
-/** GLM(Z.ai) — OpenAI 호환 SSE + JSON 모드, 엔드포인트 자동 전환(코딩 플랜/일반), 1회 재시도. */
-export async function generateMotionGlm(opts: {
+/**
+ * OpenAI 호환 chat/completions 공용 경로 — SSE 누적 + JSON 모드, 베이스 폴백, 1회 형식 재시도.
+ * GLM(Z.ai)·DeepSeek·OpenRouter가 모두 같은 스펙이라 프로바이더별 차이는 인자로만 받는다.
+ */
+async function generateMotionOpenAi(opts: {
   apiKey: string
+  /** 요청에 실제로 보낼 모델 id (슬러그 변환까지 끝난 값). */
   model: string
+  /** 시도 순서대로의 엔드포인트. 401/403/404면 다음 것으로 넘어간다. */
+  bases: string[]
+  /** 상태·에러 문구에 쓸 이름. */
+  brand: string
+  /** 401/403일 때 보여줄 안내. */
+  authHint: string
+  /** fetch 자체가 실패했을 때(네트워크·CORS) 보여줄 안내. */
+  netHint: string
   prompt: string
   doc: AiDocSummary
   signal?: AbortSignal
   onProgress?: (status: string) => void
+  /** 성공한 엔드포인트 기억 훅 (GLM 코딩/일반 플랜 전환용). */
+  onBase?: (base: string) => void
 }): Promise<AiMotionPlan> {
-  const { apiKey, model, prompt, doc, signal, onProgress } = opts
-  // OpenRouter 키(sk-or-…)는 엔드포인트/모델 슬러그 자동 전환
-  const orKey = apiKey.startsWith('sk-or-')
-  let bases: string[]
-  if (orKey) {
-    bases = ['https://openrouter.ai/api/v1']
-  } else {
-    try {
-      const saved = localStorage.getItem(GLM_BASE_STORAGE)
-      bases = saved ? [saved, ...GLM_BASES.filter((b) => b !== saved)] : [...GLM_BASES]
-    } catch {
-      bases = [...GLM_BASES]
-    }
-  }
-  const mdl = orKey && !model.includes('/') ? `z-ai/${model}` : model
+  const { apiKey, model, bases, brand, authHint, netHint, prompt, doc, signal, onProgress, onBase } = opts
   const askAt = async (base: string, extra: string): Promise<AiMotionPlan> => {
-    onProgress?.(t('GLM에 연결 중'))
+    onProgress?.(t('{brand}에 연결 중').replace('{brand}', brand))
     let res: Response
     try {
       res = await fetch(`${base}/chat/completions`, {
@@ -568,7 +607,7 @@ export async function generateMotionGlm(opts: {
           authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: mdl,
+          model,
           stream: true,
           temperature: 0.4,
           response_format: { type: 'json_object' },
@@ -583,7 +622,7 @@ export async function generateMotionGlm(opts: {
       })
     } catch (e) {
       if ((e as Error).name === 'AbortError') throw e
-      throw new Error(t('네트워크 오류 — 인터넷 연결을 확인하세요'))
+      throw new Error(netHint)
     }
     if (!res.ok) {
       let detail = ''
@@ -595,19 +634,13 @@ export async function generateMotionGlm(opts: {
       }
       const err = new Error(
         res.status === 401 || res.status === 403
-          ? t('GLM 키 인증 실패 — 키와 플랜(코딩/일반)을 확인하세요') + (detail ? ` (${detail})` : '')
+          ? authHint + (detail ? ` (${detail})` : '')
           : detail || t('API 오류 ({status})').replace('{status}', String(res.status)),
       ) as Error & { status?: number }
       err.status = res.status
       throw err
     }
-    if (!orKey) {
-      try {
-        localStorage.setItem(GLM_BASE_STORAGE, base) // 성공 엔드포인트 기억
-      } catch {
-        // 무시
-      }
-    }
+    onBase?.(base)
     // OpenAI 형식 SSE — choices[0].delta.content 누적
     const reader = res.body?.getReader()
     let acc = ''
@@ -646,7 +679,7 @@ export async function generateMotionGlm(opts: {
       return await askAt(bases[0], extra)
     } catch (e) {
       const st = (e as Error & { status?: number }).status
-      // 코딩 플랜 ↔ 일반 API 경로 자동 전환
+      // 플랜/경로가 다른 키 — 다음 엔드포인트로 자동 전환
       if ((st === 401 || st === 403 || st === 404) && bases[1]) return askAt(bases[1], extra)
       throw e
     }
@@ -658,6 +691,76 @@ export async function generateMotionGlm(opts: {
     onProgress?.(t('형식이 어긋나 다시 요청 중'))
     return ask('\n\n(이전 응답이 JSON 스키마에 맞지 않았습니다. 지시된 JSON 오브젝트 하나만 출력하세요.)')
   }
+}
+
+/** GLM(Z.ai) — 엔드포인트 자동 전환(코딩 플랜/일반), OpenRouter 키는 슬러그 변환. */
+export function generateMotionGlm(opts: {
+  apiKey: string
+  model: string
+  prompt: string
+  doc: AiDocSummary
+  signal?: AbortSignal
+  onProgress?: (status: string) => void
+}): Promise<AiMotionPlan> {
+  const { apiKey, model, ...rest } = opts
+  // OpenRouter 키(sk-or-…)는 엔드포인트/모델 슬러그 자동 전환
+  const orKey = apiKey.startsWith('sk-or-')
+  let bases: string[]
+  if (orKey) {
+    bases = [OPENROUTER_BASE]
+  } else {
+    try {
+      const saved = localStorage.getItem(GLM_BASE_STORAGE)
+      bases = saved ? [saved, ...GLM_BASES.filter((b) => b !== saved)] : [...GLM_BASES]
+    } catch {
+      bases = [...GLM_BASES]
+    }
+  }
+  return generateMotionOpenAi({
+    ...rest,
+    apiKey,
+    model: orKey && !model.includes('/') ? `z-ai/${model}` : model,
+    bases,
+    brand: 'GLM',
+    authHint: t('GLM 키 인증 실패 — 키와 플랜(코딩/일반)을 확인하세요'),
+    netHint: t('네트워크 오류 — 인터넷 연결을 확인하세요'),
+    onBase: orKey
+      ? undefined
+      : (base) => {
+          try {
+            localStorage.setItem(GLM_BASE_STORAGE, base) // 성공 엔드포인트 기억
+          } catch {
+            // 무시
+          }
+        },
+  })
+}
+
+/**
+ * DeepSeek — 공식 API(api.deepseek.com) 또는 OpenRouter 키(sk-or-…)로.
+ * 공식 API는 날짜 없는 별칭만 받으므로(deepseek-v4-flash = V4-Flash-0731),
+ * 0731 같은 고정 스냅샷을 쓰려면 OpenRouter 키 + deepseek-v4-flash-0731.
+ */
+export function generateMotionDeepseek(opts: {
+  apiKey: string
+  model: string
+  prompt: string
+  doc: AiDocSummary
+  signal?: AbortSignal
+  onProgress?: (status: string) => void
+}): Promise<AiMotionPlan> {
+  const { apiKey, model, ...rest } = opts
+  const orKey = apiKey.startsWith('sk-or-')
+  return generateMotionOpenAi({
+    ...rest,
+    apiKey,
+    model: orKey && !model.includes('/') ? `deepseek/${model}` : model,
+    bases: orKey ? [OPENROUTER_BASE] : [DEEPSEEK_BASE],
+    brand: 'DeepSeek',
+    authHint: t('DeepSeek 키 인증 실패 — 키를 확인하세요'),
+    // 공식 API가 브라우저 요청을 막는 경우가 있어 대안을 알려준다
+    netHint: t('DeepSeek 연결 실패 — 브라우저에서 막히면 OpenRouter 키(sk-or-…)를 쓰세요'),
+  })
 }
 
 export async function generateMotion(opts: {

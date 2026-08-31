@@ -5,6 +5,7 @@ import {
   getAiProvider, setAiProvider, getLocalUrl, getLocalModel, setLocalConfig,
   listLocalModels, generateMotionLocal, type AiProvider,
   getGlmKey, setGlmKey, getGlmModel, setGlmModel, generateMotionGlm,
+  getDeepseekKey, setDeepseekKey, getDeepseekModel, setDeepseekModel, generateMotionDeepseek,
 } from '../lib/ai'
 import { useEditor } from '../store'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
@@ -441,6 +442,8 @@ function AiMotionPanel() {
   const [provider, setProvider] = useState<AiProvider>(getAiProvider)
   const [glmKey, setGlmKeyState] = useState(getGlmKey)
   const [glmModel, setGlmModelState] = useState(getGlmModel)
+  const [dsKey, setDsKeyState] = useState(getDeepseekKey)
+  const [dsModel, setDsModelState] = useState(getDeepseekModel)
   const [localModels, setLocalModels] = useState<string[]>([])
   const [localModel, setLocalModel] = useState(getLocalModel)
   // 로컬 프로바이더 — 모델 목록 로드 (Ollama /api/tags)
@@ -469,6 +472,7 @@ function AiMotionPanel() {
     >
       <option value="anthropic">Claude (API)</option>
       <option value="glm">GLM (Z.ai)</option>
+      <option value="deepseek">DeepSeek</option>
       <option value="local">{t('로컬 (Ollama)')}</option>
     </select>
   )
@@ -552,7 +556,16 @@ function AiMotionPanel() {
                 signal: ac.signal,
                 onProgress: setStatus,
               })
-            : await generateMotion({ apiKey, prompt: req, doc, signal: ac.signal, onProgress: setStatus })
+            : provider === 'deepseek'
+              ? await generateMotionDeepseek({
+                  apiKey: dsKey,
+                  model: dsModel,
+                  prompt: req,
+                  doc,
+                  signal: ac.signal,
+                  onProgress: setStatus,
+                })
+              : await generateMotion({ apiKey, prompt: req, doc, signal: ac.signal, onProgress: setStatus })
       setStatus(t('모션 적용 중'))
       const applied = applyAiMotion(plan)
       if (applied === 0) {
@@ -575,42 +588,48 @@ function AiMotionPanel() {
     }
   }
 
-  if ((provider === 'anthropic' && (!apiKey || editKey)) || (provider === 'glm' && (!glmKey || editKey))) {
-    const isGlm = provider === 'glm'
-    if (isGlm) {
+  // OpenAI 호환 프로바이더(GLM·DeepSeek)는 키 입력 폼이 같다 — 문구/저장소만 다르다
+  const oai =
+    provider === 'glm'
+      ? {
+          key: glmKey,
+          save: (k: string) => { setGlmKey(k); setGlmKeyState(k) },
+          note: t('Z.ai 또는 OpenRouter API 키가 필요합니다 (sk-or-… 키는 OpenRouter로 자동 인식). 키는 이 브라우저에만 저장됩니다.'),
+          ph: t('Z.ai / OpenRouter API 키'),
+        }
+      : provider === 'deepseek'
+        ? {
+            key: dsKey,
+            save: (k: string) => { setDeepseekKey(k); setDsKeyState(k) },
+            note: t('DeepSeek 또는 OpenRouter API 키가 필요합니다 (sk-or-… 키는 OpenRouter로 자동 인식). 키는 이 브라우저에만 저장됩니다.'),
+            ph: t('DeepSeek / OpenRouter API 키'),
+          }
+        : null
+
+  if ((provider === 'anthropic' && (!apiKey || editKey)) || (oai && (!oai.key || editKey))) {
+    if (oai) {
+      const commitKey = () => {
+        oai.save(keyDraft.trim())
+        setKeyDraft('')
+        setEditKey(false)
+      }
       return (
         <div className="knob aipanel">
           <div className="aipanel__row">{providerSelect}</div>
-          <p className="knob__note">
-            {t('Z.ai 또는 OpenRouter API 키가 필요합니다 (sk-or-… 키는 OpenRouter로 자동 인식). 키는 이 브라우저에만 저장됩니다.')}
-          </p>
+          <p className="knob__note">{oai.note}</p>
           <div className="aipanel__keyrow">
             <input
               className="input"
               type="password"
-              placeholder={t('Z.ai / OpenRouter API 키')}
+              placeholder={oai.ph}
               value={keyDraft}
               onChange={(e) => setKeyDraft(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && keyDraft.trim()) {
-                  setGlmKey(keyDraft.trim())
-                  setGlmKeyState(keyDraft.trim())
-                  setKeyDraft('')
-                  setEditKey(false)
-                }
+                if (e.key === 'Enter' && keyDraft.trim()) commitKey()
               }}
               spellCheck={false}
             />
-            <button
-              className="btn"
-              disabled={!keyDraft.trim()}
-              onClick={() => {
-                setGlmKey(keyDraft.trim())
-                setGlmKeyState(keyDraft.trim())
-                setKeyDraft('')
-                setEditKey(false)
-              }}
-            >
+            <button className="btn" disabled={!keyDraft.trim()} onClick={commitKey}>
               {t('저장')}
             </button>
             {editKey && (
@@ -620,12 +639,11 @@ function AiMotionPanel() {
             )}
           </div>
           {msgEl}
-          {editKey && glmKey && (
+          {editKey && oai.key && (
             <button
               className="aipanel__keybtn"
               onClick={() => {
-                setGlmKey('')
-                setGlmKeyState('')
+                oai.save('')
                 setEditKey(false)
                 setKeyDraft('')
               }}
@@ -694,6 +712,18 @@ function AiMotionPanel() {
             onChange={(e) => {
               setGlmModelState(e.target.value)
               setGlmModel(e.target.value)
+            }}
+          />
+        )}
+        {provider === 'deepseek' && (
+          <input
+            className="input input--inline aipanel__glmmodel"
+            value={dsModel}
+            spellCheck={false}
+            title={t('DeepSeek 모델 id — 공식 API는 deepseek-v4-flash(=0731 스냅샷)·deepseek-v4-pro, OpenRouter 키면 deepseek-v4-flash-0731 같은 날짜 스냅샷도 가능')}
+            onChange={(e) => {
+              setDsModelState(e.target.value)
+              setDeepseekModel(e.target.value)
             }}
           />
         )}

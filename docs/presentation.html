@@ -1,4 +1,5 @@
-<title>LottieMaker 프로젝트 덱</title>
+<title>LottieMaker 소개</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@200;300;400;500;600;700&display=swap">
@@ -10,12 +11,12 @@
     --panel-2:#EDEFF4;
     --ink:#141821;
     --ink-2:#3E4757;
-    --muted:#6B7488;
+    --muted:#616A7D;
     --line:#D8DCE5;
     --line-soft:#E6E9F0;
-    --key:#C9761A;      /* 키프레임 앰버 */
+    --key:#A85E0F;      /* 강조 — 호박색 */
     --key-soft:#F2A93B;
-    --path:#0F8F80;     /* 모션 패스 틸 */
+    --path:#0B7365;     /* 링크 — 청록 */
     --shadow:0 1px 2px rgba(20,24,33,.06), 0 8px 24px rgba(20,24,33,.05);
 
     --f-display:"IBM Plex Sans KR", "Apple SD Gothic Neo", system-ui, sans-serif;
@@ -67,6 +68,9 @@
     font-family:var(--f-display);
     font-weight:300;
     -webkit-font-smoothing:antialiased;
+    /* 한국어는 낱말 안에서 줄이 갈리지 않게 — 긴 낱말만 예외로 쪼갠다 */
+    word-break:keep-all;
+    overflow-wrap:break-word;
   }
 
   /* ── 덱 ── */
@@ -178,10 +182,9 @@
   /* ── 리스트 ── */
   ul.feat{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; }
   ul.feat li{
-    display:grid;
-    grid-template-columns:14px 1fr;
+    display:flex;
     gap:12px;
-    align-items:start;
+    align-items:flex-start;
     font-size:var(--step-1);
     font-weight:300;
     line-height:1.55;
@@ -189,6 +192,7 @@
   }
   ul.feat li::before{
     content:"";
+    flex:0 0 7px;
     width:7px; height:7px;
     margin-top:.62em;
     transform:rotate(45deg);
@@ -219,6 +223,7 @@
   .kv dt{ font-family:var(--f-mono); color:var(--muted); letter-spacing:.02em; }
   .kv dd{ margin:0; color:var(--ink-2); }
 
+  .keep{ white-space:nowrap; }
   .chips{ display:flex; flex-wrap:wrap; gap:8px; }
   .chip{
     font-family:var(--f-mono);
@@ -304,6 +309,57 @@
     letter-spacing:.06em;
     white-space:nowrap;
   }
+  .navbtn{
+    flex:0 0 auto;
+    width:34px; height:34px;
+    display:grid; place-items:center;
+    font-family:var(--f-display);
+    font-size:18px; line-height:1;
+    color:var(--ink-2);
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:8px;
+    cursor:pointer;
+    transition:border-color .18s, color .18s, background .18s;
+  }
+  .navbtn:hover:not(:disabled){ border-color:var(--key); color:var(--key); }
+  .navbtn:disabled{ opacity:.32; cursor:default; }
+
+  /* 조작법 힌트 — 처음 한 번, 첫 이동이나 9초 뒤 사라진다 */
+  .navhint{
+    position:fixed; left:50%; bottom:86px;
+    transform:translateX(-50%);
+    white-space:nowrap;
+    font-family:var(--f-mono);
+    font-size:12px; letter-spacing:.02em;
+    color:var(--ink-2);
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:999px;
+    padding:8px 14px;
+    box-shadow:var(--shadow);
+    z-index:11;
+    transition:opacity .5s ease, transform .5s ease;
+  }
+  .navhint b{ color:var(--key); font-weight:500; }
+  .navhint.gone{ opacity:0; transform:translateX(-50%) translateY(6px); pointer-events:none; }
+
+  /* 1번 슬라이드 — 키보드를 모르는 사람도 누를 곳이 보이게 */
+  .cta{
+    align-self:flex-start;
+    display:inline-flex; align-items:center; gap:10px;
+    font-family:var(--f-display);
+    font-size:var(--step-1); font-weight:500;
+    color:var(--ground);
+    background:var(--key);
+    border:none; border-radius:8px;
+    padding:12px 22px;
+    cursor:pointer;
+    transition:transform .18s cubic-bezier(.22,.9,.3,1), filter .18s;
+  }
+  .cta:hover{ transform:translateY(-2px); filter:brightness(1.06); }
+  .cta span{ font-family:var(--f-mono); }
+
   .navname{
     font-family:var(--f-mono);
     font-size:12px;
@@ -313,6 +369,18 @@
     min-width:12ch;
   }
   @media (max-width:720px){ .navname{ display:none; } }
+
+  /* 낮은 화면(노트북·프로젝터 720p) — 한 슬라이드가 한 화면에 들어오게 */
+  @media (max-height: 820px){
+    :root{
+      --pad: clamp(20px, 3.4vw, 52px);
+      --step-3: clamp(24px, 2.4vw, 34px);
+      --step-4: clamp(32px, 4.4vw, 60px);
+    }
+    .slide{ gap:clamp(12px,1.6vh,22px); }
+    .lede{ font-size:var(--step-1); }
+    .curve{ aspect-ratio:320 / 150; }
+  }
 
   @media (prefers-reduced-motion: reduce){
     *{ animation:none !important; transition:none !important; }
@@ -324,109 +392,107 @@
   <!-- 1 -->
   <section class="slide on" data-name="타이틀">
     <div class="wrap" style="display:flex;flex-direction:column;gap:clamp(18px,3vh,40px)">
-      <div class="eyebrow">브라우저 모션 에디터 · 2026</div>
-      <h1>LottieMaker<br><b>After Effects 없이</b> 만드는 Lottie</h1>
-      <p class="lede">템플릿에서 시작하거나 내 SVG·PNG를 올려 모션을 조립하고, 결과를 표준 Lottie JSON으로 내보내는 웹 도구.</p>
+      <div class="eyebrow">웹에서 만드는 움직이는 그래픽 · 2026</div>
+      <h1>LottieMaker<br><b>무거운 프로그램 없이</b> 만드는 <span class="keep">애니메이션</span></h1>
+      <p class="lede">앱과 웹에 들어가는 짧은 움직임을 — 로딩 표시, 좋아요 하트, 완료 체크 — 브라우저에서 만들고 바로 파일로 받습니다.</p>
       <div class="chips">
-        <span class="chip">React 19</span>
-        <span class="chip">TypeScript</span>
-        <span class="chip">Vite</span>
-        <span class="chip">zustand</span>
-        <span class="chip">lottie-web</span>
-        <span class="chip hot">서버 없음 · 전부 브라우저</span>
+        <span class="chip">설치 없음</span>
+        <span class="chip">가입 없음</span>
+        <span class="chip">브라우저만 있으면</span>
+        <span class="chip hot">만든 파일은 내 컴퓨터에</span>
       </div>
       <p class="mono" style="font-size:var(--step-0)">
         <a href="https://jaegyeom-kim.github.io/lottiemaker/">jaegyeom-kim.github.io/lottiemaker</a>
       </p>
+      <button class="cta" type="button" data-next>시작하기 <span>→</span></button>
     </div>
   </section>
 
   <!-- 2 -->
-  <section class="slide" data-name="문제">
+  <section class="slide" data-name="왜 만들었나">
     <div class="wrap split">
       <div style="display:flex;flex-direction:column;gap:20px">
         <div class="eyebrow">왜 만들었나</div>
-        <h2>Lottie 하나 만들려고<br><b>AE를 켜야 한다</b></h2>
-        <p>모션 하나에 라이선스·설치·플러그인(Bodymovin)·익스포트 왕복이 붙는다. 디자이너는 AE에 묶이고, 개발자는 JSON을 열어도 손댈 수 없다.</p>
+        <h2>작은 움직임 하나에<br><b>큰 프로그램을 켜야 했다</b></h2>
+        <p>지금까지는 애프터이펙트 같은 전문 프로그램이 있어야 했습니다. 값이 비싸고, 배우는 데 오래 걸리고, 고칠 때마다 프로그램과 브라우저를 오가야 합니다.</p>
       </div>
       <div class="grid" style="gap:12px">
-        <div class="card"><span class="tag">기존 흐름</span><h3>AE → Bodymovin → JSON → 확인 → 다시 AE</h3><p>수정 한 번에 왕복 한 번. 미리보기는 항상 다른 창.</p></div>
-        <div class="card" style="border-color:var(--key)"><span class="tag" style="color:var(--key)">LottieMaker</span><h3>브라우저 → 캔버스 → JSON</h3><p>편집·재생·내보내기가 한 화면. 링크만 있으면 누구나 연다.</p></div>
+        <div class="card"><span class="tag">전에는</span><h3>프로그램에서 만들기 → 파일로 빼기 → 확인 → 다시 프로그램</h3><p>조금 고칠 때마다 이 왕복을 반복합니다.</p></div>
+        <div class="card" style="border-color:var(--key)"><span class="tag" style="color:var(--key)">지금은</span><h3>브라우저에서 만들고, 그 자리에서 확인</h3><p>주소만 있으면 누구나 열어서 바로 씁니다.</p></div>
       </div>
     </div>
   </section>
 
   <!-- 3 -->
-  <section class="slide" data-name="두 모드">
+  <section class="slide" data-name="두 가지 방법">
     <div class="wrap" style="display:flex;flex-direction:column;gap:24px">
-      <div class="eyebrow">구조</div>
-      <h2>작업 모드 <b>두 가지</b>, 워크스페이스는 통째로 스왑</h2>
+      <div class="eyebrow">쓰는 방법</div>
+      <h2>골라 쓰거나, <b>직접 만들거나</b></h2>
       <div class="grid g2">
         <div class="card">
-          <span class="tag">모드 1</span>
-          <h3>템플릿 — 고르고 손본다</h3>
-          <p>내장 애니메이션 25종을 슬라이더로 조정. 모션을 만들 줄 몰라도 결과가 나온다.</p>
+          <span class="tag">첫 번째</span>
+          <h3>만들어 둔 것에서 고르기</h3>
+          <p>미리 준비된 애니메이션 25가지 중 하나를 고르고, 슬라이더를 움직여 크기와 속도만 취향에 맞춥니다.</p>
         </div>
         <div class="card">
-          <span class="tag">모드 2</span>
-          <h3>커스텀 — 처음부터 만든다</h3>
-          <p>그래픽을 올리거나 직접 그리고, 레이어마다 모션을 붙이고, 타임라인에서 키를 찍는다.</p>
+          <span class="tag">두 번째</span>
+          <h3>처음부터 직접 만들기</h3>
+          <p>내 그림을 올리거나 화면에서 바로 그리고, 어떻게 움직일지 하나씩 정합니다.</p>
         </div>
       </div>
-      <p>탭 전환은 <strong>실행 취소 히스토리까지 포함해</strong> 작업공간을 통째로 교체한다 — 어느 쪽 작업도 사라지지 않는다.</p>
+      <p>둘 사이를 오가도 각자의 작업이 그대로 남습니다. 잘못 눌러 지워질 걱정 없이 왔다 갔다 할 수 있습니다.</p>
     </div>
   </section>
 
   <!-- 4 -->
-  <section class="slide" data-name="템플릿 모드">
+  <section class="slide" data-name="골라 쓰기">
     <div class="wrap" style="display:flex;flex-direction:column;gap:24px">
-      <div class="eyebrow">모드 1 · 템플릿</div>
-      <h2>25종 갤러리 + <b>파라메트릭 노브</b></h2>
+      <div class="eyebrow">첫 번째 방법</div>
+      <h2>25가지 중에 고르고, <b>슬라이더로 손보기</b></h2>
       <div class="grid g4">
-        <div class="card"><h3>갤러리 25종</h3><p>로딩 7 · 피드백 3 · 인터랙션 9 · 이펙트 6. 호버 재생, 검색, 최근 사용.</p></div>
-        <div class="card"><h3>노브</h3><p>템플릿별 슬라이더가 픽셀·도 절대 단위. 값은 항상 원본에서 재계산해 누적 왜곡이 없다.</p></div>
-        <div class="card"><h3>그래픽 교체</h3><p>벨·점·핀 같은 지정 슬롯에 내 SVG/PNG를 끼우고 앵커를 마우스로 맞춘다.</p></div>
-        <div class="card"><h3>색 일괄 변경</h3><p>문서의 단색 fill/stroke를 그룹으로 추출해 한 번에 교체.</p></div>
+        <div class="card"><h3>25가지 준비됨</h3><p>로딩 표시, 좋아요·체크 같은 반응, 알림 흔들기, 반짝임까지. 마우스를 올리면 미리 움직여 봅니다.</p></div>
+        <div class="card"><h3>슬라이더로 조절</h3><p>크기·속도·개수·기울기를 눈금 보며 맞춥니다. 아무리 만져도 원래 모양이 망가지지 않습니다.</p></div>
+        <div class="card"><h3>내 그림으로 교체</h3><p>종 모양, 점, 핀 같은 자리에 내 그림을 끼워 넣고 위치를 잡습니다.</p></div>
+        <div class="card"><h3>색을 한 번에</h3><p>쓰인 색을 모아 보여 주고, 한 번 고르면 관련된 곳이 함께 바뀝니다.</p></div>
       </div>
-      <p>텍스트 템플릿(숫자 카운트 등)은 로컬 폰트를 직접 고를 수 있고, <strong>사용 예시 목업</strong>으로 폰 프레임 속 실제 UI 맥락에 얹어 확인한다.</p>
+      <p>숫자가 올라가는 종류는 글꼴을 골라 쓸 수 있고, <strong>휴대폰 화면 안에 얹어</strong> 실제로 어떻게 보일지 미리 확인합니다.</p>
     </div>
   </section>
 
   <!-- 5 -->
-  <section class="slide" data-name="커스텀 모드">
+  <section class="slide" data-name="직접 만들기">
     <div class="wrap" style="display:flex;flex-direction:column;gap:24px">
-      <div class="eyebrow">모드 2 · 커스텀</div>
-      <h2>그리고, 올리고, <b>모션을 조립한다</b></h2>
+      <div class="eyebrow">두 번째 방법</div>
+      <h2>그리고, 올리고, <b>움직임을 붙인다</b></h2>
       <div class="grid g3">
-        <div class="card"><span class="tag">입력</span><h3>업로드 · 드로잉 · 펜</h3><p>SVG는 벡터 셰이프로 변환. 도형 툴(Q)과 일러스트레이터식 펜(G) — 2점부터 즉시 실제 레이어로 살아난다.</p></div>
-        <div class="card"><span class="tag">쉬운 길</span><h3>등장 · 루프 · 퇴장 3슬롯</h3><p>레이어마다 프리셋 조합. 루프는 클립에 정수 사이클로 맞춰져 끊김이 없다.</p></div>
-        <div class="card"><span class="tag">정밀한 길</span><h3>키프레임 모드</h3><p>AE 사용자용. 위치·크기·회전·불투명도 채널을 직접 편집, 재생헤드에 자동 키.</p></div>
+        <div class="card"><span class="tag">준비</span><h3>올리거나 그리거나</h3><p>가지고 있는 그림을 끌어다 놓거나, 네모·동그라미·별·선을 화면에서 바로 그립니다. 자유로운 곡선도 그릴 수 있습니다.</p></div>
+        <div class="card"><span class="tag">쉬운 길</span><h3>등장 · 반복 · 퇴장 고르기</h3><p>그림마다 어떻게 나타나고, 머무는 동안 어떻게 움직이고, 어떻게 사라질지 목록에서 고릅니다.</p></div>
+        <div class="card"><span class="tag">꼼꼼한 길</span><h3>직접 정하기</h3><p>몇 초에 어디에 있을지, 얼마나 커질지, 얼마나 돌아갈지를 시간 위에 하나씩 찍어 둡니다.</p></div>
       </div>
       <div class="grid g3">
-        <div class="card"><h3>패턴 복제</h3><p>개수·간격·회전·크기·시간차를 누적 오프셋으로 — 스태거 등장, 방사형 패턴.</p></div>
-        <div class="card"><h3>다중 선택 (AE 방식)</h3><p>마키 러버밴드, ⇧/⌘ 토글, 페이스트보드 드래그, 그룹 이동.</p></div>
-        <div class="card"><h3>산술 입력</h3><p>모든 숫자 필드에서 <code>100+50</code>, <code>*2</code>, <code>/4</code>.</p></div>
+        <div class="card"><h3>줄줄이 복제</h3><p>하나를 만들어 두면 개수·간격·시간차를 정해 여러 개로 늘립니다. 차례로 나타나는 효과가 한 번에 만들어집니다.</p></div>
+        <div class="card"><h3>여러 개 한꺼번에</h3><p>빈 곳을 드래그해 묶어 고르고, 함께 옮기고 함께 정렬합니다.</p></div>
+        <div class="card"><h3>계산해서 넣기</h3><p>숫자 칸에 <code>100+50</code>이나 <code>*2</code>처럼 적으면 알아서 계산해 넣습니다.</p></div>
       </div>
     </div>
   </section>
 
   <!-- 6 -->
-  <section class="slide" data-name="타임라인">
+  <section class="slide" data-name="시간 조절">
     <div class="wrap split">
       <div style="display:flex;flex-direction:column;gap:20px">
-        <div class="eyebrow">코어</div>
-        <h2>타임라인과 <b>그래프 에디터</b></h2>
+        <div class="eyebrow">핵심 화면</div>
+        <h2>언제, 어떤 속도로<br><b>움직일지 정하는 곳</b></h2>
         <ul class="feat">
-          <li>ms 눈금자, 레이어 트리, 프로퍼티별 키프레임 행 — 다이아몬드를 끌고 더블클릭으로 지운다</li>
-          <li>구간 이징 팝업: 프리셋 · 베지어 핸들 드래그 · <code>cubic-bezier()</code> 수치 입력</li>
-          <li><strong>이징 토큰</strong> — 내 커브에 이름을 붙여 프로젝트를 넘어 재사용</li>
-          <li>그래프 에디터는 AE value graph 방식 — 키마다 in/out 탄젠트, 탄젠트 링크와 ⌥ 브레이크</li>
-          <li>AE 단축키 그대로: <code>P S R T</code> · <code>U</code> · <code>J K</code> · <code>[ ]</code> · <code>⌥[ ⌥]</code></li>
+          <li>무엇이 언제 나타나고 사라지는지 한눈에</li>
+          <li>점을 끌면 시점 이동, 두 번 누르면 삭제</li>
+          <li>속도의 느낌을 곡선으로 — 천천히 시작해 빠르게, 또는 그 반대로</li>
+          <li><span><strong>마음에 든 속도감은 이름 붙여 저장</strong>해 다음에 다시 씁니다</span></li>
         </ul>
       </div>
       <div class="demo">
-        <span class="tag mono" style="font-size:11px;letter-spacing:.1em;color:var(--muted)">EASE CURVE · 구간 이징</span>
-        <svg class="curve" viewBox="0 0 320 220" role="img" aria-label="베지어 이징 커브와 탄젠트 핸들">
+        <span class="tag mono" style="font-size:11px;letter-spacing:.1em;color:var(--muted)">속도 곡선</span>
+        <svg class="curve" viewBox="0 0 320 220" role="img" aria-label="천천히 시작해 부드럽게 멈추는 속도 곡선">
           <rect class="frame" x="20" y="20" width="280" height="180" rx="4"></rect>
           <line class="grid-l" x1="20" y1="65" x2="300" y2="65"></line>
           <line class="grid-l" x1="20" y1="110" x2="300" y2="110"></line>
@@ -439,143 +505,129 @@
           <rect class="k" x="14" y="194" width="12" height="12" transform="rotate(45 20 200)"></rect>
           <rect class="k" x="294" y="14" width="12" height="12" transform="rotate(45 300 20)"></rect>
         </svg>
-        <p style="font-size:var(--step-0)">핸들을 끌면 값이 라이브로 갱신되고 <code>⌘Z</code> 한 번에 되돌아간다.</p>
+        <p style="font-size:var(--step-0)">손잡이를 끌면 화면의 움직임이 곧바로 바뀌고, 되돌리기 한 번이면 원래대로.</p>
       </div>
     </div>
   </section>
 
   <!-- 7 -->
-  <section class="slide" data-name="자연 모션">
+  <section class="slide" data-name="자연스러운 움직임">
     <div class="wrap split">
       <div style="display:flex;flex-direction:column;gap:20px">
-        <div class="eyebrow">최근 작업 · 2026-08-28</div>
-        <h2>자연스러운 움직임을 <b>적은 키로</b></h2>
-        <p>"적은 키 + 후편집 가능" 노선. 물리를 곡선 샘플 키로 <strong>굽고(bake)</strong> 나면 결과는 평범한 키프레임이라 그대로 손댈 수 있다.</p>
+        <div class="eyebrow">최근에 넣은 것</div>
+        <h2>기계 같지 않고 <b>살아 있는 느낌으로</b></h2>
+        <p>사람 눈에 자연스러운 움직임에는 규칙이 있습니다. 그 규칙을 버튼 하나로 적용하되, 결과는 그대로 손댈 수 있게 남겨 둡니다.</p>
         <div class="grid g2" style="gap:10px">
-          <div class="card"><h3>스프링 정착</h3><p>감쇠 조화진동 닫힌형으로 오버슛→정착 극값만 키로. 출렁/보통/절제.</p></div>
-          <div class="card"><h3>AI 자동 아크</h3><p>위치 키 3개 이상이면 Catmull-Rom 곡선 경로를 자동으로.</p></div>
-          <div class="card"><h3>스태거</h3><p>다중 선택 레이어 키를 위→아래 4f(⇧ 8f) 계단 오프셋.</p></div>
-          <div class="card"><h3>팔로우스루</h3><p>부모 모션을 지연 샘플해 자식의 위치·회전 랙을 키로 굽는다.</p></div>
+          <div class="card"><h3>튕기며 멈추기</h3><p>목표를 살짝 지나쳤다가 제자리로 돌아옵니다. 세기는 세 단계.</p></div>
+          <div class="card"><h3>곡선으로 지나가기</h3><p>여러 지점을 지날 때 각지지 않고 부드러운 길을 그립니다.</p></div>
+          <div class="card"><h3>차례로 등장</h3><p>여러 개를 골라 두면 위에서 아래로 조금씩 늦게 나타납니다.</p></div>
+          <div class="card"><h3>뒤따라 흔들리기</h3><p>손이 움직이면 소매가 늦게 따라오듯, 딸린 것이 살짝 늦게 움직입니다.</p></div>
         </div>
       </div>
       <div class="demo">
-        <span class="tag mono" style="font-size:11px;letter-spacing:.1em;color:var(--muted)">LINEAR vs SPRING</span>
+        <span class="tag mono" style="font-size:11px;letter-spacing:.1em;color:var(--muted)">그냥 이동 vs 튕기며 멈추기</span>
         <div class="row">
-          <span>LINEAR</span>
+          <span>그냥</span>
           <div class="track"><div class="goal"></div><div class="dot a"></div></div>
         </div>
         <div class="row">
-          <span>SPRING</span>
+          <span>튕기며</span>
           <div class="track"><div class="goal"></div><div class="dot b"></div></div>
         </div>
-        <p style="font-size:var(--step-0)">같은 시작·끝, 같은 길이. 차이는 정착 구간의 극값 키뿐이다.</p>
+        <p style="font-size:var(--step-0)">출발점도 도착점도 걸리는 시간도 같습니다. 멈추는 방식만 다릅니다.</p>
       </div>
     </div>
   </section>
 
   <!-- 8 -->
-  <section class="slide" data-name="AI 모션">
+  <section class="slide" data-name="말로 만들기">
     <div class="wrap" style="display:flex;flex-direction:column;gap:24px">
-      <div class="eyebrow">베타</div>
-      <h2>문장으로 쓰면 <b>키프레임이 나온다</b></h2>
-      <p class="lede">“공이 위에서 떨어져 튕기게” → 위치·회전·트림 채널의 키프레임 플랜.</p>
+      <div class="eyebrow">시험 중인 기능</div>
+      <h2>문장으로 쓰면 <b>움직임이 만들어진다</b></h2>
+      <p class="lede">“공이 위에서 떨어져 튕기게” 라고 쓰면 그대로 움직이는 결과가 나옵니다.</p>
       <div class="grid g3">
-        <div class="card"><span class="tag">BYOK</span><h3>내 키로 브라우저에서 직접</h3><p>키는 이 브라우저 localStorage에만 있고, 프로젝트 파일·자동 저장·내보낸 JSON 어디에도 들어가지 않는다.</p></div>
-        <div class="card"><span class="tag">프로바이더</span><h3>Anthropic · GLM · 로컬</h3><p>OpenRouter 키(<code>sk-or-</code>)는 자동 인식, 로컬은 Ollama 엔드포인트.</p></div>
-        <div class="card"><span class="tag">결과</span><h3>평범한 키프레임</h3><p>블랙박스가 아니라 편집 가능한 키. 적용 후 자동 재생, <code>⌘Z</code> 한 번에 원복.</p></div>
+        <div class="card"><span class="tag">준비물</span><h3>본인 이용권으로</h3><p>쓰던 AI 서비스의 이용 번호를 한 번 넣어 두면 됩니다. 이 브라우저에만 남고, 만든 파일에는 절대 들어가지 않습니다.</p></div>
+        <div class="card"><span class="tag">선택</span><h3>서비스는 골라서</h3><p>여러 AI 서비스 중 원하는 것을 고르고, 내 컴퓨터에서 돌아가는 것도 쓸 수 있습니다.</p></div>
+        <div class="card"><span class="tag">결과</span><h3>손댈 수 있는 결과</h3><p>결과가 그대로 굳어 버리지 않습니다. 마음에 안 드는 부분만 고치고, 통째로 되돌리기도 한 번이면 됩니다.</p></div>
       </div>
     </div>
   </section>
 
   <!-- 9 -->
-  <section class="slide" data-name="임포트 · 씬">
+  <section class="slide" data-name="남의 파일 열기">
     <div class="wrap" style="display:flex;flex-direction:column;gap:24px">
-      <div class="eyebrow">호환</div>
-      <h2>남이 만든 Lottie를 <b>키프레임째 열어본다</b></h2>
+      <div class="eyebrow">가져오기</div>
+      <h2>다른 데서 만든 애니메이션도 <b>열어서 고친다</b></h2>
       <div class="grid g2">
         <div class="card">
-          <h3>Lottie / dotLottie 임포트</h3>
-          <p>위치·크기·회전·불투명도 키프레임과 구간 이징을 <code>xkf</code>로 변환해 타임라인에서 그대로 편집. 시간은 60fps, 좌표는 512 캔버스로 환산.</p>
+          <h3>움직임까지 그대로</h3>
+          <p>받은 파일을 끌어다 놓으면 언제 어떻게 움직이는지가 그대로 살아 있는 채로 열립니다. 필요한 부분만 고쳐 쓰면 됩니다.</p>
         </div>
         <div class="card">
-          <h3>부모 링크 해석</h3>
-          <p>정적 체인은 행렬 합성으로 정확 변환(이징 보존), 움직이는 부모는 월드 트랜스폼을 키로 베이크.</p>
+          <h3>딸린 관계도 유지</h3>
+          <p>따라 움직이도록 묶여 있던 것들도 원래 보이던 대로 유지됩니다.</p>
         </div>
         <div class="card">
-          <h3>씬 = 프리컴프</h3>
-          <p>프리컴프가 있는 파일은 AE 컴포지션처럼 <strong>씬으로 보존</strong>. 타임라인 트리의 트월로 내부 레이어를 펼치고, 더블클릭으로 진입.</p>
+          <h3>안에 든 묶음도 그대로</h3>
+          <p>여러 그림이 한 덩어리로 묶여 있으면 그 구조를 유지한 채 열고, 더블클릭으로 안에 들어가 고칩니다.</p>
         </div>
         <div class="card">
-          <h3>표준을 벗어나지 않는다</h3>
-          <p>씬은 문서 안의 표준 comp 에셋이라 내보낸 JSON이 어느 플레이어에서든 그대로 재생된다.</p>
+          <h3>다시 내보내도 안전</h3>
+          <p>흔히 쓰는 표준 방식 그대로라, 내보낸 파일은 어느 앱에서 열어도 똑같이 재생됩니다.</p>
         </div>
       </div>
-      <p><span class="mono" style="color:var(--muted)">한계 —</span> 텍스트·매트·홀드 키·<code>tm</code>은 건너뛰거나 근사한 뒤 알린다.</p>
+      <p><span class="mono" style="color:var(--muted)">아직 안 되는 것 —</span> 글자 요소와 일부 특수 효과는 건너뛰거나 비슷하게 바꾼 뒤 알려 줍니다.</p>
     </div>
   </section>
 
   <!-- 10 -->
   <section class="slide" data-name="내보내기">
     <div class="wrap" style="display:flex;flex-direction:column;gap:24px">
-      <div class="eyebrow">출력</div>
-      <h2>한 문서에서 <b>여섯 갈래</b>로</h2>
+      <div class="eyebrow">가져가기</div>
+      <h2>한 번 만들어 <b>필요한 모양대로</b></h2>
       <div class="grid g3">
-        <div class="card"><h3>Lottie JSON</h3><p>다운로드 또는 클립보드 복사. 배속 굽기 옵션.</p></div>
-        <div class="card"><h3>dotLottie</h3><p>manifest + 애니메이션 단일 파일. 의존성 없는 자체 zip 라이터.</p></div>
-        <div class="card"><h3>WebM</h3><p>컴포지션 1회 재생을 실시간 녹화, 배경색 포함 2x.</p></div>
-        <div class="card"><h3>GIF</h3><p>프레임 정확 인코딩(gifenc), 웹워커 오프로드로 UI 유지.</p></div>
-        <div class="card"><h3>PNG</h3><p>현재 프레임(투명 2x) 또는 시퀀스 zip.</p></div>
-        <div class="card"><h3>.lmproj</h3><p>에셋 내장(base64 + SVG 원문)으로 파일 하나로 완결. 드롭하면 이어서 편집.</p></div>
+        <div class="card"><h3>앱·웹용 파일</h3><p>개발자에게 그대로 넘기는 가벼운 애니메이션 파일. 복사해서 붙여 넣어도 됩니다.</p></div>
+        <div class="card"><h3>한 덩이로 압축</h3><p>여러 조각을 파일 하나로 묶어 주고받기 편하게.</p></div>
+        <div class="card"><h3>영상</h3><p>재생 화면을 그대로 녹화해 영상 파일로.</p></div>
+        <div class="card"><h3>움직이는 그림 (GIF)</h3><p>메신저나 문서에 바로 붙일 수 있게.</p></div>
+        <div class="card"><h3>사진</h3><p>지금 이 순간의 한 장, 또는 모든 순간을 한꺼번에.</p></div>
+        <div class="card"><h3>작업 파일</h3><p>쓰던 그림까지 안에 담겨서, 다른 컴퓨터에 옮겨도 이어서 작업합니다.</p></div>
       </div>
-      <p>자동 저장은 IndexedDB(localStorage는 소형 미러), 수동 <strong>버전 스냅샷</strong> 20개, 복원 전 자동 백업.</p>
+      <p>작업은 손을 멈추면 자동으로 저장되고, 원할 때 <strong>지금 상태 저장해 두기</strong>로 되돌아갈 지점을 남길 수 있습니다.</p>
     </div>
   </section>
 
   <!-- 11 -->
-  <section class="slide" data-name="설계">
+  <section class="slide" data-name="만든 방식">
     <div class="wrap split">
       <div style="display:flex;flex-direction:column;gap:20px">
-        <div class="eyebrow">설계 결정</div>
-        <h2>확장 필드를 <b>표준 로티 위에</b> 얹는다</h2>
-        <p>에디터 상태를 별도 포맷에 두지 않고 로티 문서의 커스텀 필드로 넣는다. 플레이어는 모르는 필드를 무시하므로 <strong>내보낸 JSON = 편집 파일</strong>.</p>
-        <dl class="kv">
-          <dt>xsel</dt><dd>등장·루프·퇴장 3슬롯 상태</dd>
-          <dt>xkf</dt><dd>키프레임 모드 채널 · 구간 이징</dd>
-          <dt>xbase</dt><dd>레이어 정착 위치</dd>
-          <dt>xci</dt><dd>레이어 라벨 컬러</dd>
-          <dt>xsrc</dt><dd>원본 SVG 원문</dd>
-        </dl>
-        <p><code>ks</code> 채널은 편집할 때마다 <code>xsel</code> 또는 <code>xkf</code>에서 <strong>재생성</strong>된다 — 상태가 두 곳에 갈라지지 않는다.</p>
+        <div class="eyebrow">만들면서 정한 것</div>
+        <h2>내보낸 파일이 <b>곧 작업 파일</b></h2>
+        <p>보통은 작업용 파일과 전달용 파일이 따로 놉니다. 여기서는 하나입니다. 전달한 파일을 다시 끌어다 놓으면 만들던 그대로 이어서 고칠 수 있습니다.</p>
+        <p>편집에 필요한 정보는 재생하는 쪽이 그냥 지나치는 자리에 넣어 두었습니다. 그래서 <strong>어디서 열든 재생은 똑같고</strong>, 여기서 열면 편집까지 됩니다.</p>
       </div>
-      <div class="card" style="gap:14px">
-        <span class="tag">src/</span>
-        <dl class="kv" style="gap:10px 18px">
-          <dt>customBuilder</dt><dd>커스텀 엔진 — 슬롯·키프레임 → ks 생성, 스프링 굽기</dd>
-          <dt>lottieImport</dt><dd>임포트 — 부모 해석, 프리컴프 재귀 평탄화(5단)</dd>
-          <dt>svgImport</dt><dd>SVG → 로티 셰이프, 래스터 임베드</dd>
-          <dt>lottieKnobs</dt><dd>템플릿 파라메트릭 엔진 (px·° 단위)</dd>
-          <dt>lottieColors</dt><dd>색 추출·치환 (정적 + 키프레임)</dd>
-          <dt>store.ts</dt><dd>zustand — 모드 스왑, 스냅샷 undo/redo, 자동 저장</dd>
-          <dt>ai.ts</dt><dd>자연어 → 키프레임 플랜, 프로바이더 3종</dd>
-        </dl>
+      <div class="grid" style="gap:12px">
+        <div class="card"><h3>중간에 잃어버리지 않게</h3><p>손을 멈추면 알아서 저장하고, 창을 닫기 직전에도 한 번 더 저장합니다. 저장이 안 되는 상황이면 화면 위에 그렇다고 알려 줍니다.</p></div>
+        <div class="card"><h3>돌아갈 지점</h3><p>원할 때 지금 상태를 따로 남겨 두고, 나중에 그 시점으로 되돌아갑니다. 되돌리기 전 상태도 한 벌 남겨 둡니다.</p></div>
+        <div class="card"><h3>내 것은 내 컴퓨터에</h3><p>작업 내용은 서버로 보내지 않고 브라우저 안에 남습니다. 계정도 로그인도 없습니다.</p></div>
       </div>
     </div>
   </section>
 
   <!-- 12 -->
-  <section class="slide" data-name="현황">
+  <section class="slide" data-name="지금까지">
     <div class="wrap" style="display:flex;flex-direction:column;gap:28px">
-      <div class="eyebrow">현황 · 2026-07-09 → 2026-08-28</div>
-      <h2>50일, <b>커밋 121개</b></h2>
+      <div class="eyebrow">지금까지 · 2026년 7월 9일 → 8월 31일</div>
+      <h2>53일 동안 <b>123번 손봤다</b></h2>
       <div class="stats">
-        <div class="stat"><span class="n">21,072</span><span class="l">src TypeScript 줄</span></div>
-        <div class="stat"><span class="n">25</span><span class="l">내장 템플릿</span></div>
-        <div class="stat"><span class="n">36</span><span class="l">테스트 (e2e 35 + unit)</span></div>
-        <div class="stat"><span class="n">0</span><span class="l">서버 · 계정 · 백엔드</span></div>
+        <div class="stat"><span class="n">25</span><span class="l">골라 쓰는 애니메이션</span></div>
+        <div class="stat"><span class="n">37</span><span class="l">자동 점검 항목</span></div>
+        <div class="stat"><span class="n">6</span><span class="l">내보내는 방식</span></div>
+        <div class="stat"><span class="n">0</span><span class="l">서버 · 계정 · 이용료</span></div>
       </div>
       <div class="grid g2">
-        <div class="card"><h3>런타임 의존성 6개</h3><p>react · react-dom · zustand · lottie-web · gifenc · opentype.js. zip 라이터, dotLottie, WebM 녹화는 자체 구현.</p></div>
-        <div class="card"><h3>배포는 정적 한 벌</h3><p><code>vite build</code> → gh-pages. 데이터는 전부 사용자 브라우저에 남는다.</p></div>
+        <div class="card"><h3>고칠 때마다 자동 점검</h3><p>37가지 상황을 사람 대신 눌러 보고 확인합니다. 새 기능이 옛 기능을 망가뜨리면 바로 걸립니다.</p></div>
+        <div class="card"><h3>주소 하나가 전부</h3><p>설치할 것도, 켜 둘 서버도 없습니다. 주소를 열면 그게 프로그램입니다.</p></div>
       </div>
     </div>
   </section>
@@ -584,8 +636,8 @@
   <section class="slide" data-name="한마디">
     <div class="wrap" style="display:flex;flex-direction:column;gap:26px">
       <div class="eyebrow">정리</div>
-      <h1 style="font-size:var(--step-3);font-weight:300">AE의 <b>조작 문법</b>은 가져오고,<br>AE의 <b>설치·라이선스·왕복</b>은 버린다.</h1>
-      <p class="lede" style="max-width:44ch">링크 하나로 열어 그리고, 키를 찍고, 표준 Lottie로 내보낸다. 만든 파일은 어디서든 재생되고, 다시 열면 편집이 이어진다.</p>
+      <h1 style="font-size:var(--step-3);font-weight:300">전문 프로그램의 <b>손맛</b>은 가져오고,<br>설치와 <b>비용과 왕복</b>은 버린다.</h1>
+      <p class="lede" style="max-width:44ch">주소 하나 열어 그리고, 움직이게 하고, 파일로 받습니다. 받은 파일은 어디서든 재생되고, 다시 열면 만들던 자리에서 이어집니다.</p>
       <p class="mono" style="font-size:var(--step-0)">
         <a href="https://jaegyeom-kim.github.io/lottiemaker/">jaegyeom-kim.github.io/lottiemaker</a>
       </p>
@@ -595,10 +647,14 @@
 </div>
 
 <nav class="nav" aria-label="슬라이드 이동">
-  <span class="navname" id="navname">타이틀</span>
+  <button class="navbtn" id="prev" type="button" aria-label="이전 슬라이드">‹</button>
+  <span class="navname" id="navname" aria-live="polite" aria-atomic="true">타이틀</span>
   <div class="ruler" id="ruler"><div class="line"></div><div class="head" id="head"></div></div>
   <span class="counter" id="counter">01 / 13</span>
+  <button class="navbtn" id="next" type="button" aria-label="다음 슬라이드">›</button>
 </nav>
+
+<div class="navhint" id="navhint" role="note"></div>
 
 <script>
 (function(){
@@ -607,8 +663,24 @@
   var head = document.getElementById('head');
   var counter = document.getElementById('counter');
   var navname = document.getElementById('navname');
+  var prevBtn = document.getElementById('prev');
+  var nextBtn = document.getElementById('next');
+  var hint = document.getElementById('navhint');
   var i = 0;
   var marks = [];
+  var moved = false;
+
+  // 조작법 안내 — 입력 방식에 맞는 문구로. 첫 이동이나 9초 뒤 사라진다.
+  var touch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  hint.innerHTML = touch
+    ? '좌우로 <b>밀거나</b> 아래 <b>◆</b>를 눌러 이동'
+    : '<b>← →</b> 키 · 스페이스 · 아래 <b>◆</b> 클릭으로 이동';
+  var hideHint = function(){
+    if (moved) return;
+    moved = true;
+    hint.classList.add('gone');
+  };
+  setTimeout(hideHint, 9000);
 
   slides.forEach(function(s, n){
     var pct = slides.length === 1 ? 0 : (n / (slides.length - 1)) * 100;
@@ -617,7 +689,7 @@
     b.style.left = pct + '%';
     b.title = s.dataset.name;
     b.setAttribute('aria-label', (n + 1) + '. ' + s.dataset.name);
-    b.addEventListener('click', function(){ go(n); });
+    b.addEventListener('click', function(){ hideHint(); go(n); });
     ruler.appendChild(b);
     marks.push(b);
   });
@@ -630,20 +702,49 @@
     marks.forEach(function(m, k){
       m.classList.toggle('cur', k === i);
       m.classList.toggle('done', k < i);
+      m.setAttribute('aria-current', k === i ? 'true' : 'false');
     });
     head.style.left = (slides.length === 1 ? 0 : (i / (slides.length - 1)) * 100) + '%';
     counter.textContent = pad(i + 1) + ' / ' + pad(slides.length);
     navname.textContent = slides[i].dataset.name;
     if (location.hash !== '#' + (i + 1)) history.replaceState(null, '', '#' + (i + 1));
+    prevBtn.disabled = i === 0;
+    nextBtn.disabled = i === slides.length - 1;
     window.scrollTo(0, 0);
   }
 
+  prevBtn.addEventListener('click', function(){ hideHint(); go(i - 1); });
+  nextBtn.addEventListener('click', function(){ hideHint(); go(i + 1); });
+  // 타이틀 슬라이드의 '시작하기'
+  Array.prototype.forEach.call(document.querySelectorAll('[data-next]'), function(b){
+    b.addEventListener('click', function(){ hideHint(); go(i + 1); });
+  });
+
+  // 터치 스와이프 — 키보드가 없는 기기의 유일한 진입점이라 링크/버튼 위에서도 받는다
+  var sx = null, sy = null;
+  document.addEventListener('touchstart', function(e){
+    if (e.touches.length !== 1) { sx = null; return; }
+    sx = e.touches[0].clientX;
+    sy = e.touches[0].clientY;
+  }, { passive: true });
+  document.addEventListener('touchend', function(e){
+    if (sx === null) return;
+    var t = e.changedTouches[0];
+    var dx = t.clientX - sx, dy = t.clientY - sy;
+    sx = null;
+    if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy)) return;
+    hideHint();
+    go(dx < 0 ? i + 1 : i - 1);
+  }, { passive: true });
+
   document.addEventListener('keydown', function(e){
     if (e.metaKey || e.ctrlKey || e.altKey) return;
-    if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); go(i + 1); }
-    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); go(i - 1); }
-    else if (e.key === 'Home') { e.preventDefault(); go(0); }
-    else if (e.key === 'End') { e.preventDefault(); go(slides.length - 1); }
+    // 스페이스는 버튼·링크를 누르는 키다 — 포커스가 거기 있으면 가로채지 않는다
+    if (e.key === ' ' && e.target && e.target.closest && e.target.closest('button, a')) return;
+    if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); hideHint(); go(i + 1); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); hideHint(); go(i - 1); }
+    else if (e.key === 'Home') { e.preventDefault(); hideHint(); go(0); }
+    else if (e.key === 'End') { e.preventDefault(); hideHint(); go(slides.length - 1); }
   });
 
   var start = parseInt((location.hash || '').slice(1), 10);
