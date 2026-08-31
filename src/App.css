@@ -1171,6 +1171,10 @@ body.drag-cross * { cursor: crosshair !important; }
 }
 
 /* SVG 드롭존 */
+.custombuilder__new {
+  margin-bottom: 8px;
+}
+
 .dropzone {
   display: flex;
   flex-direction: column;

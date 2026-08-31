@@ -310,6 +310,8 @@ const DICT: Record<string, string> = {
   '그래픽을 끌어다 놓아 커스텀을 시작하세요': 'Drop a graphic to start a custom project',
   'SVG/PNG/JPG/WebP · 왼쪽 커스텀 패널에서도 업로드 가능 · 프로젝트 파일(.lmproj.json) 드롭 시 복원': 'SVG/PNG/JPG/WebP · also uploadable from the Custom panel · drop a project file (.lmproj.json) to restore',
   '파일 열기': 'Open file',
+  '새 작업': 'New project',
+  '현재 작업을 지우고 새 작업을 시작할까요? 되돌릴 수 없습니다.': 'Discard the current project and start a new one? This cannot be undone.',
   '왼쪽에서 템플릿을 선택하세요': 'Pick a template on the left',
   '로티 JSON · 프로젝트 파일(.lmproj.json)을 끌어다 놓아도 열립니다': 'Lottie JSON · you can also drop a project file (.lmproj.json)',
   'JSON 파일 열기': 'Open JSON file',

@@ -128,6 +128,19 @@ export default function CustomBuilder() {
 
   return (
     <div className="custombuilder">
+      {/* 작업 중에도 새로 시작할 수 있게 — 빈 캔버스 화면에만 있던 '새 문서'와 같은 동작 */}
+      {active && layers.length > 0 && (
+        <button
+          className="btn btn--secondary btn--full custombuilder__new"
+          onClick={() => {
+            // newBlankCustom은 히스토리를 비운다 — ⌘Z로 못 되돌리므로 확인을 받는다
+            if (window.confirm(t('현재 작업을 지우고 새 작업을 시작할까요? 되돌릴 수 없습니다.')))
+              useEditor.getState().newBlankCustom()
+          }}
+        >
+          {t('새 작업')}
+        </button>
+      )}
       <div
         className={`dropzone ${dragOver ? 'dropzone--over' : ''}`}
         onClick={() => fileRef.current?.click()}
