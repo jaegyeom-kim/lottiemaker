@@ -1,0 +1,652 @@
+<title>LottieMaker 프로젝트 덱</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@200;300;400;500;600;700&display=swap">
+
+<style>
+  :root{
+    --ground:#F4F5F8;
+    --panel:#FFFFFF;
+    --panel-2:#EDEFF4;
+    --ink:#141821;
+    --ink-2:#3E4757;
+    --muted:#6B7488;
+    --line:#D8DCE5;
+    --line-soft:#E6E9F0;
+    --key:#C9761A;      /* 키프레임 앰버 */
+    --key-soft:#F2A93B;
+    --path:#0F8F80;     /* 모션 패스 틸 */
+    --shadow:0 1px 2px rgba(20,24,33,.06), 0 8px 24px rgba(20,24,33,.05);
+
+    --f-display:"IBM Plex Sans KR", "Apple SD Gothic Neo", system-ui, sans-serif;
+    --f-mono:"IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+
+    --pad: clamp(28px, 5vw, 88px);
+    --step-0: clamp(13px, 1.15vw, 16px);
+    --step-1: clamp(15px, 1.35vw, 19px);
+    --step-2: clamp(19px, 1.8vw, 26px);
+    --step-3: clamp(26px, 3vw, 44px);
+    --step-4: clamp(38px, 6vw, 92px);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#0E1116;
+      --panel:#161B23;
+      --panel-2:#1E242E;
+      --ink:#E9ECF2;
+      --ink-2:#B3BAC8;
+      --muted:#7C8496;
+      --line:#2A313D;
+      --line-soft:#232932;
+      --key:#F2A93B;
+      --key-soft:#F7C46B;
+      --path:#38C7B4;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 32px rgba(0,0,0,.28);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0E1116;
+    --panel:#161B23;
+    --panel-2:#1E242E;
+    --ink:#E9ECF2;
+    --ink-2:#B3BAC8;
+    --muted:#7C8496;
+    --line:#2A313D;
+    --line-soft:#232932;
+    --key:#F2A93B;
+    --key-soft:#F7C46B;
+    --path:#38C7B4;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 32px rgba(0,0,0,.28);
+  }
+
+  *{ box-sizing:border-box; }
+  body{
+    margin:0;
+    background:var(--ground);
+    color:var(--ink);
+    font-family:var(--f-display);
+    font-weight:300;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* ── 덱 ── */
+  .deck{ position:relative; }
+  .slide{
+    display:none;
+    min-height:100vh;
+    min-height:100svh;
+    padding:var(--pad) var(--pad) calc(var(--pad) + 78px);
+    flex-direction:column;
+    justify-content:center;
+    gap:clamp(18px,2.4vh,34px);
+  }
+  .slide.on{ display:flex; }
+  .slide > *{ animation:rise .42s cubic-bezier(.22,.9,.3,1) both; }
+  .slide > *:nth-child(2){ animation-delay:.05s; }
+  .slide > *:nth-child(3){ animation-delay:.1s; }
+  .slide > *:nth-child(4){ animation-delay:.15s; }
+  .slide > *:nth-child(5){ animation-delay:.2s; }
+  @keyframes rise{ from{ opacity:0; transform:translateY(10px); } to{ opacity:1; transform:none; } }
+
+  .wrap{ width:100%; max-width:1180px; margin:0 auto; }
+
+  /* ── 타이포 ── */
+  .eyebrow{
+    font-family:var(--f-mono);
+    font-size:var(--step-0);
+    font-weight:500;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--key);
+  }
+  h1{
+    font-size:var(--step-4);
+    font-weight:200;
+    line-height:1.02;
+    letter-spacing:-.03em;
+    margin:0;
+    text-wrap:balance;
+  }
+  h1 b{ font-weight:600; }
+  h2{
+    font-size:var(--step-3);
+    font-weight:300;
+    line-height:1.14;
+    letter-spacing:-.02em;
+    margin:0;
+    text-wrap:balance;
+  }
+  h2 b{ font-weight:600; }
+  .lede{
+    font-size:var(--step-2);
+    font-weight:200;
+    line-height:1.5;
+    color:var(--ink-2);
+    max-width:34ch;
+    margin:0;
+  }
+  p{ margin:0; font-size:var(--step-1); line-height:1.62; color:var(--ink-2); max-width:62ch; }
+  .mono{ font-family:var(--f-mono); }
+  code{
+    font-family:var(--f-mono);
+    font-size:.9em;
+    background:var(--panel-2);
+    border:1px solid var(--line-soft);
+    border-radius:4px;
+    padding:1px 5px;
+    color:var(--ink);
+  }
+  strong{ font-weight:600; color:var(--ink); }
+
+  /* ── 카드 그리드 ── */
+  .grid{ display:grid; gap:clamp(12px,1.4vw,20px); }
+  .g2{ grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .g3{ grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .g4{ grid-template-columns:repeat(4,minmax(0,1fr)); }
+  @media (max-width:900px){
+    .g2,.g3,.g4{ grid-template-columns:1fr; }
+    .split{ grid-template-columns:1fr !important; }
+  }
+  .card{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:clamp(16px,1.6vw,24px);
+    box-shadow:var(--shadow);
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .card h3{
+    margin:0;
+    font-size:var(--step-1);
+    font-weight:600;
+    letter-spacing:-.01em;
+    color:var(--ink);
+  }
+  .card p{ font-size:var(--step-0); line-height:1.6; }
+  .card .tag{
+    font-family:var(--f-mono);
+    font-size:11px;
+    letter-spacing:.1em;
+    text-transform:uppercase;
+    color:var(--muted);
+  }
+
+  .split{ display:grid; grid-template-columns:1.05fr .95fr; gap:clamp(24px,3vw,56px); align-items:center; }
+
+  /* ── 리스트 ── */
+  ul.feat{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; }
+  ul.feat li{
+    display:grid;
+    grid-template-columns:14px 1fr;
+    gap:12px;
+    align-items:start;
+    font-size:var(--step-1);
+    font-weight:300;
+    line-height:1.55;
+    color:var(--ink-2);
+  }
+  ul.feat li::before{
+    content:"";
+    width:7px; height:7px;
+    margin-top:.62em;
+    transform:rotate(45deg);
+    background:var(--key);
+    border-radius:1px;
+  }
+
+  /* ── 데이터 ── */
+  .stats{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:clamp(12px,1.4vw,20px); }
+  @media (max-width:900px){ .stats{ grid-template-columns:repeat(2,1fr); } }
+  .stat{
+    border-top:1px solid var(--line);
+    padding-top:14px;
+    display:flex; flex-direction:column; gap:4px;
+  }
+  .stat .n{
+    font-family:var(--f-mono);
+    font-variant-numeric:tabular-nums;
+    font-size:clamp(30px,3.6vw,52px);
+    font-weight:400;
+    letter-spacing:-.03em;
+    color:var(--ink);
+    line-height:1;
+  }
+  .stat .l{ font-size:var(--step-0); color:var(--muted); }
+
+  .kv{ display:grid; grid-template-columns:auto 1fr; gap:8px 18px; font-size:var(--step-0); }
+  .kv dt{ font-family:var(--f-mono); color:var(--muted); letter-spacing:.02em; }
+  .kv dd{ margin:0; color:var(--ink-2); }
+
+  .chips{ display:flex; flex-wrap:wrap; gap:8px; }
+  .chip{
+    font-family:var(--f-mono);
+    font-size:12px;
+    letter-spacing:.02em;
+    padding:5px 10px;
+    border:1px solid var(--line);
+    border-radius:999px;
+    color:var(--ink-2);
+    background:var(--panel);
+  }
+  .chip.hot{ border-color:var(--key); color:var(--key); }
+
+  a{ color:var(--path); text-decoration:none; border-bottom:1px solid color-mix(in srgb, var(--path) 40%, transparent); }
+  a:hover{ border-bottom-color:var(--path); }
+  a:focus-visible, button:focus-visible{ outline:2px solid var(--key); outline-offset:3px; border-radius:3px; }
+
+  /* ── 데모: 스프링 vs 리니어 ── */
+  .demo{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:clamp(16px,1.6vw,22px);
+    display:flex; flex-direction:column; gap:14px;
+    box-shadow:var(--shadow);
+  }
+  .track{ position:relative; height:34px; border-radius:6px; background:var(--panel-2); overflow:hidden; }
+  .track .goal{ position:absolute; top:0; bottom:0; right:12%; width:1px; background:var(--line); }
+  .dot{
+    position:absolute; top:50%; left:8%;
+    width:18px; height:18px; margin-top:-9px; border-radius:50%;
+  }
+  .dot.a{ background:var(--muted); animation:slideLinear 2.6s linear infinite; }
+  .dot.b{ background:var(--key); animation:slideSpring 2.6s cubic-bezier(.16,1.3,.3,1) infinite; }
+  @keyframes slideLinear{ 0%{ left:8%; } 45%,100%{ left:calc(88% - 18px); } }
+  @keyframes slideSpring{ 0%{ left:8%; } 45%,100%{ left:calc(88% - 18px); } }
+  .demo .row{ display:grid; grid-template-columns:96px 1fr; gap:14px; align-items:center; }
+  .demo .row span{ font-family:var(--f-mono); font-size:12px; color:var(--muted); letter-spacing:.06em; }
+
+  /* ── 이징 커브 ── */
+  .curve{ width:100%; height:auto; display:block; }
+  .curve .frame{ stroke:var(--line); fill:none; }
+  .curve .grid-l{ stroke:var(--line-soft); }
+  .curve .c{ stroke:var(--key); stroke-width:2.4; fill:none; }
+  .curve .h{ stroke:var(--path); stroke-width:1.2; }
+  .curve .k{ fill:var(--key); }
+  .curve .hk{ fill:var(--path); }
+
+  /* ── 하단 타임라인 내비 ── */
+  .nav{
+    position:fixed; left:0; right:0; bottom:0;
+    background:color-mix(in srgb, var(--ground) 88%, transparent);
+    backdrop-filter:blur(10px);
+    border-top:1px solid var(--line);
+    padding:10px var(--pad) 12px;
+    display:flex; align-items:center; gap:16px;
+    z-index:10;
+  }
+  .ruler{ position:relative; flex:1; height:26px; }
+  .ruler .line{ position:absolute; left:0; right:0; top:12px; height:1px; background:var(--line); }
+  .ruler .head{
+    position:absolute; top:0; bottom:0; width:1px; background:var(--key);
+    transition:left .3s cubic-bezier(.22,.9,.3,1);
+  }
+  .kf{
+    position:absolute; top:7px;
+    width:11px; height:11px; margin-left:-5.5px;
+    transform:rotate(45deg);
+    background:var(--panel);
+    border:1px solid var(--muted);
+    border-radius:1px;
+    padding:0; cursor:pointer;
+    transition:background .18s, border-color .18s, transform .18s;
+  }
+  .kf:hover{ border-color:var(--key); transform:rotate(45deg) scale(1.25); }
+  .kf.done{ background:var(--muted); border-color:var(--muted); }
+  .kf.cur{ background:var(--key); border-color:var(--key); transform:rotate(45deg) scale(1.35); }
+  .counter{
+    font-family:var(--f-mono);
+    font-variant-numeric:tabular-nums;
+    font-size:12px;
+    color:var(--muted);
+    letter-spacing:.06em;
+    white-space:nowrap;
+  }
+  .navname{
+    font-family:var(--f-mono);
+    font-size:12px;
+    color:var(--ink-2);
+    letter-spacing:.04em;
+    white-space:nowrap;
+    min-width:12ch;
+  }
+  @media (max-width:720px){ .navname{ display:none; } }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ animation:none !important; transition:none !important; }
+  }
+</style>
+
+<div class="deck">
+
+  <!-- 1 -->
+  <section class="slide on" data-name="타이틀">
+    <div class="wrap" style="display:flex;flex-direction:column;gap:clamp(18px,3vh,40px)">
+      <div class="eyebrow">브라우저 모션 에디터 · 2026</div>
+      <h1>LottieMaker<br><b>After Effects 없이</b> 만드는 Lottie</h1>
+      <p class="lede">템플릿에서 시작하거나 내 SVG·PNG를 올려 모션을 조립하고, 결과를 표준 Lottie JSON으로 내보내는 웹 도구.</p>
+      <div class="chips">
+        <span class="chip">React 19</span>
+        <span class="chip">TypeScript</span>
+        <span class="chip">Vite</span>
+        <span class="chip">zustand</span>
+        <span class="chip">lottie-web</span>
+        <span class="chip hot">서버 없음 · 전부 브라우저</span>
+      </div>
+      <p class="mono" style="font-size:var(--step-0)">
+        <a href="https://jaegyeom-kim.github.io/lottiemaker/">jaegyeom-kim.github.io/lottiemaker</a>
+      </p>
+    </div>
+  </section>
+
+  <!-- 2 -->
+  <section class="slide" data-name="문제">
+    <div class="wrap split">
+      <div style="display:flex;flex-direction:column;gap:20px">
+        <div class="eyebrow">왜 만들었나</div>
+        <h2>Lottie 하나 만들려고<br><b>AE를 켜야 한다</b></h2>
+        <p>모션 하나에 라이선스·설치·플러그인(Bodymovin)·익스포트 왕복이 붙는다. 디자이너는 AE에 묶이고, 개발자는 JSON을 열어도 손댈 수 없다.</p>
+      </div>
+      <div class="grid" style="gap:12px">
+        <div class="card"><span class="tag">기존 흐름</span><h3>AE → Bodymovin → JSON → 확인 → 다시 AE</h3><p>수정 한 번에 왕복 한 번. 미리보기는 항상 다른 창.</p></div>
+        <div class="card" style="border-color:var(--key)"><span class="tag" style="color:var(--key)">LottieMaker</span><h3>브라우저 → 캔버스 → JSON</h3><p>편집·재생·내보내기가 한 화면. 링크만 있으면 누구나 연다.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 -->
+  <section class="slide" data-name="두 모드">
+    <div class="wrap" style="display:flex;flex-direction:column;gap:24px">
+      <div class="eyebrow">구조</div>
+      <h2>작업 모드 <b>두 가지</b>, 워크스페이스는 통째로 스왑</h2>
+      <div class="grid g2">
+        <div class="card">
+          <span class="tag">모드 1</span>
+          <h3>템플릿 — 고르고 손본다</h3>
+          <p>내장 애니메이션 25종을 슬라이더로 조정. 모션을 만들 줄 몰라도 결과가 나온다.</p>
+        </div>
+        <div class="card">
+          <span class="tag">모드 2</span>
+          <h3>커스텀 — 처음부터 만든다</h3>
+          <p>그래픽을 올리거나 직접 그리고, 레이어마다 모션을 붙이고, 타임라인에서 키를 찍는다.</p>
+        </div>
+      </div>
+      <p>탭 전환은 <strong>실행 취소 히스토리까지 포함해</strong> 작업공간을 통째로 교체한다 — 어느 쪽 작업도 사라지지 않는다.</p>
+    </div>
+  </section>
+
+  <!-- 4 -->
+  <section class="slide" data-name="템플릿 모드">
+    <div class="wrap" style="display:flex;flex-direction:column;gap:24px">
+      <div class="eyebrow">모드 1 · 템플릿</div>
+      <h2>25종 갤러리 + <b>파라메트릭 노브</b></h2>
+      <div class="grid g4">
+        <div class="card"><h3>갤러리 25종</h3><p>로딩 7 · 피드백 3 · 인터랙션 9 · 이펙트 6. 호버 재생, 검색, 최근 사용.</p></div>
+        <div class="card"><h3>노브</h3><p>템플릿별 슬라이더가 픽셀·도 절대 단위. 값은 항상 원본에서 재계산해 누적 왜곡이 없다.</p></div>
+        <div class="card"><h3>그래픽 교체</h3><p>벨·점·핀 같은 지정 슬롯에 내 SVG/PNG를 끼우고 앵커를 마우스로 맞춘다.</p></div>
+        <div class="card"><h3>색 일괄 변경</h3><p>문서의 단색 fill/stroke를 그룹으로 추출해 한 번에 교체.</p></div>
+      </div>
+      <p>텍스트 템플릿(숫자 카운트 등)은 로컬 폰트를 직접 고를 수 있고, <strong>사용 예시 목업</strong>으로 폰 프레임 속 실제 UI 맥락에 얹어 확인한다.</p>
+    </div>
+  </section>
+
+  <!-- 5 -->
+  <section class="slide" data-name="커스텀 모드">
+    <div class="wrap" style="display:flex;flex-direction:column;gap:24px">
+      <div class="eyebrow">모드 2 · 커스텀</div>
+      <h2>그리고, 올리고, <b>모션을 조립한다</b></h2>
+      <div class="grid g3">
+        <div class="card"><span class="tag">입력</span><h3>업로드 · 드로잉 · 펜</h3><p>SVG는 벡터 셰이프로 변환. 도형 툴(Q)과 일러스트레이터식 펜(G) — 2점부터 즉시 실제 레이어로 살아난다.</p></div>
+        <div class="card"><span class="tag">쉬운 길</span><h3>등장 · 루프 · 퇴장 3슬롯</h3><p>레이어마다 프리셋 조합. 루프는 클립에 정수 사이클로 맞춰져 끊김이 없다.</p></div>
+        <div class="card"><span class="tag">정밀한 길</span><h3>키프레임 모드</h3><p>AE 사용자용. 위치·크기·회전·불투명도 채널을 직접 편집, 재생헤드에 자동 키.</p></div>
+      </div>
+      <div class="grid g3">
+        <div class="card"><h3>패턴 복제</h3><p>개수·간격·회전·크기·시간차를 누적 오프셋으로 — 스태거 등장, 방사형 패턴.</p></div>
+        <div class="card"><h3>다중 선택 (AE 방식)</h3><p>마키 러버밴드, ⇧/⌘ 토글, 페이스트보드 드래그, 그룹 이동.</p></div>
+        <div class="card"><h3>산술 입력</h3><p>모든 숫자 필드에서 <code>100+50</code>, <code>*2</code>, <code>/4</code>.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 -->
+  <section class="slide" data-name="타임라인">
+    <div class="wrap split">
+      <div style="display:flex;flex-direction:column;gap:20px">
+        <div class="eyebrow">코어</div>
+        <h2>타임라인과 <b>그래프 에디터</b></h2>
+        <ul class="feat">
+          <li>ms 눈금자, 레이어 트리, 프로퍼티별 키프레임 행 — 다이아몬드를 끌고 더블클릭으로 지운다</li>
+          <li>구간 이징 팝업: 프리셋 · 베지어 핸들 드래그 · <code>cubic-bezier()</code> 수치 입력</li>
+          <li><strong>이징 토큰</strong> — 내 커브에 이름을 붙여 프로젝트를 넘어 재사용</li>
+          <li>그래프 에디터는 AE value graph 방식 — 키마다 in/out 탄젠트, 탄젠트 링크와 ⌥ 브레이크</li>
+          <li>AE 단축키 그대로: <code>P S R T</code> · <code>U</code> · <code>J K</code> · <code>[ ]</code> · <code>⌥[ ⌥]</code></li>
+        </ul>
+      </div>
+      <div class="demo">
+        <span class="tag mono" style="font-size:11px;letter-spacing:.1em;color:var(--muted)">EASE CURVE · 구간 이징</span>
+        <svg class="curve" viewBox="0 0 320 220" role="img" aria-label="베지어 이징 커브와 탄젠트 핸들">
+          <rect class="frame" x="20" y="20" width="280" height="180" rx="4"></rect>
+          <line class="grid-l" x1="20" y1="65" x2="300" y2="65"></line>
+          <line class="grid-l" x1="20" y1="110" x2="300" y2="110"></line>
+          <line class="grid-l" x1="20" y1="155" x2="300" y2="155"></line>
+          <path class="c" d="M20 200 C 110 200, 150 20, 300 20"></path>
+          <line class="h" x1="20" y1="200" x2="110" y2="200"></line>
+          <line class="h" x1="300" y1="20" x2="210" y2="20"></line>
+          <circle class="hk" cx="110" cy="200" r="4"></circle>
+          <circle class="hk" cx="210" cy="20" r="4"></circle>
+          <rect class="k" x="14" y="194" width="12" height="12" transform="rotate(45 20 200)"></rect>
+          <rect class="k" x="294" y="14" width="12" height="12" transform="rotate(45 300 20)"></rect>
+        </svg>
+        <p style="font-size:var(--step-0)">핸들을 끌면 값이 라이브로 갱신되고 <code>⌘Z</code> 한 번에 되돌아간다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7 -->
+  <section class="slide" data-name="자연 모션">
+    <div class="wrap split">
+      <div style="display:flex;flex-direction:column;gap:20px">
+        <div class="eyebrow">최근 작업 · 2026-08-28</div>
+        <h2>자연스러운 움직임을 <b>적은 키로</b></h2>
+        <p>"적은 키 + 후편집 가능" 노선. 물리를 곡선 샘플 키로 <strong>굽고(bake)</strong> 나면 결과는 평범한 키프레임이라 그대로 손댈 수 있다.</p>
+        <div class="grid g2" style="gap:10px">
+          <div class="card"><h3>스프링 정착</h3><p>감쇠 조화진동 닫힌형으로 오버슛→정착 극값만 키로. 출렁/보통/절제.</p></div>
+          <div class="card"><h3>AI 자동 아크</h3><p>위치 키 3개 이상이면 Catmull-Rom 곡선 경로를 자동으로.</p></div>
+          <div class="card"><h3>스태거</h3><p>다중 선택 레이어 키를 위→아래 4f(⇧ 8f) 계단 오프셋.</p></div>
+          <div class="card"><h3>팔로우스루</h3><p>부모 모션을 지연 샘플해 자식의 위치·회전 랙을 키로 굽는다.</p></div>
+        </div>
+      </div>
+      <div class="demo">
+        <span class="tag mono" style="font-size:11px;letter-spacing:.1em;color:var(--muted)">LINEAR vs SPRING</span>
+        <div class="row">
+          <span>LINEAR</span>
+          <div class="track"><div class="goal"></div><div class="dot a"></div></div>
+        </div>
+        <div class="row">
+          <span>SPRING</span>
+          <div class="track"><div class="goal"></div><div class="dot b"></div></div>
+        </div>
+        <p style="font-size:var(--step-0)">같은 시작·끝, 같은 길이. 차이는 정착 구간의 극값 키뿐이다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8 -->
+  <section class="slide" data-name="AI 모션">
+    <div class="wrap" style="display:flex;flex-direction:column;gap:24px">
+      <div class="eyebrow">베타</div>
+      <h2>문장으로 쓰면 <b>키프레임이 나온다</b></h2>
+      <p class="lede">“공이 위에서 떨어져 튕기게” → 위치·회전·트림 채널의 키프레임 플랜.</p>
+      <div class="grid g3">
+        <div class="card"><span class="tag">BYOK</span><h3>내 키로 브라우저에서 직접</h3><p>키는 이 브라우저 localStorage에만 있고, 프로젝트 파일·자동 저장·내보낸 JSON 어디에도 들어가지 않는다.</p></div>
+        <div class="card"><span class="tag">프로바이더</span><h3>Anthropic · GLM · 로컬</h3><p>OpenRouter 키(<code>sk-or-</code>)는 자동 인식, 로컬은 Ollama 엔드포인트.</p></div>
+        <div class="card"><span class="tag">결과</span><h3>평범한 키프레임</h3><p>블랙박스가 아니라 편집 가능한 키. 적용 후 자동 재생, <code>⌘Z</code> 한 번에 원복.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9 -->
+  <section class="slide" data-name="임포트 · 씬">
+    <div class="wrap" style="display:flex;flex-direction:column;gap:24px">
+      <div class="eyebrow">호환</div>
+      <h2>남이 만든 Lottie를 <b>키프레임째 열어본다</b></h2>
+      <div class="grid g2">
+        <div class="card">
+          <h3>Lottie / dotLottie 임포트</h3>
+          <p>위치·크기·회전·불투명도 키프레임과 구간 이징을 <code>xkf</code>로 변환해 타임라인에서 그대로 편집. 시간은 60fps, 좌표는 512 캔버스로 환산.</p>
+        </div>
+        <div class="card">
+          <h3>부모 링크 해석</h3>
+          <p>정적 체인은 행렬 합성으로 정확 변환(이징 보존), 움직이는 부모는 월드 트랜스폼을 키로 베이크.</p>
+        </div>
+        <div class="card">
+          <h3>씬 = 프리컴프</h3>
+          <p>프리컴프가 있는 파일은 AE 컴포지션처럼 <strong>씬으로 보존</strong>. 타임라인 트리의 트월로 내부 레이어를 펼치고, 더블클릭으로 진입.</p>
+        </div>
+        <div class="card">
+          <h3>표준을 벗어나지 않는다</h3>
+          <p>씬은 문서 안의 표준 comp 에셋이라 내보낸 JSON이 어느 플레이어에서든 그대로 재생된다.</p>
+        </div>
+      </div>
+      <p><span class="mono" style="color:var(--muted)">한계 —</span> 텍스트·매트·홀드 키·<code>tm</code>은 건너뛰거나 근사한 뒤 알린다.</p>
+    </div>
+  </section>
+
+  <!-- 10 -->
+  <section class="slide" data-name="내보내기">
+    <div class="wrap" style="display:flex;flex-direction:column;gap:24px">
+      <div class="eyebrow">출력</div>
+      <h2>한 문서에서 <b>여섯 갈래</b>로</h2>
+      <div class="grid g3">
+        <div class="card"><h3>Lottie JSON</h3><p>다운로드 또는 클립보드 복사. 배속 굽기 옵션.</p></div>
+        <div class="card"><h3>dotLottie</h3><p>manifest + 애니메이션 단일 파일. 의존성 없는 자체 zip 라이터.</p></div>
+        <div class="card"><h3>WebM</h3><p>컴포지션 1회 재생을 실시간 녹화, 배경색 포함 2x.</p></div>
+        <div class="card"><h3>GIF</h3><p>프레임 정확 인코딩(gifenc), 웹워커 오프로드로 UI 유지.</p></div>
+        <div class="card"><h3>PNG</h3><p>현재 프레임(투명 2x) 또는 시퀀스 zip.</p></div>
+        <div class="card"><h3>.lmproj</h3><p>에셋 내장(base64 + SVG 원문)으로 파일 하나로 완결. 드롭하면 이어서 편집.</p></div>
+      </div>
+      <p>자동 저장은 IndexedDB(localStorage는 소형 미러), 수동 <strong>버전 스냅샷</strong> 20개, 복원 전 자동 백업.</p>
+    </div>
+  </section>
+
+  <!-- 11 -->
+  <section class="slide" data-name="설계">
+    <div class="wrap split">
+      <div style="display:flex;flex-direction:column;gap:20px">
+        <div class="eyebrow">설계 결정</div>
+        <h2>확장 필드를 <b>표준 로티 위에</b> 얹는다</h2>
+        <p>에디터 상태를 별도 포맷에 두지 않고 로티 문서의 커스텀 필드로 넣는다. 플레이어는 모르는 필드를 무시하므로 <strong>내보낸 JSON = 편집 파일</strong>.</p>
+        <dl class="kv">
+          <dt>xsel</dt><dd>등장·루프·퇴장 3슬롯 상태</dd>
+          <dt>xkf</dt><dd>키프레임 모드 채널 · 구간 이징</dd>
+          <dt>xbase</dt><dd>레이어 정착 위치</dd>
+          <dt>xci</dt><dd>레이어 라벨 컬러</dd>
+          <dt>xsrc</dt><dd>원본 SVG 원문</dd>
+        </dl>
+        <p><code>ks</code> 채널은 편집할 때마다 <code>xsel</code> 또는 <code>xkf</code>에서 <strong>재생성</strong>된다 — 상태가 두 곳에 갈라지지 않는다.</p>
+      </div>
+      <div class="card" style="gap:14px">
+        <span class="tag">src/</span>
+        <dl class="kv" style="gap:10px 18px">
+          <dt>customBuilder</dt><dd>커스텀 엔진 — 슬롯·키프레임 → ks 생성, 스프링 굽기</dd>
+          <dt>lottieImport</dt><dd>임포트 — 부모 해석, 프리컴프 재귀 평탄화(5단)</dd>
+          <dt>svgImport</dt><dd>SVG → 로티 셰이프, 래스터 임베드</dd>
+          <dt>lottieKnobs</dt><dd>템플릿 파라메트릭 엔진 (px·° 단위)</dd>
+          <dt>lottieColors</dt><dd>색 추출·치환 (정적 + 키프레임)</dd>
+          <dt>store.ts</dt><dd>zustand — 모드 스왑, 스냅샷 undo/redo, 자동 저장</dd>
+          <dt>ai.ts</dt><dd>자연어 → 키프레임 플랜, 프로바이더 3종</dd>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12 -->
+  <section class="slide" data-name="현황">
+    <div class="wrap" style="display:flex;flex-direction:column;gap:28px">
+      <div class="eyebrow">현황 · 2026-07-09 → 2026-08-28</div>
+      <h2>50일, <b>커밋 121개</b></h2>
+      <div class="stats">
+        <div class="stat"><span class="n">21,072</span><span class="l">src TypeScript 줄</span></div>
+        <div class="stat"><span class="n">25</span><span class="l">내장 템플릿</span></div>
+        <div class="stat"><span class="n">36</span><span class="l">테스트 (e2e 35 + unit)</span></div>
+        <div class="stat"><span class="n">0</span><span class="l">서버 · 계정 · 백엔드</span></div>
+      </div>
+      <div class="grid g2">
+        <div class="card"><h3>런타임 의존성 6개</h3><p>react · react-dom · zustand · lottie-web · gifenc · opentype.js. zip 라이터, dotLottie, WebM 녹화는 자체 구현.</p></div>
+        <div class="card"><h3>배포는 정적 한 벌</h3><p><code>vite build</code> → gh-pages. 데이터는 전부 사용자 브라우저에 남는다.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 13 -->
+  <section class="slide" data-name="한마디">
+    <div class="wrap" style="display:flex;flex-direction:column;gap:26px">
+      <div class="eyebrow">정리</div>
+      <h1 style="font-size:var(--step-3);font-weight:300">AE의 <b>조작 문법</b>은 가져오고,<br>AE의 <b>설치·라이선스·왕복</b>은 버린다.</h1>
+      <p class="lede" style="max-width:44ch">링크 하나로 열어 그리고, 키를 찍고, 표준 Lottie로 내보낸다. 만든 파일은 어디서든 재생되고, 다시 열면 편집이 이어진다.</p>
+      <p class="mono" style="font-size:var(--step-0)">
+        <a href="https://jaegyeom-kim.github.io/lottiemaker/">jaegyeom-kim.github.io/lottiemaker</a>
+      </p>
+    </div>
+  </section>
+
+</div>
+
+<nav class="nav" aria-label="슬라이드 이동">
+  <span class="navname" id="navname">타이틀</span>
+  <div class="ruler" id="ruler"><div class="line"></div><div class="head" id="head"></div></div>
+  <span class="counter" id="counter">01 / 13</span>
+</nav>
+
+<script>
+(function(){
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var ruler = document.getElementById('ruler');
+  var head = document.getElementById('head');
+  var counter = document.getElementById('counter');
+  var navname = document.getElementById('navname');
+  var i = 0;
+  var marks = [];
+
+  slides.forEach(function(s, n){
+    var pct = slides.length === 1 ? 0 : (n / (slides.length - 1)) * 100;
+    var b = document.createElement('button');
+    b.className = 'kf';
+    b.style.left = pct + '%';
+    b.title = s.dataset.name;
+    b.setAttribute('aria-label', (n + 1) + '. ' + s.dataset.name);
+    b.addEventListener('click', function(){ go(n); });
+    ruler.appendChild(b);
+    marks.push(b);
+  });
+
+  function pad(n){ return n < 10 ? '0' + n : '' + n; }
+
+  function go(n){
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach(function(s, k){ s.classList.toggle('on', k === i); });
+    marks.forEach(function(m, k){
+      m.classList.toggle('cur', k === i);
+      m.classList.toggle('done', k < i);
+    });
+    head.style.left = (slides.length === 1 ? 0 : (i / (slides.length - 1)) * 100) + '%';
+    counter.textContent = pad(i + 1) + ' / ' + pad(slides.length);
+    navname.textContent = slides[i].dataset.name;
+    if (location.hash !== '#' + (i + 1)) history.replaceState(null, '', '#' + (i + 1));
+    window.scrollTo(0, 0);
+  }
+
+  document.addEventListener('keydown', function(e){
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); go(i + 1); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); go(i - 1); }
+    else if (e.key === 'Home') { e.preventDefault(); go(0); }
+    else if (e.key === 'End') { e.preventDefault(); go(slides.length - 1); }
+  });
+
+  var start = parseInt((location.hash || '').slice(1), 10);
+  go(isNaN(start) ? 0 : start - 1);
+})();
+</script>
