@@ -127,7 +127,49 @@ export async function buildDotLottie(anim: object): Promise<Blob> {
   ])
 }
 
-/** dotLottie(.lottie) 읽기 — zip에서 첫 애니메이션 JSON 추출. 실패 시 null. */
+const IMG_MIME: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+}
+
+function toDataUri(bytes: Uint8Array, ext: string): string {
+  let bin = ''
+  for (let i = 0; i < bytes.length; i += 0x8000)
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return `data:${IMG_MIME[ext] ?? 'application/octet-stream'};base64,${btoa(bin)}`
+}
+
+interface ZipDirEntry {
+  name: string
+  method: number
+  csize: number
+  lho: number
+}
+
+/** zip 엔트리 원본 바이트 (stored/deflate만). 그 외 압축 방식은 null. */
+async function readEntry(
+  b: Uint8Array,
+  dv: DataView,
+  entry: ZipDirEntry,
+): Promise<Uint8Array | null> {
+  const nl = dv.getUint16(entry.lho + 26, true)
+  const xl = dv.getUint16(entry.lho + 28, true)
+  const start = entry.lho + 30 + nl + xl
+  const data = b.subarray(start, start + entry.csize)
+  if (entry.method === 0) return data
+  if (entry.method !== 8) return null
+  const ds = new DecompressionStream('deflate-raw')
+  return new Uint8Array(
+    await new Response(new Blob([data as BlobPart]).stream().pipeThrough(ds)).arrayBuffer(),
+  )
+}
+
+/** dotLottie(.lottie) 읽기 — zip에서 첫 애니메이션 JSON 추출 + images/ 를 data URI로 인라인.
+ *  (zip 안의 이미지는 JSON 밖에 있어, 인라인하지 않으면 임포트 후 경로가 깨진다.) 실패 시 null. */
 export async function readDotLottie(buf: ArrayBuffer): Promise<Record<string, unknown> | null> {
   try {
     const b = new Uint8Array(buf)
@@ -142,7 +184,7 @@ export async function readDotLottie(buf: ArrayBuffer): Promise<Record<string, un
     if (eocd < 0) return null
     const count = dv.getUint16(eocd + 10, true)
     let off = dv.getUint32(eocd + 16, true)
-    const entries: { name: string; method: number; csize: number; lho: number }[] = []
+    const entries: ZipDirEntry[] = []
     const td = new TextDecoder()
     for (let n = 0; n < count; n++) {
       if (dv.getUint32(off, true) !== 0x02014b50) break
@@ -159,20 +201,32 @@ export async function readDotLottie(buf: ArrayBuffer): Promise<Record<string, un
       entries.find((e) => /^animations\/.+\.json$/i.test(e.name)) ??
       entries.find((e) => e.name.endsWith('.json') && !/manifest\.json$/i.test(e.name))
     if (!entry) return null
-    const nl = dv.getUint16(entry.lho + 26, true)
-    const xl = dv.getUint16(entry.lho + 28, true)
-    const start = entry.lho + 30 + nl + xl
-    const data = b.subarray(start, start + entry.csize)
-    let jsonBytes: Uint8Array = data
-    if (entry.method === 8) {
-      const ds = new DecompressionStream('deflate-raw')
-      jsonBytes = new Uint8Array(
-        await new Response(new Blob([data as BlobPart]).stream().pipeThrough(ds)).arrayBuffer(),
-      )
-    } else if (entry.method !== 0) {
-      return null
+    const jsonBytes = await readEntry(b, dv, entry)
+    if (!jsonBytes) return null
+    const anim = JSON.parse(new TextDecoder().decode(jsonBytes)) as Record<string, unknown>
+
+    // images/ 엔트리 → 파일명 기준 data URI 맵
+    const imgs = new Map<string, ZipDirEntry>()
+    for (const e of entries) {
+      const m = /([^/]+)\.(png|jpe?g|gif|webp|svg)$/i.exec(e.name)
+      if (m) imgs.set(`${m[1]}.${m[2]}`.toLowerCase(), e)
     }
-    return JSON.parse(new TextDecoder().decode(jsonBytes)) as Record<string, unknown>
+    const assets = anim.assets as Record<string, unknown>[] | undefined
+    if (imgs.size && Array.isArray(assets)) {
+      for (const a of assets) {
+        const p = a.p
+        if (typeof p !== 'string' || p.startsWith('data:')) continue
+        const base = (p.split('/').pop() ?? p).toLowerCase()
+        const hit = imgs.get(base)
+        if (!hit) continue
+        const bytes = await readEntry(b, dv, hit)
+        if (!bytes) continue
+        a.p = toDataUri(bytes, base.split('.').pop() ?? '')
+        a.u = ''
+        a.e = 1
+      }
+    }
+    return anim
   } catch {
     return null
   }

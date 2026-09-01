@@ -638,17 +638,13 @@ export const useEditor = create<EditorState>((set, get) => {
   }
 
   /** 선택 레이어 앵커 변경 — 정지 자세(회전) 기준 포지션 보정으로 그래픽은 제자리. */
-  const withCustomAnchor = (
-    st: EditorState,
-    fx: number,
-    fy: number,
-  ): Pick<EditorState, 'animationData' | 'sourceData' | 'colorGroups'> | null => {
-    const { sourceData, templateKnobs, knobValues, customIdx } = st
-    if (!sourceData) return null
-    if (lockedAt(sourceData, Math.min(customIdx, sourceData.layers.length - 1))) return null
-    const src = structuredClone(sourceData)
-    const layer = src.layers[Math.min(customIdx, src.layers.length - 1)] as Record<string, unknown>
-    if (!layer) return null
+  /**
+   * 앵커 분율(fx,fy) 적용 — src를 제자리에서 고친다. 팬비하인드 보정까지 포함.
+   * AI 플랜과 앵커 도구가 같은 수학을 쓰도록 store 클로저에서 분리했다.
+   */
+  const setAnchorIn = (src: LottieJson, li: number, fx: number, fy: number, frame: number): boolean => {
+    const layer = src.layers[li] as Record<string, unknown> | undefined
+    if (!layer) return false
     const ks = layer.ks as Record<string, unknown>
     const asset = (src.assets as Record<string, unknown>[] | undefined)?.find(
       (a) => a.id === layer.refId,
@@ -678,10 +674,9 @@ export const useEditor = create<EditorState>((set, get) => {
     const xsel = { ...DEFAULT_SEL, ...((layer.xsel as Partial<CustomSel>) ?? {}) }
     // 팬비하인드 — 앵커 이동분에 정착 회전·스케일 반영해 포지션 보정.
     // 스케일 100 가정이면 스케일≠100에서 그래픽이 밀린다 — 유효 ks.s 곱 필수
-    const li2 = Math.min(customIdx, src.layers.length - 1)
-    const eff = layerScaleOf(src, li2, st.curFrame)
+    const eff = layerScaleOf(src, li, frame)
     // 회전도 프레임 인지 — kf r 키가 있으면 xsel.rotation은 폴백일 뿐
-    const rad = (layerRotationOf(src, li2, st.curFrame) * Math.PI) / 180
+    const rad = (layerRotationOf(src, li, frame) * Math.PI) / 180
     const da = [(newA[0] - oldA[0]) * eff, (newA[1] - oldA[1]) * eff]
     const dx = da[0] * Math.cos(rad) - da[1] * Math.sin(rad)
     const dy = da[0] * Math.sin(rad) + da[1] * Math.cos(rad)
@@ -689,6 +684,20 @@ export const useEditor = create<EditorState>((set, get) => {
     // 포지션 보정 — shiftLayer가 ks.p·xbase·xkf.p를 한 번에 (공유 배열 가드 포함)
     shiftLayer(layer, dx, dy)
     layer.xsel = { ...xsel, anchor: [fx, fy] }
+    return true
+  }
+
+  const withCustomAnchor = (
+    st: EditorState,
+    fx: number,
+    fy: number,
+  ): Pick<EditorState, 'animationData' | 'sourceData' | 'colorGroups'> | null => {
+    const { sourceData, templateKnobs, knobValues, customIdx } = st
+    if (!sourceData) return null
+    const li = Math.min(customIdx, sourceData.layers.length - 1)
+    if (lockedAt(sourceData, li)) return null
+    const src = structuredClone(sourceData)
+    if (!setAnchorIn(src, li, fx, fy, st.curFrame)) return null
     const applied = applyKnobs(src, templateKnobs, knobValues)
     return { animationData: applied, sourceData: src, colorGroups: extractColorGroups(applied) }
   }
@@ -3398,12 +3407,52 @@ export const useEditor = create<EditorState>((set, get) => {
       let touched = 0
       for (const lp of plan.layers) {
         if (lp.index < 0 || lp.index >= src.layers.length) continue
+        // 앵커는 키보다 먼저 — shiftLayer가 기존 xkf.p를 함께 보정하므로, 뒤에 두면
+        // 방금 심은 플랜 좌표까지 밀어 버린다. 잠금은 editKfLayerIn과 같은 기준으로 막는다.
+        if (lp.anchor && !lockedAt(src, lp.index))
+          setAnchorIn(src, lp.index, lp.anchor[0], lp.anchor[1], get().curFrame)
         const ok = editKfLayerIn(src, lp.index, (xkf, layer) => {
+          const prev = xkf.on ? xkf.keys : []
+          // 같은 시각의 기존 키에서 계획할 수 없는 채널을 옮겨 온다 — pk(패스 모핑)·gk(그라디언트)·
+          // pto/pti(모션 패스 핸들)는 AI 스키마에 없어서, 그냥 덮어쓰면 손으로 만든 애니메이션이
+          // 요청하지도 않았는데 파괴된다.
+          const carry = (k: KfKey): KfKey => {
+            const o = prev.find((q) => Math.abs(q.t - k.t) < 0.5)
+            if (!o) return k
+            return {
+              ...k,
+              ...(o.pk !== undefined ? { pk: o.pk } : {}),
+              ...(o.gk !== undefined ? { gk: o.gk } : {}),
+              ...(o.pto !== undefined ? { pto: o.pto } : {}),
+              ...(o.pti !== undefined ? { pti: o.pti } : {}),
+            }
+          }
+          const planned = structuredClone(lp.keys).map(carry)
           xkf.on = true
-          xkf.keys = structuredClone(lp.keys)
-          // 자동 아크 — 위치 키 3개 이상이면 Catmull-Rom 곡선 경로 (자연 모션은 호)
-          if (lp.keys.filter((k) => k.p).length >= 3 && !lp.keys.some((k) => k.pto || k.pti))
-            xkf.smooth = true
+          if (lp.mode === 'merge' && prev.length) {
+            // 기존 키를 시드로 두고 같은 시각만 채널 단위로 덮어쓴다 — 부분 수정용
+            const merged = structuredClone(prev)
+            for (const k of planned) {
+              const dup = merged.find((q) => Math.abs(q.t - k.t) < 0.5)
+              if (!dup) merged.push(k)
+              else Object.assign(dup, k, { t: dup.t, e: { ...(dup.e ?? {}), ...(k.e ?? {}) } })
+            }
+            xkf.keys = merged.sort((a, b) => a.t - b.t)
+          } else {
+            xkf.keys = planned
+          }
+          // 플랜은 키에 e를 실어 보낸다 — 레이어 기본 이징이 남아 있으면 e 없는 구간이
+          // 사용자가 예전에 누른 칩을 상속해 같은 프롬프트가 문서마다 다른 결과를 낸다.
+          // 0 = 선형. 프롬프트도 "e 없으면 선형"으로 약속한다.
+          xkf.ease = 0
+          // 자동 아크 — 위치 키 3개 이상이면 Catmull-Rom 곡선 경로 (자연 모션은 호).
+          // false도 반드시 대입한다 — 이전 실행/수동 칩으로 켜진 smooth가 normKf를 타고
+          // 계속 따라와 직선을 요구한 플랜까지 곡선으로 만든다.
+          xkf.smooth =
+            lp.path === 'smooth' ||
+            (lp.path !== 'linear' &&
+              xkf.keys.filter((k) => k.p).length >= 3 &&
+              !xkf.keys.some((k) => k.pto || k.pti))
           if (lp.clip) {
             const xsel = normSel(layer.xsel as Partial<CustomSel> | undefined, src.op)
             xsel.clip = [lp.clip[0], lp.clip[1]]

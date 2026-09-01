@@ -181,6 +181,44 @@ S().importLottieLayers(matteDoc('B'))
   S().toggleLayerLock(1)
   const n2 = S().applyAiMotion({ layers: [{ index: 1, keys: [{ t: 0, r: 0 }, { t: 30, r: 90 }] }] })
   ok(n2 === 1, `해제 후 적용 1 (${n2})`)
+
+  // 5d) 레이어 기본 이징 초기화 — e 없는 구간이 사용자가 눌러 둔 칩을 상속하면 안 된다
+  ok(S().sourceData.layers[1].xkf.ease === 0, `AI 적용 시 ease 선형으로 (${S().sourceData.layers[1].xkf.ease})`)
+
+  // 5e) mode:'merge' — 기존 키를 남기고 같은 시각만 덮어쓴다
+  const merged = S().applyAiMotion({
+    layers: [{ index: 1, mode: 'merge', keys: [{ t: 30, o: 50 }, { t: 60, o: 100 }] }],
+  })
+  ok(merged === 1, 'merge 적용됨')
+  {
+    const keys = S().sourceData.layers[1].xkf.keys
+    ok(keys.length === 3, `기존 2키 + 새 1키 = 3 (${keys.length})`)
+    ok(keys.find((k) => k.t === 0)?.r === 0, '기존 t=0 회전 키 유지')
+    const k30 = keys.find((k) => k.t === 30)
+    ok(k30?.r === 90 && k30?.o === 50, `같은 시각은 채널 합성 (r=${k30?.r}, o=${k30?.o})`)
+  }
+
+  // 5f) 계획할 수 없는 채널 보존 — pk(패스 모핑)를 덮어써서 지우면 안 된다
+  {
+    const kf = S().sourceData.layers[1].xkf
+    kf.keys = [
+      { t: 0, p: [100, 100], pk: { v: [[0, 0]], i: [[0, 0]], o: [[0, 0]], c: true } },
+      { t: 30, p: [200, 200], pk: { v: [[9, 9]], i: [[0, 0]], o: [[0, 0]], c: true } },
+    ]
+    S().applyAiMotion({ layers: [{ index: 1, keys: [{ t: 0, o: 0 }, { t: 30, o: 100 }] }] })
+    const keys = S().sourceData.layers[1].xkf.keys
+    ok(keys[0]?.pk?.v?.[0]?.[0] === 0 && keys[1]?.pk?.v?.[0]?.[0] === 9, 'pk 채널이 같은 시각 키로 옮겨짐')
+    ok(keys[1]?.o === 100, '플랜 채널은 그대로 적용')
+  }
+
+  // 5g) anchor — 키 적용 전에 축을 옮긴다
+  {
+    S().applyAiMotion({
+      layers: [{ index: 1, anchor: [0.5, 1], keys: [{ t: 0, r: 0 }, { t: 30, r: 90 }] }],
+    })
+    const a = S().sourceData.layers[1].xsel.anchor
+    ok(a[0] === 0.5 && a[1] === 1, `anchor 적용 (${a})`)
+  }
 }
 
 console.log(failed ? `STORE FAIL ${failed}` : 'STORE PASS')

@@ -4586,6 +4586,13 @@ body.drag-cross * { cursor: crosshair !important; }
   padding: 0 6px;
   font-size: 11px;
 }
+/* 로컬 컨텍스트 창 — 모델 셀렉트에 자리를 양보하는 좁은 수치 입력 */
+.aipanel__ctx {
+  width: 68px;
+  flex: 0 0 auto;
+  padding: 0 6px;
+  font-size: 11px;
+}
 
 /* AI 진행 상태 버블 — 채팅 타이핑 인디케이터 느낌 */
 .aipanel__status {

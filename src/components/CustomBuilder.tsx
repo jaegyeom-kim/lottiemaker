@@ -3,9 +3,11 @@ import { evalNumExpr } from '../lib/num'
 import {
   getAiKey, setAiKey, verifyAiKey, summarizeDoc, generateMotion,
   getAiProvider, setAiProvider, getLocalUrl, getLocalModel, setLocalConfig,
-  listLocalModels, generateMotionLocal, type AiProvider,
+  listLocalModels, generateMotionLocal, getLocalCtx, setLocalCtx, type AiProvider,
   getGlmKey, setGlmKey, getGlmModel, setGlmModel, generateMotionGlm,
   getDeepseekKey, setDeepseekKey, getDeepseekModel, setDeepseekModel, generateMotionDeepseek,
+  getGeminiKey, setGeminiKey, getGeminiModel, setGeminiModel, generateMotionGemini,
+  getLingKey, setLingKey, getLingModel, setLingModel, generateMotionLing,
 } from '../lib/ai'
 import { useEditor } from '../store'
 import { svgToLottie, readImageFile } from '../lib/svgImport'
@@ -444,8 +446,22 @@ function AiMotionPanel() {
   const [glmModel, setGlmModelState] = useState(getGlmModel)
   const [dsKey, setDsKeyState] = useState(getDeepseekKey)
   const [dsModel, setDsModelState] = useState(getDeepseekModel)
+  const [gemKey, setGemKeyState] = useState(getGeminiKey)
+  const [gemModel, setGemModelState] = useState(getGeminiModel)
+  const [lingKey, setLingKeyState] = useState(getLingKey)
+  const [lingModel, setLingModelState] = useState(getLingModel)
+  // 최근 3턴 — "좀 더 천천히" 같은 후속 요청이 앞 맥락 없이 처음부터 다시 짜지 않게.
+  // 프롬프트 문자열 하나에만 실어서 다섯 프로바이더 경로가 그대로 공유한다.
+  const [turns, setTurns] = useState<{ req: string; note?: string }[]>([])
   const [localModels, setLocalModels] = useState<string[]>([])
   const [localModel, setLocalModel] = useState(getLocalModel)
+  const [localCtx, setLocalCtxState] = useState(getLocalCtx)
+  // 대상 레이어가 바뀌거나 문서가 통째로 갈리면(프로젝트 로드·되돌리기) 앞 맥락은 거짓이 된다
+  const aiSel = useEditor((s) => s.customIdxs.join(','))
+  const aiDoc = useEditor((s) => s.sourceData)
+  useEffect(() => {
+    setTurns([])
+  }, [aiSel, aiDoc])
   // 로컬 프로바이더 — 모델 목록 로드 (Ollama /api/tags)
   useEffect(() => {
     if (provider !== 'local') return
@@ -473,6 +489,8 @@ function AiMotionPanel() {
       <option value="anthropic">Claude (API)</option>
       <option value="glm">GLM (Z.ai)</option>
       <option value="deepseek">DeepSeek</option>
+      <option value="gemini">Gemini (Google)</option>
+      <option value="ling">Ling (InclusionAI)</option>
       <option value="local">{t('로컬 (Ollama)')}</option>
     </select>
   )
@@ -537,12 +555,17 @@ function AiMotionPanel() {
     abortRef.current = ac
     try {
       const doc = summarizeDoc(sourceData, customIdxs, curFrame)
+      const history = turns.length
+        ? `${t('이전 요청 (오래된 것부터):')}\n${turns
+            .map((h, i) => `${i + 1}. ${h.req}${h.note ? ` → ${h.note}` : ''}`)
+            .join('\n')}\n\n${t('아래는 그 뒤에 이어지는 요청이다:')}\n`
+        : ''
       const plan =
         provider === 'local'
           ? await generateMotionLocal({
               url: getLocalUrl(),
               model: localModel,
-              prompt: req,
+              prompt: history + req,
               doc,
               signal: ac.signal,
               onProgress: setStatus,
@@ -551,7 +574,7 @@ function AiMotionPanel() {
             ? await generateMotionGlm({
                 apiKey: glmKey,
                 model: glmModel,
-                prompt: req,
+                prompt: history + req,
                 doc,
                 signal: ac.signal,
                 onProgress: setStatus,
@@ -560,12 +583,30 @@ function AiMotionPanel() {
               ? await generateMotionDeepseek({
                   apiKey: dsKey,
                   model: dsModel,
-                  prompt: req,
+                  prompt: history + req,
                   doc,
                   signal: ac.signal,
                   onProgress: setStatus,
                 })
-              : await generateMotion({ apiKey, prompt: req, doc, signal: ac.signal, onProgress: setStatus })
+              : provider === 'gemini'
+                ? await generateMotionGemini({
+                    apiKey: gemKey,
+                    model: gemModel,
+                    prompt: history + req,
+                    doc,
+                    signal: ac.signal,
+                    onProgress: setStatus,
+                  })
+                : provider === 'ling'
+                  ? await generateMotionLing({
+                      apiKey: lingKey,
+                      model: lingModel,
+                      prompt: history + req,
+                      doc,
+                      signal: ac.signal,
+                      onProgress: setStatus,
+                    })
+                  : await generateMotion({ apiKey, prompt: history + req, doc, signal: ac.signal, onProgress: setStatus })
       setStatus(t('모션 적용 중'))
       const applied = applyAiMotion(plan)
       if (applied === 0) {
@@ -573,11 +614,19 @@ function AiMotionPanel() {
       } else {
         // 미리보기 — 적용 직후 1회 재생, 메시지에 되돌리기 액션
         useEditor.getState().replay()
+        // 조용히 버려지거나 고쳐진 것 + 잠겨서 건너뛴 레이어를 성공 문구에 덧붙인다.
+        // 모델이 쓴 note만 띄우면 "왼쪽에서 밀려 들어옵니다"가 제자리 페이드에도 뜬다.
+        const notes = [...(plan.issues ?? [])]
+        if (applied < plan.layers.length)
+          notes.push(
+            t('레이어 {n}개는 잠겨 있어 건너뛰었습니다').replace('{n}', String(plan.layers.length - applied)),
+          )
         setMsg({
           kind: 'ok',
-          text: plan.note ?? t('모션 적용됨'),
+          text: `${plan.note ?? t('모션 적용됨')}${notes.length ? ` — ${notes.join(' / ')}` : ''}`,
           undoable: true,
         })
+        setTurns((prev) => [...prev, { req, note: plan.note }].slice(-3))
       }
     } catch (e) {
       if ((e as Error).name !== 'AbortError') setMsg({ kind: 'err', text: (e as Error).message })
@@ -604,7 +653,21 @@ function AiMotionPanel() {
             note: t('DeepSeek 또는 OpenRouter API 키가 필요합니다 (sk-or-… 키는 OpenRouter로 자동 인식). 키는 이 브라우저에만 저장됩니다.'),
             ph: t('DeepSeek / OpenRouter API 키'),
           }
-        : null
+        : provider === 'gemini'
+          ? {
+              key: gemKey,
+              save: (k: string) => { setGeminiKey(k); setGemKeyState(k) },
+              note: t('Google AI Studio 또는 OpenRouter API 키가 필요합니다 (sk-or-… 키는 OpenRouter로 자동 인식). 키는 이 브라우저에만 저장됩니다.'),
+              ph: t('Google AI Studio / OpenRouter API 키'),
+            }
+          : provider === 'ling'
+            ? {
+                key: lingKey,
+                save: (k: string) => { setLingKey(k); setLingKeyState(k) },
+                note: t('ZenMux 또는 OpenRouter API 키가 필요합니다 (sk-or-… 키는 OpenRouter로 자동 인식). 키는 이 브라우저에만 저장됩니다.'),
+                ph: t('ZenMux / OpenRouter API 키'),
+              }
+            : null
 
   if ((provider === 'anthropic' && (!apiKey || editKey)) || (oai && (!oai.key || editKey))) {
     if (oai) {
@@ -724,6 +787,45 @@ function AiMotionPanel() {
             onChange={(e) => {
               setDsModelState(e.target.value)
               setDeepseekModel(e.target.value)
+            }}
+          />
+        )}
+        {provider === 'gemini' && (
+          <input
+            className="input input--inline aipanel__glmmodel"
+            value={gemModel}
+            spellCheck={false}
+            title={t('Gemini 모델 id — 예: gemini-3.7-flash, gemini-3-pro. OpenRouter 키면 google/ 접두는 자동')}
+            onChange={(e) => {
+              setGemModelState(e.target.value)
+              setGeminiModel(e.target.value)
+            }}
+          />
+        )}
+        {provider === 'ling' && (
+          <input
+            className="input input--inline aipanel__glmmodel"
+            value={lingModel}
+            spellCheck={false}
+            title={t('Ling 모델 id — 예: ling-3.0-flash. inclusionai/ 접두는 자동으로 붙습니다')}
+            onChange={(e) => {
+              setLingModelState(e.target.value)
+              setLingModel(e.target.value)
+            }}
+          />
+        )}
+        {provider === 'local' && (
+          <input
+            className="input input--inline aipanel__ctx"
+            type="number"
+            min={2048}
+            step={2048}
+            value={localCtx}
+            title={t('컨텍스트 창 토큰 — 컴포지션이 크면 늘리세요. 올릴수록 메모리를 더 씁니다.')}
+            onChange={(e) => {
+              const n = Number(e.target.value)
+              setLocalCtxState(n)
+              setLocalCtx(n)
             }}
           />
         )}

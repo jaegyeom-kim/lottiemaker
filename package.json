@@ -9,8 +9,9 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test:e2e": "node tests/e2e/run.mjs",
-    "test:unit": "node tests/unit/store.test.mjs",
-    "test": "npm run test:unit && npm run test:e2e"
+    "test:unit": "node tests/unit/store.test.mjs && node tests/unit/dotlottie.test.mjs && node tests/unit/ai-sanitize.test.mjs",
+    "test": "npm run test:unit && npm run test:e2e",
+    "eval": "node tests/eval/run.mjs"
   },
   "dependencies": {
     "gifenc": "^1.0.3",
